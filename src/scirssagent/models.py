@@ -46,6 +46,7 @@ class Classification(BaseModel):
     reason: str
     recommended_action: str = "scan"
     model: str = "heuristic"
+    translated_title_zh: str | None = None
 
     @field_validator("topic_tags")
     @classmethod
@@ -58,6 +59,14 @@ class Classification(BaseModel):
                 seen.add(clean)
                 normalized.append(clean)
         return normalized
+
+    @field_validator("translated_title_zh")
+    @classmethod
+    def normalize_translated_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = value.strip()
+        return clean or None
 
 
 class ReportPaper(Paper):
@@ -72,4 +81,3 @@ class Report(BaseModel):
     totals: dict[str, int]
     papers: list[ReportPaper]
     errors: list[str] = Field(default_factory=list)
-

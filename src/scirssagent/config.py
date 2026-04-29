@@ -15,8 +15,12 @@ class Settings:
     reports_dir: Path
     logs_dir: Path
     database_path: Path
-    openai_api_key: str | None
-    openai_model: str
+    llm_provider: str
+    llm_api_key: str | None
+    llm_base_url: str | None
+    llm_model: str
+    llm_thinking: str
+    llm_batch_size: int
 
 
 def load_settings(root: Path | None = None) -> Settings:
@@ -32,7 +36,15 @@ def load_settings(root: Path | None = None) -> Settings:
         reports_dir=reports_dir,
         logs_dir=logs_dir,
         database_path=data_dir / "literature.sqlite",
-        openai_api_key=os.getenv("SCIRSS_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY"),
-        openai_model=os.getenv("SCIRSS_OPENAI_MODEL", "gpt-4.1-mini"),
+        llm_provider=os.getenv("SCIRSS_LLM_PROVIDER", "deepseek").strip().lower(),
+        llm_api_key=(
+            os.getenv("SCIRSS_LLM_API_KEY")
+            or os.getenv("DEEPSEEK_API_KEY")
+            or os.getenv("SCIRSS_OPENAI_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+        ),
+        llm_base_url=os.getenv("SCIRSS_LLM_BASE_URL", "https://api.deepseek.com"),
+        llm_model=os.getenv("SCIRSS_LLM_MODEL", "deepseek-v4-flash"),
+        llm_thinking=os.getenv("SCIRSS_LLM_THINKING", "disabled").strip().lower(),
+        llm_batch_size=max(1, int(os.getenv("SCIRSS_LLM_BATCH_SIZE", "10"))),
     )
-

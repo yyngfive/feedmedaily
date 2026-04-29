@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS classifications (
   topic_tags_json TEXT NOT NULL,
   recommended_action TEXT NOT NULL,
   model TEXT NOT NULL,
+  translated_title_zh TEXT,
   classified_at TEXT NOT NULL,
   FOREIGN KEY (paper_id) REFERENCES papers(id)
 );
@@ -51,6 +52,11 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(classifications)").fetchall()
+    }
+    if "translated_title_zh" not in columns:
+        conn.execute("ALTER TABLE classifications ADD COLUMN translated_title_zh TEXT")
     return conn
 
 
@@ -132,6 +138,7 @@ def latest_classification(conn: sqlite3.Connection, paper_id: int) -> Classifica
             "topic_tags": json.loads(row["topic_tags_json"]),
             "recommended_action": row["recommended_action"],
             "model": row["model"],
+            "translated_title_zh": row["translated_title_zh"],
         }
     )
 
@@ -143,9 +150,9 @@ def save_classification(
         """
         INSERT INTO classifications (
           paper_id, relevance, confidence, reason, topic_tags_json,
-          recommended_action, model, classified_at
+          recommended_action, model, translated_title_zh, classified_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             paper_id,
@@ -155,6 +162,7 @@ def save_classification(
             json.dumps(classification.topic_tags, ensure_ascii=False),
             classification.recommended_action,
             classification.model,
+            classification.translated_title_zh,
             datetime.now(UTC).isoformat(),
         ),
     )
@@ -210,3 +218,14 @@ def unclassified_paper_ids(conn: sqlite3.Connection, ids: Iterable[int]) -> list
         if latest_classification(conn, paper_id) is None:
             unclassified.append(paper_id)
     return unclassified
+
+
+def paper_ids_needing_classification(
+    conn: sqlite3.Connection,
+    paper_ids: Iterable[int],
+) -> list[int]:
+    pending: list[int] = []
+    for paper_id in paper_ids:
+        if latest_classification(conn, paper_id) is None:
+            pending.append(paper_id)
+    return pending

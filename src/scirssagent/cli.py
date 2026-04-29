@@ -24,11 +24,22 @@ PRINT_TASK_OPTION = typer.Option(
 def run(
     once: bool = ONCE_OPTION,
     root: Path | None = ROOT_OPTION,
+    max_papers: int | None = typer.Option(
+        None,
+        "--max-papers",
+        min=1,
+        help="Limit the number of fetched papers for a test run.",
+    ),
+    reclassify: bool = typer.Option(
+        False,
+        "--reclassify",
+        help="Force touched papers through classification again.",
+    ),
 ) -> None:
     if not once:
         raise typer.BadParameter("Only --once is supported in v0.1.")
     settings = load_settings(root)
-    index = run_once(settings)
+    index = run_once(settings, max_papers=max_papers, reclassify=reclassify)
     typer.echo(f"Report: {index}")
 
 

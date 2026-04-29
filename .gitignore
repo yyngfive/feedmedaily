@@ -14,7 +14,6 @@ pytest_tmp/
 
 .env
 .env.*
-!.env.example
 
 node_modules/
 web/dist/
