@@ -22,6 +22,10 @@ pnpm --dir web build
 
 Open `reports/latest/index.html` after a run. If `SCIRSS_OPENAI_API_KEY` is not set, SciRSSAgent uses a deterministic fallback classifier so the pipeline still works.
 
+## Secrets
+
+Keep real API keys in `.env` or user-level environment variables. `.env` is ignored by Git; only `.env.example` with blank placeholders should be committed.
+
 If `python` is not on PATH, that is still fine: `uv` can install and manage the project Python itself.
 
 ```powershell
@@ -34,6 +38,13 @@ If uv cannot access its default user cache on Windows, keep its managed Python a
 ```powershell
 $env:UV_CACHE_DIR = ".uv-cache"
 $env:UV_PYTHON_INSTALL_DIR = ".uv-python"
+uv sync
+```
+
+If uv warns that hardlinking failed, use copy mode on Windows:
+
+```powershell
+$env:UV_LINK_MODE = "copy"
 uv sync
 ```
 
@@ -54,7 +65,7 @@ pnpm --dir web build
 With nvm-windows, use the installed Node 22 LTS line before frontend checks:
 
 ```powershell
-nvm use 22.22.2
+nvm use (Get-Content .nvmrc).Trim()
 pnpm --dir web test
 pnpm --dir web build
 ```

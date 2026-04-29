@@ -138,7 +138,10 @@ def parse_atom(root: ElementTree.Element, source_url: str) -> list[Paper]:
     papers: list[Paper] = []
     for entry in children(root, f"{ATOM}entry"):
         title = child_text(entry, f"{ATOM}title")
-        link_node = next((child for child in children(entry, f"{ATOM}link") if child.get("href")), None)
+        link_node = next(
+            (child for child in children(entry, f"{ATOM}link") if child.get("href")),
+            None,
+        )
         link = link_node.get("href") if link_node is not None else child_text(entry, f"{ATOM}id")
         if not title or not link:
             continue
