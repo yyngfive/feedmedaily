@@ -28,7 +28,7 @@
   - 适合后期需要复杂科学计算依赖、Jupyter、GPU、本地 embedding 模型时使用。
   - 当前项目主要是 RSS、HTTP、SQLite、LLM API、JSON 和报告生成，用 uv 更轻、更可复现。
 - 前端工具链：
-  - 使用 `Vite + React + TypeScript + Tailwind CSS`。
+  - 使用 `Vite + React + TypeScript + Tailwind CSS + HeroUI`。
   - 包管理建议用 `pnpm`。
   - Tailwind 使用当前官方推荐的 Vite plugin 方式：`tailwindcss` + `@tailwindcss/vite`。
   - 前端只做本地静态 dashboard，不需要 Next.js、后端服务或登录系统。
@@ -54,10 +54,11 @@
   - 调用 LLM 输出固定 JSON 分类。
   - 导出前端可读的 `reports/data/latest.json` 和按日期归档 JSON。
 - React 前端负责：
-  - 读取静态 JSON。
-  - 展示 direct / indirect / unrelated。
-  - 支持标签筛选、期刊筛选、搜索标题、摘要折叠。
-  - 单独突出 `proximity_labeling` 标签。
+  - 读取嵌入的静态 report payload。
+  - 左侧展示期刊、主题、日期筛选。
+  - 顶部提供搜索框和 direct / indirect / unrelated tabs。
+  - 主体展示 paper cards，包含 relevance、topic tags、标题、期刊、日期、作者、摘要句和 LLM 判断理由。
+  - 右侧详情面板展示摘要、LLM rationale、关键词、DOI link、Save to Zotero 和 Mark wrong 的本地 UI 状态。
 - 报告生成方式：
   - 第一版构建为静态页面。
   - Python 每次运行后更新 JSON，并复制或引用前端 build 产物。
@@ -84,7 +85,7 @@
   - 测试无数据、API 失败记录、长标题、无摘要文章。
 - 集成：
   - `uv run scirssagent run --once` 后生成 SQLite 和 JSON。
-  - `pnpm --dir web build` 后能打开本地报告。
+  - `pnpm --dir web build` 后运行 `uv run scirssagent report latest`，再打开本地报告。
   - 重复运行不产生重复文献。
 - 自动化：
   - Windows Task Scheduler 每天 10:00 运行 `uv run scirssagent run --once`。

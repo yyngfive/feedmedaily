@@ -1,4 +1,3 @@
-import type {Key} from "@heroui/react";
 import {
   Button,
   Card,
@@ -17,6 +16,7 @@ import {EMPTY_REPORT} from "./types";
 
 type RelevanceFilter = "all" | Relevance;
 type DateFilter = "all" | "report" | "7d" | "30d";
+type SelectionValue = React.Key | React.Key[] | null;
 
 const relevanceTabs: Array<{id: RelevanceFilter; label: string}> = [
   {id: "all", label: "All"},
@@ -110,7 +110,7 @@ function FilterSelect({
       placeholder={label}
       value={value}
       variant="secondary"
-      onChange={(key) => onChange(String(key ?? "all"))}
+      onChange={(key: SelectionValue) => onChange(String(key ?? "all"))}
     >
       <Label>{label}</Label>
       <Select.Trigger>
@@ -539,7 +539,7 @@ export function App() {
               <Tabs
                 selectedKey={relevance}
                 variant="secondary"
-                onSelectionChange={(key: Key) => setRelevance(String(key) as RelevanceFilter)}
+                onSelectionChange={(key: React.Key) => setRelevance(String(key) as RelevanceFilter)}
               >
                 <Tabs.ListContainer>
                   <Tabs.List aria-label="Relevance">
@@ -553,7 +553,9 @@ export function App() {
                   </Tabs.List>
                 </Tabs.ListContainer>
                 {relevanceTabs.map((tab) => (
-                  <Tabs.Panel key={`${tab.id}-panel`} className="hidden" id={tab.id} />
+                  <Tabs.Panel key={`${tab.id}-panel`} className="hidden" id={tab.id}>
+                    <span />
+                  </Tabs.Panel>
                 ))}
               </Tabs>
             </div>

@@ -25,28 +25,36 @@ SciRSSAgent monitors journal RSS feeds, stores paper metadata in SQLite, classif
 - `cli.py`: expose `run`, `report`, and scheduled-task commands
 
 Current flow:
-`RSS.txt` -> feed fetch -> paper dedupe/upsert -> metadata enrichment -> pending classification queue -> SQLite classifications -> report JSON + static report page
+`RSS.txt` -> feed fetch -> paper dedupe/upsert -> metadata enrichment -> pending classification queue -> SQLite classifications -> report JSON -> static report page
 
 ## Web Architecture
 
 - `web/src/main.tsx`: app entrypoint
-- `web/src/`: React UI for the local report reader
+- `web/src/App.tsx`: HeroUI-based paper review dashboard
+- `web/src/`: React UI, report data loader, and shared types for the local report reader
 - `reports/latest/report-data.js`: embedded report payload written by the backend
 - `reports/latest/index.html`: static page that reads embedded data and renders the report
 
 Current flow:
-Python writes `latest.json` and `report-data.js` -> built web assets are copied into `reports/latest/` -> browser opens local `index.html` -> page reads embedded report data -> renders filterable literature list
+`pnpm --dir web build` writes `web/dist/` -> Python copies built assets into `reports/latest/` and embeds `report-data.js` -> browser opens local `index.html` -> page renders the review dashboard with filters, relevance tabs, paper cards, and a detail panel
 
 ## Quick Start
 
 ```powershell
 uv sync
 pnpm --dir web install
-uv run scirssagent run --once
 pnpm --dir web build
+uv run scirssagent run --once
 ```
 
 Open `reports/latest/index.html` after a run. If `SCIRSS_LLM_API_KEY` is not set, SciRSSAgent uses a deterministic fallback classifier so the pipeline still works.
+
+After changing frontend code, rebuild and republish the latest report:
+
+```powershell
+pnpm --dir web build
+uv run scirssagent report latest
+```
 
 ## Commands
 
@@ -54,12 +62,13 @@ Open `reports/latest/index.html` after a run. If `SCIRSS_LLM_API_KEY` is not set
 uv run scirssagent run --once
 uv run scirssagent run --once --max-papers 10
 uv run scirssagent run --once --max-papers 10 --reclassify
-uv run scirssagent report --latest
+uv run scirssagent report latest
 uv run scirssagent init-task
 uv run pytest
 uv run ruff check
 pnpm --dir web test
 pnpm --dir web build
+uv run scirssagent report latest
 ```
 
 With nvm-windows:
