@@ -58,6 +58,20 @@ def entry_doi(*values: str | None) -> str | None:
     return None
 
 
+def local_name(tag: str) -> str:
+    return tag.split("}", 1)[-1]
+
+
+def children(node: ElementTree.Element, *names: str) -> list[ElementTree.Element]:
+    wanted = {local_name(name) for name in names}
+    return [child for child in list(node) if local_name(child.tag) in wanted]
+
+
+def first_child(node: ElementTree.Element, *names: str) -> ElementTree.Element | None:
+    matches = children(node, *names)
+    return matches[0] if matches else None
+
+
 def text(node: ElementTree.Element | None) -> str | None:
     if node is None or node.text is None:
         return None
@@ -67,19 +81,19 @@ def text(node: ElementTree.Element | None) -> str | None:
 
 def child_text(node: ElementTree.Element, *names: str) -> str | None:
     for name in names:
-        value = text(node.find(name))
+        value = text(first_child(node, name))
         if value:
             return value
     return None
 
 
 def parse_rss(root: ElementTree.Element, source_url: str) -> list[Paper]:
-    channel = root.find("channel")
+    channel = first_child(root, "channel")
     if channel is None:
         return []
     feed_title = child_text(channel, "title")
     papers: list[Paper] = []
-    for item in channel.findall("item"):
+    for item in children(channel, "item"):
         title = child_text(item, "title")
         link = child_text(item, "link", "guid")
         if not title or not link:
@@ -122,15 +136,15 @@ def parse_rss(root: ElementTree.Element, source_url: str) -> list[Paper]:
 def parse_atom(root: ElementTree.Element, source_url: str) -> list[Paper]:
     feed_title = child_text(root, f"{ATOM}title")
     papers: list[Paper] = []
-    for entry in root.findall(f"{ATOM}entry"):
+    for entry in children(root, f"{ATOM}entry"):
         title = child_text(entry, f"{ATOM}title")
-        link_node = entry.find(f"{ATOM}link[@href]")
+        link_node = next((child for child in children(entry, f"{ATOM}link") if child.get("href")), None)
         link = link_node.get("href") if link_node is not None else child_text(entry, f"{ATOM}id")
         if not title or not link:
             continue
         authors = [
             name
-            for author in entry.findall(f"{ATOM}author")
+            for author in children(entry, f"{ATOM}author")
             for name in [child_text(author, f"{ATOM}name")]
             if name
         ]
@@ -160,9 +174,9 @@ def fetch_feed(url: str) -> list[Paper]:
     response = httpx.get(url, timeout=30, follow_redirects=True)
     response.raise_for_status()
     root = ElementTree.fromstring(response.content)
-    if root.tag == "rss" or root.find("channel") is not None:
+    if local_name(root.tag) == "rss" or first_child(root, "channel") is not None:
         return parse_rss(root, url)
-    if root.tag == f"{ATOM}feed":
+    if local_name(root.tag) == "feed":
         return parse_atom(root, url)
     return []
 
