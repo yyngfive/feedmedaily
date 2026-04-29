@@ -13,6 +13,8 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@heroui/react": "^3.0.3",
+    "@heroui/styles": "^3.0.3",
     "@tailwindcss/vite": "^4.1.18",
     "@vitejs/plugin-react": "^5.1.1",
     "react": "^19.2.3",

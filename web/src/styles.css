@@ -1,15 +1,20 @@
 @import "tailwindcss";
+@import "@heroui/styles";
 
 :root {
-  --paper: #f7f3eb;
-  --paper-accent: #f2ede3;
-  --ink: #1b1a18;
-  --subtle-ink: #4f4a41;
-  --body: #3f3b35;
-  --muted: #756d62;
-  --line: #d9d0c3;
-  --line-strong: #bcae98;
-  --accent: #8f2f1a;
+  --paper: #f6f7f9;
+  --paper-accent: #ffffff;
+  --ink: #172026;
+  --subtle-ink: #44515c;
+  --body: #303b44;
+  --muted: #64717d;
+  --line: #d9e0e6;
+  --line-strong: #b8c4ce;
+  --accent: #0f766e;
+  --direct: #0f766e;
+  --indirect: #b7791f;
+  --unrelated: #68707a;
+  --unread: #2563eb;
 }
 
 * {
@@ -20,9 +25,7 @@ body {
   margin: 0;
   font-family:
     "Helvetica Neue", "Segoe UI", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0) 18rem),
-    var(--paper);
+  background: var(--paper);
 }
 
 a {
@@ -33,4 +36,18 @@ a {
   font-family:
     "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, "STSong", "Songti SC",
     "Noto Serif CJK SC", serif;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }

@@ -16,6 +16,7 @@ export type Paper = {
   url: string;
   doi?: string | null;
   journal?: string | null;
+  authors?: string[];
   abstract?: string | null;
   published_date?: string | null;
   seen_date: string;
