@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from json import JSONDecodeError
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -52,11 +53,83 @@ def replace_profile_version(
     return profile.model_copy(update={"meta": meta})
 
 
-def validate_profile_json(payload: str | bytes | dict) -> ClassificationProfile:
+def _strip_code_fence(payload: str) -> str:
+    stripped = payload.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if not lines:
+        return stripped
+    if lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _extract_json_object(payload: str) -> str | None:
+    start = payload.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(payload)):
+        char = payload[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return payload[start : index + 1]
+    return None
+
+
+def _load_profile_json(payload: str | bytes | dict) -> dict:
     if isinstance(payload, dict):
-        data = payload
+        return payload
+    if isinstance(payload, bytes):
+        text = payload.decode("utf-8")
     else:
-        data = json.loads(payload)
+        text = payload
+    stripped = _strip_code_fence(text)
+    try:
+        loaded = json.loads(stripped)
+        if not isinstance(loaded, dict):
+            raise ValueError("Classification profile JSON must be an object.")
+        return loaded
+    except JSONDecodeError:
+        extracted = _extract_json_object(stripped)
+        if extracted and extracted != stripped:
+            try:
+                loaded = json.loads(extracted)
+                if not isinstance(loaded, dict):
+                    raise ValueError("Classification profile JSON must be an object.")
+                return loaded
+            except JSONDecodeError as extracted_exc:
+                raise ValueError(
+                    "Invalid classification profile JSON: "
+                    f"{extracted_exc.msg} at line {extracted_exc.lineno}, "
+                    f"column {extracted_exc.colno}."
+                ) from extracted_exc
+        raise ValueError(
+            "Invalid classification profile JSON: could not find a complete JSON object."
+        ) from None
+
+
+def validate_profile_json(payload: str | bytes | dict) -> ClassificationProfile:
+    data = _load_profile_json(payload)
     try:
         return ClassificationProfile.model_validate(data)
     except ValidationError as exc:

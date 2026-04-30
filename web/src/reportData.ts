@@ -38,7 +38,7 @@ export async function fetchCurrentProfile(): Promise<CurrentProfileResponse> {
 export async function bootstrapProfile(input: {
   interest_description: string;
   name?: string;
-}): Promise<ProfileProposal> {
+}): Promise<JobInfo> {
   const response = await fetch("/api/profile/bootstrap", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -47,7 +47,8 @@ export async function bootstrapProfile(input: {
   if (!response.ok) {
     throw new Error(await response.text());
   }
-  return (await response.json()) as ProfileProposal;
+  const payload = (await response.json()) as {job: JobInfo};
+  return payload.job;
 }
 
 export async function fetchFeedback(): Promise<FeedbackRecord[]> {
@@ -127,7 +128,7 @@ export async function launchAdminJob(
 }
 
 export async function launchReclassifyJob(input: {
-  scope: "recent" | "feedback";
+  scope: "recent" | "feedback" | "all";
   limit: number;
 }): Promise<JobInfo> {
   const response = await fetch("/api/admin/reclassify", {

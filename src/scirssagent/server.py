@@ -33,6 +33,7 @@ from scirssagent.services import (
     write_current_profile,
 )
 from scirssagent.storage import (
+    all_paper_ids,
     apply_profile_proposal,
     connect,
     feedback_paper_ids,
@@ -62,7 +63,7 @@ class FeedbackCreateRequest(BaseModel):
 
 
 class ReclassifyRequest(BaseModel):
-    scope: Literal["recent", "feedback"] = "recent"
+    scope: Literal["recent", "feedback", "all"] = "recent"
     limit: int = Field(default=50, ge=1, le=500)
 
 
@@ -104,28 +105,20 @@ def create_app() -> FastAPI:
         return CurrentProfileResponse(profile=read_profile(settings.profile_path))
 
     @app.post("/api/profile/bootstrap")
-    def api_profile_bootstrap(payload: ProfileBootstrapRequest) -> dict[str, object]:
+    def api_profile_bootstrap(payload: ProfileBootstrapRequest) -> JobLaunchResponse:
         settings = load_settings()
         if read_profile(settings.profile_path) is not None:
             raise HTTPException(status_code=400, detail="A classification profile already exists.")
-        proposal_payload = generate_initial_profile_payload(
-            settings,
-            interest_description=payload.interest_description,
-            name=payload.name,
-        )
-        conn = connect(settings.database_path)
-        try:
-            proposal = save_profile_proposal(
-                conn,
-                summary=str(proposal_payload["summary"]),
-                proposed_profile=proposal_payload["proposed_profile"],
-                source_feedback_ids=[],
-                model=settings.profile_model,
+        return JobLaunchResponse(
+            job=launch_job(
+                "profile-bootstrap",
+                _bootstrap_profile_job,
+                settings.root,
+                payload.model_dump(),
+                queued_message="Queued initial profile generation.",
+                running_message="Generating the initial classification profile proposal.",
             )
-            conn.commit()
-            return proposal.model_dump(mode="json")
-        finally:
-            conn.close()
+        )
 
     @app.get("/api/feedback")
     def api_feedback() -> list[dict[str, object]]:
@@ -347,19 +340,36 @@ def current_report(settings: Settings) -> Report:
         conn.close()
 
 
-def launch_job(job_type: str, target, *args) -> JobInfo:
-    job = JobInfo(id=uuid.uuid4().hex, job_type=job_type, status="queued")
+def launch_job(
+    job_type: str,
+    target,
+    *args,
+    queued_message: str | None = None,
+    running_message: str | None = None,
+) -> JobInfo:
+    job = JobInfo(
+        id=uuid.uuid4().hex,
+        job_type=job_type,
+        status="queued",
+        message=queued_message,
+    )
     with JOB_REGISTRY.lock:
         JOB_REGISTRY.jobs[job.id] = job
 
     def runner() -> None:
-        update_job(job.id, status="running", started_at=datetime.now(UTC))
+        update_job(
+            job.id,
+            status="running",
+            message=running_message,
+            started_at=datetime.now(UTC),
+        )
         try:
             result = target(*args)
         except Exception as exc:
             update_job(
                 job.id,
                 status="failed",
+                message=None,
                 error=str(exc),
                 finished_at=datetime.now(UTC),
             )
@@ -367,6 +377,7 @@ def launch_job(job_type: str, target, *args) -> JobInfo:
         update_job(
             job.id,
             status="completed",
+            message="Completed.",
             result=result if isinstance(result, dict) else {"value": result},
             finished_at=datetime.now(UTC),
         )
@@ -416,12 +427,38 @@ def _generate_profile_proposal_job(root: Path) -> dict[str, object]:
         conn.close()
 
 
+def _bootstrap_profile_job(root: Path, payload: dict[str, object]) -> dict[str, object]:
+    settings = load_settings(root)
+    if read_profile(settings.profile_path) is not None:
+        raise ValueError("A classification profile already exists.")
+    proposal_payload = generate_initial_profile_payload(
+        settings,
+        interest_description=str(payload["interest_description"]),
+        name=str(payload["name"]) if payload.get("name") else None,
+    )
+    conn = connect(settings.database_path)
+    try:
+        proposal = save_profile_proposal(
+            conn,
+            summary=str(proposal_payload["summary"]),
+            proposed_profile=proposal_payload["proposed_profile"],
+            source_feedback_ids=[],
+            model=settings.profile_model,
+        )
+        conn.commit()
+        return {"proposal_id": proposal.id}
+    finally:
+        conn.close()
+
+
 def _reclassify_job(root: Path, payload: dict[str, object]) -> dict[str, object]:
     settings = load_settings(root)
     conn = connect(settings.database_path)
     try:
         if payload["scope"] == "feedback":
             paper_ids = feedback_paper_ids(conn)
+        elif payload["scope"] == "all":
+            paper_ids = all_paper_ids(conn)
         else:
             paper_ids = recent_paper_ids(conn, int(payload["limit"]))
     finally:

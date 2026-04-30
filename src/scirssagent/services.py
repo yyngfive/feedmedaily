@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from textwrap import dedent
+from typing import Any
 
 import httpx
 from openai import OpenAI
@@ -63,6 +64,84 @@ def _profile_contract() -> str:
     )
 
 
+def _chat_completion_content(response: Any) -> str:
+    return response.choices[0].message.content or ""
+
+
+def _request_profile_json(
+    client: OpenAI,
+    settings: Settings,
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+) -> str:
+    response = client.chat.completions.create(
+        model=settings.profile_model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0,
+        max_tokens=max_tokens,
+        response_format={"type": "json_object"},
+        extra_body={"thinking": {"type": settings.profile_thinking}},
+    )
+    return _chat_completion_content(response)
+
+
+def _repair_profile_json(
+    client: OpenAI,
+    settings: Settings,
+    *,
+    malformed_content: str,
+) -> ClassificationProfile:
+    prompt = dedent(
+        f"""
+        Repair the malformed scientific-literature classification profile below.
+
+        Requirements:
+        - Return valid JSON only.
+        - Return a complete profile object.
+        - Follow the required schema exactly.
+        - Keep the repaired content faithful to the original intent.
+        - If the draft was truncated, infer the smallest sensible completion.
+
+        Required JSON shape:
+        {_profile_contract()}
+
+        Malformed draft:
+        {malformed_content}
+        """
+    ).strip()
+    repaired = _request_profile_json(
+        client,
+        settings,
+        system_prompt="You repair malformed JSON classification profiles.",
+        user_prompt=prompt,
+        max_tokens=4200,
+    )
+    return validate_profile_json(repaired)
+
+
+def _coerce_profile_json(
+    client: OpenAI,
+    settings: Settings,
+    *,
+    content: str,
+) -> ClassificationProfile:
+    try:
+        return validate_profile_json(content)
+    except ValueError as first_error:
+        try:
+            return _repair_profile_json(client, settings, malformed_content=content)
+        except ValueError as second_error:
+            raise ValueError(
+                "Model returned invalid classification profile JSON. "
+                f"First parse failed: {first_error} Repair attempt failed: {second_error}"
+            ) from second_error
+
+
 def generate_initial_profile_payload(
     settings: Settings,
     *,
@@ -93,19 +172,14 @@ def generate_initial_profile_payload(
         {_profile_contract()}
         """
     ).strip()
-    response = client.chat.completions.create(
-        model=settings.profile_model,
-        messages=[
-            {"role": "system", "content": "You design structured classification profiles."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0,
-        max_tokens=3000,
-        response_format={"type": "json_object"},
-        extra_body={"thinking": {"type": settings.profile_thinking}},
+    content = _request_profile_json(
+        client,
+        settings,
+        system_prompt="You design structured classification profiles.",
+        user_prompt=prompt,
+        max_tokens=4200,
     )
-    content = response.choices[0].message.content or ""
-    profile = validate_profile_json(content)
+    profile = _coerce_profile_json(client, settings, content=content)
     summary = (
         f"Initial profile for {profile.meta.name} with "
         f"{len(profile.topic_taxonomy)} topic tags and {len(profile.few_shots)} few-shot examples."
@@ -155,19 +229,14 @@ def generate_profile_proposal_payload(
         {_profile_contract()}
         """
     ).strip()
-    response = client.chat.completions.create(
-        model=settings.profile_model,
-        messages=[
-            {"role": "system", "content": "You revise structured classification profiles."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0,
-        max_tokens=3200,
-        response_format={"type": "json_object"},
-        extra_body={"thinking": {"type": settings.profile_thinking}},
+    content = _request_profile_json(
+        client,
+        settings,
+        system_prompt="You revise structured classification profiles.",
+        user_prompt=prompt,
+        max_tokens=4600,
     )
-    content = response.choices[0].message.content or ""
-    proposed_profile = validate_profile_json(content)
+    proposed_profile = _coerce_profile_json(client, settings, content=content)
     summary = (
         f"Updated profile from {len(feedback_items)} feedback item(s); "
         f"{len(proposed_profile.topic_taxonomy)} topic tags, "

@@ -518,6 +518,11 @@ def recent_paper_ids(conn: sqlite3.Connection, limit: int) -> list[int]:
     return [int(row["id"]) for row in rows]
 
 
+def all_paper_ids(conn: sqlite3.Connection) -> list[int]:
+    rows = conn.execute("SELECT id FROM papers ORDER BY first_seen_at DESC").fetchall()
+    return [int(row["id"]) for row in rows]
+
+
 def feedback_paper_ids(conn: sqlite3.Connection) -> list[int]:
     rows = conn.execute(
         "SELECT DISTINCT paper_id FROM feedback ORDER BY created_at DESC, id DESC"

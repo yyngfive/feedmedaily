@@ -130,11 +130,13 @@ function nativeSelectClassName(): string {
 
 function Onboarding({
   proposals,
+  jobs,
   onBootstrap,
   onApplyProposal,
   busy,
 }: {
   proposals: ProfileProposal[];
+  jobs: JobInfo[];
   onBootstrap: (interestDescription: string, name: string) => Promise<void>;
   onApplyProposal: (proposalId: number) => Promise<void>;
   busy: boolean;
@@ -142,10 +144,14 @@ function Onboarding({
   const [name, setName] = React.useState("Default profile");
   const [interestDescription, setInterestDescription] = React.useState("");
   const pendingProposal = proposals.find((item) => item.state === "pending") ?? proposals[0] ?? null;
+  const latestBootstrapJob =
+    jobs.find((item) => item.job_type === "profile-bootstrap") ?? null;
+  const bootstrapRunning =
+    latestBootstrapJob?.status === "queued" || latestBootstrapJob?.status === "running";
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-6">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
+    <main className="mx-auto max-w-7xl px-4 py-6">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_520px]">
         <Card className="border border-[var(--line)] bg-white">
           <Card.Header className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -177,13 +183,29 @@ function Onboarding({
                 onChange={(event) => setInterestDescription(event.target.value)}
               />
             </label>
+            {latestBootstrapJob ? (
+              <div
+                className={`rounded-md border p-3 text-sm ${
+                  latestBootstrapJob.status === "failed"
+                    ? "border-rose-300 bg-rose-50 text-rose-900"
+                    : latestBootstrapJob.status === "completed"
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                      : "border-sky-300 bg-sky-50 text-sky-900"
+                }`}
+              >
+                <p className="font-medium">
+                  {bootstrapRunning ? "Generating profile..." : "Latest profile generation job"}
+                </p>
+                <p className="mt-1 leading-6">{statusMessage(latestBootstrapJob)}</p>
+              </div>
+            ) : null}
           </Card.Content>
           <Card.Footer>
             <Button
               isDisabled={busy || !interestDescription.trim()}
               onPress={() => void onBootstrap(interestDescription.trim(), name.trim() || "Default profile")}
             >
-              Generate initial profile
+              {bootstrapRunning ? "Generating..." : "Generate initial profile"}
             </Button>
           </Card.Footer>
         </Card>
@@ -192,7 +214,7 @@ function Onboarding({
           <Card.Header>
             <h2 className="text-lg font-semibold text-[var(--ink)]">Latest proposal</h2>
           </Card.Header>
-          <Card.Content className="space-y-4">
+          <Card.Content className="max-h-[78vh] space-y-4 overflow-y-auto pr-1">
             {!pendingProposal ? (
               <p className="text-sm text-[var(--muted)]">No proposal yet.</p>
             ) : (
@@ -202,7 +224,7 @@ function Onboarding({
           {pendingProposal ? (
             <Card.Footer className="flex gap-2">
               <Button
-                isDisabled={busy || pendingProposal.state !== "pending"}
+                isDisabled={busy || bootstrapRunning || pendingProposal.state !== "pending"}
                 onPress={() => void onApplyProposal(pendingProposal.id)}
               >
                 Apply profile
@@ -539,34 +561,106 @@ function ProfileProposalPreview({proposal}: {proposal: ProfileProposal}) {
         </Chip>
       </div>
       <p className="text-sm leading-6 text-[var(--body)]">{proposal.summary}</p>
-      <div className="grid gap-4">
-        <RuleList title="Direct" items={profile.relevance_rules.direct} />
-        <RuleList title="Indirect" items={profile.relevance_rules.indirect} />
-        <RuleList title="Unrelated" items={profile.relevance_rules.unrelated} />
+      <div className="grid gap-4 xl:grid-cols-3">
+        <div className="rounded-md border border-[var(--line)] p-3">
+          <RuleList title="Direct" items={profile.relevance_rules.direct} />
+        </div>
+        <div className="rounded-md border border-[var(--line)] p-3">
+          <RuleList title="Indirect" items={profile.relevance_rules.indirect} />
+        </div>
+        <div className="rounded-md border border-[var(--line)] p-3">
+          <RuleList title="Unrelated" items={profile.relevance_rules.unrelated} />
+        </div>
       </div>
-      <div className="overflow-auto rounded-md border border-[var(--line)]">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-slate-50 text-[var(--muted)]">
-            <tr>
-              <th className="px-3 py-2 font-medium">Tag</th>
-              <th className="px-3 py-2 font-medium">Label</th>
-              <th className="px-3 py-2 font-medium">Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            {profile.topic_taxonomy.map((topic) => (
-              <tr key={topic.id} className="border-t border-[var(--line)]">
-                <td className="px-3 py-2 font-mono text-xs">{topic.id}</td>
-                <td className="px-3 py-2">{topic.label}</td>
-                <td className="px-3 py-2 text-[var(--body)]">{topic.description}</td>
+      <div className="space-y-2">
+        <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+          Topic taxonomy
+        </h4>
+        <div className="max-h-[320px] overflow-y-auto rounded-md border border-[var(--line)]">
+          <table className="min-w-full table-fixed text-left text-sm">
+            <thead className="sticky top-0 bg-slate-50 text-[var(--muted)]">
+              <tr>
+                <th className="w-[26%] px-3 py-2 font-medium">Tag</th>
+                <th className="w-[22%] px-3 py-2 font-medium">Label</th>
+                <th className="w-[34%] px-3 py-2 font-medium">Description</th>
+                <th className="w-[18%] px-3 py-2 font-medium">Examples</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {profile.topic_taxonomy.map((topic) => (
+                <tr key={topic.id} className="border-t border-[var(--line)] align-top">
+                  <td className="px-3 py-3 font-mono text-xs break-all">{topic.id}</td>
+                  <td className="px-3 py-3 font-medium text-[var(--ink)]">{topic.label}</td>
+                  <td className="px-3 py-3 leading-6 text-[var(--body)]">{topic.description}</td>
+                  <td className="px-3 py-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      {topic.examples.length === 0 ? (
+                        <span className="text-xs text-[var(--muted)]">None</span>
+                      ) : (
+                        topic.examples.slice(0, 3).map((example) => (
+                          <Chip key={`${topic.id}-${example}`} size="sm" variant="secondary">
+                            {example}
+                          </Chip>
+                        ))
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-      <pre className="overflow-auto rounded-md bg-slate-50 p-3 text-xs leading-5 text-[var(--body)]">
-        {JSON.stringify(profile, null, 2)}
-      </pre>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-2 rounded-md border border-[var(--line)] p-3">
+          <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+            Few-shot examples
+          </h4>
+          <div className="max-h-[260px] space-y-3 overflow-y-auto pr-1">
+            {profile.few_shots.length === 0 ? (
+              <p className="text-sm text-[var(--muted)]">No few-shot examples.</p>
+            ) : (
+              profile.few_shots.map((item) => (
+                <div
+                  key={`${item.title}-${item.relevance}`}
+                  className="rounded-md border border-[var(--line)] p-3"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Chip size="sm" variant="secondary">
+                      {relevanceLabel[item.relevance]}
+                    </Chip>
+                    {item.tags.map((tag) => (
+                      <Chip key={`${item.title}-${tag}`} size="sm" variant="secondary">
+                        {tag}
+                      </Chip>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-sm font-medium leading-6 text-[var(--ink)]">
+                    {item.title}
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-[var(--body)]">{item.rationale}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+        <div className="space-y-2 rounded-md border border-[var(--line)] p-3">
+          <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+            Notes
+          </h4>
+          <div className="max-h-[260px] overflow-y-auto pr-1">
+            {profile.classification_notes.length === 0 ? (
+              <p className="text-sm text-[var(--muted)]">No extra notes.</p>
+            ) : (
+              <ul className="list-disc space-y-2 pl-5 text-sm leading-6 text-[var(--body)]">
+                {profile.classification_notes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -584,6 +678,7 @@ function AdminPanel({
   onRunFeedSync,
   onReclassifyRecent,
   onReclassifyFeedback,
+  onReclassifyAll,
   onRefreshReport,
 }: {
   open: boolean;
@@ -598,6 +693,7 @@ function AdminPanel({
   onRunFeedSync: () => void;
   onReclassifyRecent: () => void;
   onReclassifyFeedback: () => void;
+  onReclassifyAll: () => void;
   onRefreshReport: () => void;
 }) {
   if (!open) {
@@ -605,7 +701,7 @@ function AdminPanel({
   }
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/20">
-      <aside className="h-full w-full max-w-[640px] overflow-auto border-l border-[var(--line)] bg-[var(--paper)] p-4 shadow-xl">
+      <aside className="h-full w-full max-w-[min(1100px,92vw)] overflow-auto border-l border-[var(--line)] bg-[var(--paper)] p-4 shadow-xl">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -632,6 +728,9 @@ function AdminPanel({
             </Button>
             <Button size="sm" variant="outline" onPress={onReclassifyFeedback}>
               Reclassify feedback papers
+            </Button>
+            <Button size="sm" variant="outline" onPress={onReclassifyAll}>
+              Reclassify all
             </Button>
             <Button size="sm" variant="secondary" onPress={onGenerateProposal}>
               Generate profile proposal
@@ -680,7 +779,7 @@ function AdminPanel({
                     </div>
                     <span className="text-xs text-[var(--muted)]">{proposal.created_at.slice(0, 10)}</span>
                   </Card.Header>
-                  <Card.Content>
+                  <Card.Content className="max-h-[78vh] overflow-y-auto pr-1">
                     <ProfileProposalPreview proposal={proposal} />
                   </Card.Content>
                   <Card.Footer className="flex flex-wrap gap-2">
@@ -838,6 +937,14 @@ export function App() {
     () => jobs.filter((job) => job.status === "queued" || job.status === "running"),
     [jobs],
   );
+  const bootstrapJob = React.useMemo(
+    () => jobs.find((job) => job.job_type === "profile-bootstrap") ?? null,
+    [jobs],
+  );
+  const onboardingBusy =
+    busy ||
+    bootstrapJob?.status === "queued" ||
+    bootstrapJob?.status === "running";
 
   React.useEffect(() => {
     if (runningJobs.length === 0) {
@@ -853,6 +960,10 @@ export function App() {
               left.created_at < right.created_at ? 1 : -1,
             );
           });
+          const failedJob = updatedJobs.find((job) => job.status === "failed" && job.error);
+          if (failedJob?.error) {
+            setLoadError(failedJob.error);
+          }
           if (updatedJobs.some((job) => job.status === "completed")) {
             void refreshAll();
           }
@@ -959,17 +1070,21 @@ export function App() {
     }
   };
 
-  const registerJob = (job: JobInfo) => {
+  const registerJob = (job: JobInfo, openAdmin = true) => {
     setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
-    setAdminOpen(true);
+    if (openAdmin) {
+      setAdminOpen(true);
+    }
   };
 
   const handleBootstrap = async (interestDescription: string, name: string) => {
     try {
       setBusy(true);
-      await bootstrapProfile({interest_description: interestDescription, name});
-      await refreshProposals();
-      setNotice("Initial profile proposal created.");
+      registerJob(
+        await bootstrapProfile({interest_description: interestDescription, name}),
+        false,
+      );
+      setNotice("Initial profile generation started.");
     } catch (error) {
       setLoadError((error as Error).message);
     } finally {
@@ -1018,9 +1133,9 @@ export function App() {
     }
   };
 
-  const handleReclassify = async (scope: "recent" | "feedback") => {
+  const handleReclassify = async (scope: "recent" | "feedback" | "all") => {
     try {
-      registerJob(await launchReclassifyJob({scope, limit: 50}));
+      registerJob(await launchReclassifyJob({scope, limit: scope === "all" ? 500 : 50}));
       setNotice("Reclassification job started.");
     } catch (error) {
       setLoadError((error as Error).message);
@@ -1041,7 +1156,8 @@ export function App() {
           </div>
         ) : null}
         <Onboarding
-          busy={busy}
+          busy={onboardingBusy}
+          jobs={jobs}
           proposals={profileProposals}
           onBootstrap={handleBootstrap}
           onApplyProposal={handleApplyProposal}
@@ -1065,6 +1181,7 @@ export function App() {
         onRunFeedSync={() => void handleRunAdminJob("/api/admin/run")}
         onReclassifyRecent={() => void handleReclassify("recent")}
         onReclassifyFeedback={() => void handleReclassify("feedback")}
+        onReclassifyAll={() => void handleReclassify("all")}
         onRefreshReport={() => void handleRunAdminJob("/api/admin/report/latest")}
       />
       <FeedbackModal

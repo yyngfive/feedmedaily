@@ -9,7 +9,7 @@ SciRSSAgent monitors journal RSS feeds, stores paper metadata in SQLite, classif
 - `web/`: Vite + React + TypeScript UI
 - `RSS.txt`: RSS feed list, one URL per line
 - `data/literature.sqlite`: local paper database
-- `data/classification_profile.json`: active user classification profile
+- `data/classification_profile.json`: active user classification profile (local only, Git-ignored)
 - `reports/data/latest.json`: latest report data
 - `reports/latest/index.html`: static report entrypoint
 - `logs/YYYY-MM-DD.log`: daily run logs
@@ -37,6 +37,7 @@ The FastAPI-hosted app is the primary interface:
 3. After approval, the profile is written to `data/classification_profile.json`.
 4. Model A uses that profile for future classifications.
 5. User feedback can trigger profile proposals; applying a proposal updates the profile and reclassifies the linked feedback papers.
+6. Manual reclassification is available for recent papers, feedback-linked papers, or the full local library.
 
 Static export is still supported:
 `pnpm --dir web build` writes `web/dist/` -> Python publishes `reports/latest/` -> browser opens local `index.html`
@@ -98,6 +99,15 @@ uv run ruff check
 pnpm --dir web test
 pnpm --dir web build
 ```
+
+In the admin panel, the interactive app supports:
+
+- `Run fetch + classify`
+- `Refresh report`
+- `Reclassify recent 50`
+- `Reclassify feedback papers`
+- `Reclassify all`
+- `Generate profile proposal`
 
 ## Batch Size Experiment
 

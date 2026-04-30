@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from scirssagent.models import (
     Classification,
     ClassificationProfile,
+    JobInfo,
     Paper,
     ProfileMeta,
     Relevance,
@@ -76,6 +77,67 @@ def test_report_latest_and_feedback_api(monkeypatch) -> None:
     assert feedback_response.status_code == 200
     feedback_payload = feedback_response.json()
     assert feedback_payload["corrected_relevance"] == "direct"
+
+
+def test_profile_bootstrap_launches_job(monkeypatch) -> None:
+    root = _project_root("bootstrap")
+    _bootstrap_root(root)
+
+    monkeypatch.chdir(root)
+    import scirssagent.server as server_module
+
+    launched: dict[str, object] = {}
+
+    def fake_launch_job(job_type, target, *args, **kwargs):
+        launched["job_type"] = job_type
+        launched["args"] = args
+        launched["queued_message"] = kwargs.get("queued_message")
+        launched["running_message"] = kwargs.get("running_message")
+        return JobInfo(id="job-1", job_type=job_type, status="queued")
+
+    monkeypatch.setattr(server_module, "launch_job", fake_launch_job)
+    client = TestClient(server_module.create_app())
+
+    response = client.post(
+        "/api/profile/bootstrap",
+        json={
+            "interest_description": "I study nucleic acid chemistry and polymerase engineering.",
+            "name": "Test bootstrap profile",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["job"]["job_type"] == "profile-bootstrap"
+    assert launched["job_type"] == "profile-bootstrap"
+    assert launched["queued_message"] == "Queued initial profile generation."
+    assert launched["running_message"] == "Generating the initial classification profile proposal."
+
+
+def test_admin_reclassify_accepts_all_scope(monkeypatch) -> None:
+    root = _project_root("reclassify-all")
+    _bootstrap_root(root)
+    write_profile(root / "data" / "classification_profile.json", _profile("All profile"))
+
+    monkeypatch.chdir(root)
+    import scirssagent.server as server_module
+
+    launched: dict[str, object] = {}
+
+    def fake_launch_job(job_type, target, *args, **kwargs):
+        launched["job_type"] = job_type
+        launched["args"] = args
+        return JobInfo(id="job-all", job_type=job_type, status="queued")
+
+    monkeypatch.setattr(server_module, "launch_job", fake_launch_job)
+    client = TestClient(server_module.create_app())
+
+    response = client.post("/api/admin/reclassify", json={"scope": "all", "limit": 50})
+
+    assert response.status_code == 200
+    assert response.json()["job"]["job_type"] == "reclassify"
+    assert launched["job_type"] == "reclassify"
+    assert len(launched["args"]) == 2
+    assert launched["args"][1]["scope"] == "all"
 
 
 def test_profile_proposal_apply_updates_profile_and_feedback(monkeypatch) -> None:

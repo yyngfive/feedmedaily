@@ -46,3 +46,34 @@ uv sync
 - Keep generated caches, databases, logs, and reports out of Git.
 - Prefer deterministic pipeline logic over free-form agent behavior for RSS ingestion, classification, and reporting.
 - For larger changes, create a new Git branch first and merge it back only after the work is complete and verified.
+
+## Current Architecture
+
+- Classification is profile-driven. The active rules live in `data/classification_profile.json`, which is user-local and Git-ignored.
+- There are two DeepSeek model roles:
+  - model A: paper classification
+  - model B: profile generation and profile revision
+- The code owns the task shell and output schema, but user interest boundaries, topic taxonomy, few-shots, and classification notes come from the profile file.
+- FastAPI is now the primary local app surface:
+  - serves `web/dist`
+  - exposes `/api/report/latest`
+  - exposes feedback, profile proposal, Zotero, and admin job APIs
+- Profile lifecycle:
+  1. User describes interests in onboarding
+  2. model B generates an initial profile proposal
+  3. user applies the proposal
+  4. future classifications use the applied profile
+  5. feedback can generate new full-profile proposals
+  6. applying a proposal reclassifies linked feedback papers only
+- Reclassification scopes currently supported:
+  - `recent`
+  - `feedback`
+  - `all`
+- `Mark wrong` writes persistent feedback records to SQLite.
+- `Save to Zotero` uses the Zotero Web API and stores save status in SQLite.
+
+## Agent Notes
+
+- Do not commit `data/classification_profile.json` or `data/*.sqlite`; they are per-user local state.
+- When changing the profile proposal UI, optimize for reviewability rather than raw JSON visibility.
+- Keep long-running LLM actions as background jobs with visible status in the UI.
