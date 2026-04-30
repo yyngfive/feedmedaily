@@ -291,12 +291,24 @@ function PaperCard({
   const tone = relevanceTone[paper.classification.relevance];
   const feedbackText = feedbackLabel(paper);
   const zoteroSaved = paper.zotero_status?.saved ?? false;
+  const handleSelectKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect();
+    }
+  };
 
   return (
     <Card
       className={`border-l-4 ${tone.ring} ${isSelected ? "outline outline-2 outline-[var(--accent)]" : ""}`}
     >
-      <button className="block w-full text-left" type="button" onClick={onSelect}>
+      <div
+        className="block w-full cursor-pointer text-left"
+        role="button"
+        tabIndex={0}
+        onClick={onSelect}
+        onKeyDown={handleSelectKeyDown}
+      >
         <Card.Header className="gap-3">
           <div className="flex flex-1 flex-wrap items-center gap-2">
             {isUnread ? (
@@ -344,8 +356,12 @@ function PaperCard({
             {paper.classification.reason}
           </p>
         </Card.Content>
-      </button>
-      <Card.Footer className="flex flex-wrap gap-2">
+      </div>
+      <Card.Footer
+        className="flex flex-wrap gap-2"
+        onClickCapture={(event) => event.stopPropagation()}
+        onKeyDownCapture={(event) => event.stopPropagation()}
+      >
         <Button size="sm" variant="outline" onPress={() => window.open(doiHref(paper), "_blank")}>
           DOI
         </Button>
@@ -363,11 +379,7 @@ function PaperCard({
         <Button size="sm" variant={zoteroSaved ? "secondary" : "tertiary"} onPress={onSave}>
           {zoteroSaved ? "Saved" : "Save to Zotero"}
         </Button>
-        <Button
-          size="sm"
-          variant={feedbackText ? "danger-soft" : "ghost"}
-          onPress={onMarkWrong}
-        >
+        <Button size="sm" variant={feedbackText ? "danger-soft" : "ghost"} onPress={onMarkWrong}>
           Mark wrong
         </Button>
       </Card.Footer>
