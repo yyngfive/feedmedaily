@@ -34,6 +34,19 @@ class FeedSource(BaseModel):
     url: HttpUrl
 
 
+class FeedSubscription(BaseModel):
+    journal: str
+    url: HttpUrl
+
+    @field_validator("journal")
+    @classmethod
+    def required_journal(cls, value: str) -> str:
+        clean = value.strip()
+        if not clean:
+            raise ValueError("journal cannot be blank")
+        return clean
+
+
 class Paper(BaseModel):
     source_url: str
     feed_title: str | None = None
@@ -45,6 +58,7 @@ class Paper(BaseModel):
     abstract: str | None = None
     published_date: date | None = None
     first_seen_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    read_at: datetime | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("title", "url")
@@ -102,6 +116,19 @@ class ZoteroStatus(BaseModel):
     last_error: str | None = None
     attempted_at: datetime | None = None
     saved_at: datetime | None = None
+
+
+class ZoteroCollectionOption(BaseModel):
+    key: str
+    name: str
+    path_label: str
+    parent_key: str | None = None
+    is_default: bool = False
+
+
+class ZoteroCollectionsResponse(BaseModel):
+    collections: list[ZoteroCollectionOption] = Field(default_factory=list)
+    default_collection_key: str | None = None
 
 
 class ReportPaper(Paper):

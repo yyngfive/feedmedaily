@@ -2,6 +2,15 @@ export type Relevance = "direct" | "indirect" | "unrelated";
 export type FeedbackState = "open" | "used";
 export type ProfileProposalState = "pending" | "applied" | "rejected";
 export type ZoteroSaveState = "pending" | "saved" | "error";
+export type FeedSubscription = {
+  journal: string;
+  url: string;
+};
+
+export type PaperReadStatus = {
+  paper_id: number;
+  read_at: string;
+};
 
 export type Classification = {
   relevance: Relevance;
@@ -31,6 +40,19 @@ export type ZoteroStatus = {
   saved_at?: string | null;
 };
 
+export type ZoteroCollectionOption = {
+  key: string;
+  name: string;
+  path_label: string;
+  parent_key?: string | null;
+  is_default: boolean;
+};
+
+export type ZoteroCollectionsResponse = {
+  collections: ZoteroCollectionOption[];
+  default_collection_key?: string | null;
+};
+
 export type Paper = {
   id: number;
   title: string;
@@ -41,6 +63,7 @@ export type Paper = {
   abstract?: string | null;
   published_date?: string | null;
   seen_date: string;
+  read_at?: string | null;
   classification: Classification;
   feedback_status?: FeedbackStatus | null;
   zotero_status?: ZoteroStatus | null;

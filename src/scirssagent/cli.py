@@ -121,13 +121,13 @@ def experiment_batch_size(
         preview = ", ".join(missing_ids[:10])
         suffix = "..." if len(missing_ids) > 10 else ""
         raise typer.BadParameter(f"gold_relevance is missing for paper_id: {preview}{suffix}")
-    if not settings.deepseek_api_key:
-        raise typer.BadParameter("SCIRSS_DEEPSEEK_API_KEY is required.")
+    if not settings.classifier_api_key:
+        raise typer.BadParameter("SCIRSS_CLASSIFIER_API_KEY is required.")
     profile = ensure_profile(settings.profile_path)
     llm_config = build_classifier_config(settings)
     typer.echo(f"Gold labels: {sample_path}")
     typer.echo(f"Output dir: {output_root}")
-    typer.echo(f"Model: {settings.classifier_model} | Provider: deepseek | Papers: {len(rows)}")
+    typer.echo(f"Model: {settings.classifier_model} | Papers: {len(rows)}")
     report = run_batch_size_experiment(rows, sizes, llm_config, profile, progress=typer.echo)
     json_path, csv_path = write_experiment_outputs(report, output_root)
     typer.echo(f"Selected batch size: {report['selected_batch_size']}")

@@ -15,14 +15,18 @@ from scirssagent.models import (
     Paper,
     ProfileMeta,
     RelevanceRules,
+    ZoteroCollectionOption,
+    ZoteroCollectionsResponse,
 )
 from scirssagent.profiles import validate_profile_json, write_profile
 
 
-def deepseek_client(settings: Settings) -> OpenAI:
-    if not settings.deepseek_api_key:
-        raise ValueError("SCIRSS_DEEPSEEK_API_KEY is required.")
-    return OpenAI(api_key=settings.deepseek_api_key, base_url=settings.deepseek_base_url)
+def profile_model_client(settings: Settings) -> OpenAI:
+    if not settings.profile_api_key:
+        raise ValueError(
+            "SCIRSS_PROFILE_API_KEY is required for profile generation and prompt revision."
+        )
+    return OpenAI(api_key=settings.profile_api_key, base_url=settings.profile_base_url)
 
 
 def _profile_contract() -> str:
@@ -148,7 +152,7 @@ def generate_initial_profile_payload(
     interest_description: str,
     name: str | None = None,
 ) -> dict[str, object]:
-    client = deepseek_client(settings)
+    client = profile_model_client(settings)
     prompt = dedent(
         f"""
         Build a complete scientific-literature classification profile from the user's
@@ -194,7 +198,7 @@ def generate_profile_proposal_payload(
 ) -> dict[str, object]:
     if not feedback_items:
         raise ValueError("No feedback is available for profile proposal generation.")
-    client = deepseek_client(settings)
+    client = profile_model_client(settings)
     feedback_payload = [
         {
             "feedback_id": item.id,
@@ -316,28 +320,109 @@ def zotero_item_payload(
     return payload
 
 
+def _zotero_library_prefix(settings: Settings) -> str:
+    if not settings.zotero_api_key:
+        raise ValueError(
+            "SCIRSS_ZOTERO_API_KEY is not configured. Add it to your .env file first."
+        )
+    if not settings.zotero_library_id:
+        raise ValueError(
+            "SCIRSS_ZOTERO_LIBRARY_ID is not configured. "
+            "Add your Zotero user or group library ID to the .env file."
+        )
+    library_type = settings.zotero_library_type
+    if library_type not in {"user", "group"}:
+        raise ValueError(
+            "SCIRSS_ZOTERO_LIBRARY_TYPE must be 'user' or 'group'. "
+            "Check the .env setting before saving to Zotero."
+        )
+    return f"{library_type}s/{settings.zotero_library_id}"
+
+
+def list_zotero_collections(settings: Settings) -> ZoteroCollectionsResponse:
+    prefix = _zotero_library_prefix(settings)
+    response = httpx.get(
+        f"https://api.zotero.org/{prefix}/collections",
+        headers={
+            "Zotero-API-Version": "3",
+            "Zotero-API-Key": settings.zotero_api_key or "",
+        },
+        params={"format": "json", "limit": 1000},
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise ValueError(f"Zotero API error {response.status_code}: {response.text}")
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise ValueError("Unexpected Zotero collections response.")
+
+    by_key: dict[str, dict[str, Any]] = {}
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        data = item.get("data")
+        key = item.get("key")
+        if isinstance(data, dict) and isinstance(key, str):
+            by_key[key] = data
+
+    def build_path_label(collection_key: str) -> str:
+        names: list[str] = []
+        current_key: str | None = collection_key
+        while current_key:
+            current = by_key.get(current_key)
+            if current is None:
+                break
+            names.append(str(current.get("name") or current_key))
+            parent_key = current.get("parentCollection")
+            current_key = str(parent_key) if isinstance(parent_key, str) and parent_key else None
+        return " / ".join(reversed(names))
+
+    default_key = settings.zotero_collection_key or None
+    collections = [
+        ZoteroCollectionOption(
+            key=collection_key,
+            name=str(data.get("name") or collection_key),
+            path_label=build_path_label(collection_key),
+            parent_key=(
+                str(data.get("parentCollection"))
+                if isinstance(data.get("parentCollection"), str) and data.get("parentCollection")
+                else None
+            ),
+            is_default=collection_key == default_key,
+        )
+        for collection_key, data in sorted(
+            by_key.items(),
+            key=lambda item: build_path_label(item[0]).lower(),
+        )
+    ]
+    return ZoteroCollectionsResponse(
+        collections=collections,
+        default_collection_key=default_key,
+    )
+
+
 def save_paper_to_zotero(
     settings: Settings,
     paper: Paper,
     classification: Classification,
+    collection_key: str | None = None,
 ) -> tuple[str, str | None]:
-    if not settings.zotero_api_key:
-        raise ValueError("SCIRSS_ZOTERO_API_KEY is not configured.")
-    if not settings.zotero_library_id:
-        raise ValueError("SCIRSS_ZOTERO_LIBRARY_ID is not configured.")
-    library_type = settings.zotero_library_type
-    if library_type not in {"user", "group"}:
-        raise ValueError("SCIRSS_ZOTERO_LIBRARY_TYPE must be 'user' or 'group'.")
-    url = f"https://api.zotero.org/{library_type}s/{settings.zotero_library_id}/items"
+    prefix = _zotero_library_prefix(settings)
+    url = f"https://api.zotero.org/{prefix}/items"
+    target_collection_key = (
+        collection_key if collection_key is not None else settings.zotero_collection_key
+    )
+    if target_collection_key == "":
+        target_collection_key = None
     response = httpx.post(
         url,
         headers={
             "Zotero-API-Version": "3",
-            "Zotero-API-Key": settings.zotero_api_key,
+            "Zotero-API-Key": settings.zotero_api_key or "",
             "Content-Type": "application/json",
         },
         content=json.dumps(
-            [zotero_item_payload(paper, classification, settings.zotero_collection_key)],
+            [zotero_item_payload(paper, classification, target_collection_key)],
             ensure_ascii=False,
         ).encode("utf-8"),
         timeout=30,

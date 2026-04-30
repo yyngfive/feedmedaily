@@ -38,6 +38,7 @@ uv sync
 ```
 
 - `mamba` is a fallback for future heavy scientific, GPU, or local-model dependencies. It is not the default workflow for v0.1.
+- `.env.example` documents the current recommended environment variables and should be kept in sync with README when configuration changes.
 
 ## Repository Conventions
 
@@ -50,9 +51,12 @@ uv sync
 ## Current Architecture
 
 - Classification is profile-driven. The active rules live in `data/classification_profile.json`, which is user-local and Git-ignored.
-- There are two DeepSeek model roles:
-  - model A: paper classification
-  - model B: profile generation and profile revision
+- There are two configurable LLM roles:
+  - classifier model: paper classification
+  - profile model: profile generation and profile revision
+- Each role can use its own API key and base URL:
+  - `SCIRSS_CLASSIFIER_API_KEY` / `SCIRSS_CLASSIFIER_BASE_URL`
+  - `SCIRSS_PROFILE_API_KEY` / `SCIRSS_PROFILE_BASE_URL`
 - The code owns the task shell and output schema, but user interest boundaries, topic taxonomy, few-shots, and classification notes come from the profile file.
 - FastAPI is now the primary local app surface:
   - serves `web/dist`
@@ -77,3 +81,13 @@ uv sync
 - Do not commit `data/classification_profile.json` or `data/*.sqlite`; they are per-user local state.
 - When changing the profile proposal UI, optimize for reviewability rather than raw JSON visibility.
 - Keep long-running LLM actions as background jobs with visible status in the UI.
+
+## UI Baseline
+
+- The main app currently uses a three-column layout: left filters, center paper list, right detail panel.
+- If no profile exists, the app shows onboarding first. If a profile exists but no RSS feeds are configured, the app switches into a feed-initialization empty state and opens admin feed settings by default.
+- The center list defaults to `Unread + Last 30 days`, uses virtualized card rendering, and keeps paper cards as read-only previews without inline action buttons.
+- The admin panel owns feed subscription editing, manual jobs, feedback review, and profile proposal review.
+- The right detail panel owns the paper action buttons (`DOI link`, `Mark as read`, `Save to Zotero`, `Mark wrong`).
+- Zotero saving is implemented through the Zotero Web API with an in-app collection picker, not through the browser connector.
+- In `web/src/App.tsx` and `web/src/main.tsx`, top-level helpers and components should keep short Chinese comments that explain each function or component's responsibility.

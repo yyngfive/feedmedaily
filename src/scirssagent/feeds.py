@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from datetime import date, datetime
 from email.utils import parsedate_to_datetime
@@ -8,23 +9,37 @@ from xml.etree import ElementTree
 
 import httpx
 
-from scirssagent.models import Paper
+from scirssagent.models import FeedSubscription, Paper
 
 ATOM = "{http://www.w3.org/2005/Atom}"
 DC = "{http://purl.org/dc/elements/1.1/}"
 PRISM = "{http://prismstandard.org/namespaces/basic/2.0/}"
 CONTENT = "{http://purl.org/rss/1.0/modules/content/}"
 
+def read_feed_subscriptions(path: Path) -> list[FeedSubscription]:
+    if not path.exists():
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list):
+        raise ValueError("Feed subscriptions JSON must be an array.")
+    return [FeedSubscription.model_validate(item) for item in payload]
+
 
 def read_feed_urls(path: Path) -> list[str]:
-    if not path.exists():
-        raise FileNotFoundError(f"RSS feed file not found: {path}")
-    urls: list[str] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        clean = line.strip()
-        if clean and not clean.startswith("#"):
-            urls.append(clean)
-    return urls
+    return [str(item.url) for item in read_feed_subscriptions(path)]
+
+
+def write_feed_subscriptions(path: Path, subscriptions: Iterable[FeedSubscription]) -> None:
+    payload: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in subscriptions:
+        url = str(item.url)
+        if url in seen:
+            continue
+        seen.add(url)
+        payload.append({"journal": item.journal, "url": url})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def parse_entry_date_text(*values: str | None) -> date | None:

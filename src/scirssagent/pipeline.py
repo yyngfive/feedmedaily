@@ -37,7 +37,7 @@ def run_once(
     reclassify: bool = False,
 ) -> str:
     configure_logging(settings)
-    urls = read_feed_urls(settings.feeds_file)
+    urls = read_feed_urls(settings.feeds_path)
     logging.info("Fetching %s feeds", len(urls))
     papers, errors = fetch_all_feeds(urls)
     if max_papers is not None:
@@ -82,7 +82,7 @@ def run_once(
             settings.classifier_batch_size,
         )
         report_date = datetime.now(UTC).date()
-        report_papers = papers_for_report(conn, report_date=None, limit=settings.report_limit)
+        report_papers = papers_for_report(conn, report_date=None, limit=None)
         report = build_report(report_papers, report_date, errors)
         write_report_json(report, settings.reports_dir)
         index = publish_static_app(settings.root / "web" / "dist", settings.reports_dir, report)
@@ -97,7 +97,7 @@ def regenerate_latest_report(settings: Settings) -> str:
     conn = connect(settings.database_path)
     try:
         report_date = datetime.now(UTC).date()
-        report_papers = papers_for_report(conn, report_date=None, limit=settings.report_limit)
+        report_papers = papers_for_report(conn, report_date=None, limit=None)
         report = build_report(report_papers, report_date, [])
         write_report_json(report, settings.reports_dir)
         index = publish_static_app(settings.root / "web" / "dist", settings.reports_dir, report)
@@ -108,12 +108,12 @@ def regenerate_latest_report(settings: Settings) -> str:
 
 
 def build_classifier_config(settings: Settings) -> LlmConfig:
-    if not settings.deepseek_api_key:
-        raise ValueError("SCIRSS_DEEPSEEK_API_KEY is required for classification.")
+    if not settings.classifier_api_key:
+        raise ValueError("SCIRSS_CLASSIFIER_API_KEY is required for classification.")
     return LlmConfig(
-        api_key=settings.deepseek_api_key,
+        api_key=settings.classifier_api_key,
         model=settings.classifier_model,
-        base_url=settings.deepseek_base_url,
+        base_url=settings.classifier_base_url,
         thinking=settings.classifier_thinking,
     )
 

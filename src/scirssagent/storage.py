@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS papers (
   abstract TEXT,
   published_date TEXT,
   first_seen_at TEXT NOT NULL,
+  read_at TEXT,
   last_checked_at TEXT NOT NULL,
   raw_json TEXT NOT NULL
 );
@@ -104,6 +105,9 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    paper_columns = {row["name"] for row in conn.execute("PRAGMA table_info(papers)").fetchall()}
+    if "read_at" not in paper_columns:
+        conn.execute("ALTER TABLE papers ADD COLUMN read_at TEXT")
     columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(classifications)").fetchall()
     }
@@ -193,6 +197,22 @@ def latest_classification(conn: sqlite3.Connection, paper_id: int) -> Classifica
             "translated_title_zh": row["translated_title_zh"],
         }
     )
+
+
+def mark_paper_read(conn: sqlite3.Connection, paper_id: int) -> datetime:
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        """
+        UPDATE papers
+        SET read_at = COALESCE(read_at, ?)
+        WHERE id = ?
+        """,
+        (now, paper_id),
+    )
+    row = conn.execute("SELECT read_at FROM papers WHERE id = ?", (paper_id,)).fetchone()
+    if row is None or row["read_at"] is None:
+        raise ValueError("Failed to persist read status.")
+    return datetime.fromisoformat(row["read_at"])
 
 
 def latest_classification_row(conn: sqlite3.Connection, paper_id: int) -> sqlite3.Row | None:
@@ -563,6 +583,7 @@ def paper_from_row(row: sqlite3.Row) -> Paper:
         abstract=row["abstract"],
         published_date=date.fromisoformat(row["published_date"]) if row["published_date"] else None,
         first_seen_at=datetime.fromisoformat(row["first_seen_at"]),
+        read_at=datetime.fromisoformat(row["read_at"]) if row["read_at"] else None,
         raw=json.loads(row["raw_json"]),
     )
 
@@ -570,13 +591,15 @@ def paper_from_row(row: sqlite3.Row) -> Paper:
 def papers_for_report(
     conn: sqlite3.Connection,
     report_date: date | None = None,
-    limit: int = 500,
+    limit: int | None = None,
 ) -> list[ReportPaper]:
     if report_date:
         rows = conn.execute(
             "SELECT * FROM papers WHERE date(first_seen_at) = ? ORDER BY first_seen_at DESC",
             (report_date.isoformat(),),
         ).fetchall()
+    elif limit is None:
+        rows = conn.execute("SELECT * FROM papers ORDER BY first_seen_at DESC").fetchall()
     else:
         rows = conn.execute(
             "SELECT * FROM papers ORDER BY first_seen_at DESC LIMIT ?",
