@@ -5,6 +5,7 @@ import {
   applyProfileProposal,
   bootstrapProfile,
   createFeedback,
+  deleteFeedback,
   fetchCurrentProfile,
   fetchFeedback,
   fetchJob,
@@ -679,6 +680,7 @@ function AdminPanel({
   onReclassifyRecent,
   onReclassifyFeedback,
   onReclassifyAll,
+  onDeleteFeedback,
   onRefreshReport,
 }: {
   open: boolean;
@@ -694,6 +696,7 @@ function AdminPanel({
   onReclassifyRecent: () => void;
   onReclassifyFeedback: () => void;
   onReclassifyAll: () => void;
+  onDeleteFeedback: (id: number) => void;
   onRefreshReport: () => void;
 }) {
   if (!open) {
@@ -828,6 +831,13 @@ function AdminPanel({
                           Used in profile
                         </Chip>
                       ) : null}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onPress={() => onDeleteFeedback(item.id)}
+                      >
+                        Delete
+                      </Button>
                     </div>
                   </Card.Content>
                 </Card>
@@ -1070,6 +1080,16 @@ export function App() {
     }
   };
 
+  const handleDeleteFeedback = async (feedbackId: number) => {
+    try {
+      await deleteFeedback(feedbackId);
+      await Promise.all([refreshReport(), refreshFeedback(), refreshProposals()]);
+      setNotice("Feedback deleted.");
+    } catch (error) {
+      setLoadError((error as Error).message);
+    }
+  };
+
   const registerJob = (job: JobInfo, openAdmin = true) => {
     setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
     if (openAdmin) {
@@ -1182,6 +1202,7 @@ export function App() {
         onReclassifyRecent={() => void handleReclassify("recent")}
         onReclassifyFeedback={() => void handleReclassify("feedback")}
         onReclassifyAll={() => void handleReclassify("all")}
+        onDeleteFeedback={(id) => void handleDeleteFeedback(id)}
         onRefreshReport={() => void handleRunAdminJob("/api/admin/report/latest")}
       />
       <FeedbackModal

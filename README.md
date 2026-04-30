@@ -136,3 +136,7 @@ pnpm --dir web build
 Use `uv run scirssagent init-task --print-only` to print a PowerShell command for creating a daily 10:00 task. Review it before running.
 
 See `AGENTS.md` for environment notes, secret handling, and repository conventions.
+
+## License
+
+MIT. See [LICENSE](/D:/Codes/Projects/SciRSSAgent/LICENSE).

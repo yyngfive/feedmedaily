@@ -36,6 +36,8 @@ from scirssagent.storage import (
     all_paper_ids,
     apply_profile_proposal,
     connect,
+    delete_feedback,
+    feedback_by_id,
     feedback_paper_ids,
     latest_classification,
     latest_zotero_status,
@@ -152,6 +154,20 @@ def create_app() -> FastAPI:
             )
             conn.commit()
             return feedback.model_dump(mode="json")
+        finally:
+            conn.close()
+
+    @app.delete("/api/feedback/{feedback_id}")
+    def api_feedback_delete(feedback_id: int) -> dict[str, object]:
+        settings = load_settings()
+        conn = connect(settings.database_path)
+        try:
+            feedback = feedback_by_id(conn, feedback_id)
+            if feedback is None:
+                raise HTTPException(status_code=404, detail="Feedback not found.")
+            delete_feedback(conn, feedback_id)
+            conn.commit()
+            return {"deleted": True, "feedback_id": feedback_id}
         finally:
             conn.close()
 

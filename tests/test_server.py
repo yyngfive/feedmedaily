@@ -113,6 +113,51 @@ def test_profile_bootstrap_launches_job(monkeypatch) -> None:
     assert launched["running_message"] == "Generating the initial classification profile proposal."
 
 
+def test_feedback_delete_api_removes_feedback(monkeypatch) -> None:
+    root = _project_root("feedback-delete")
+    _bootstrap_root(root)
+    write_profile(root / "data" / "classification_profile.json", _profile("Delete profile"))
+
+    conn = connect(root / "data" / "literature.sqlite")
+    paper_id, _is_new = upsert_paper(
+        conn,
+        Paper(
+            source_url="https://example.com/rss",
+            title="Delete feedback paper",
+            url="https://example.com/delete-feedback",
+        ),
+    )
+    save_classification(
+        conn,
+        paper_id,
+        Classification(
+            relevance=Relevance.INDIRECT,
+            confidence=0.8,
+            reason="Fixture",
+            model="test",
+        ),
+    )
+    feedback = save_feedback(
+        conn,
+        paper_id,
+        Relevance.INDIRECT,
+        Relevance.DIRECT,
+        note="Delete me.",
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.chdir(root)
+    from scirssagent.server import create_app
+
+    client = TestClient(create_app())
+    response = client.delete(f"/api/feedback/{feedback.id}")
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+    assert client.get("/api/feedback").json() == []
+
+
 def test_admin_reclassify_accepts_all_scope(monkeypatch) -> None:
     root = _project_root("reclassify-all")
     _bootstrap_root(root)

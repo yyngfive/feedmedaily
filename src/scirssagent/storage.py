@@ -316,6 +316,10 @@ def list_open_feedback(conn: sqlite3.Connection) -> list[FeedbackRecord]:
     return [item for item in list_feedback(conn) if item.state == FeedbackState.OPEN]
 
 
+def delete_feedback(conn: sqlite3.Connection, feedback_id: int) -> None:
+    conn.execute("DELETE FROM feedback WHERE id = ?", (feedback_id,))
+
+
 def mark_feedback_used(
     conn: sqlite3.Connection,
     feedback_ids: Iterable[int],
@@ -339,11 +343,11 @@ def latest_feedback_status(conn: sqlite3.Connection, paper_id: int) -> FeedbackS
         """
         SELECT *
         FROM feedback
-        WHERE paper_id = ?
+        WHERE paper_id = ? AND state = ?
         ORDER BY created_at DESC, id DESC
         LIMIT 1
         """,
-        (paper_id,),
+        (paper_id, FeedbackState.OPEN.value),
     ).fetchone()
     if row is None:
         return None

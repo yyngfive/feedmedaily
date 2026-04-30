@@ -75,6 +75,13 @@ export async function createFeedback(input: {
   return (await response.json()) as FeedbackRecord;
 }
 
+export async function deleteFeedback(feedbackId: number): Promise<void> {
+  const response = await fetch(`/api/feedback/${feedbackId}`, {method: "DELETE"});
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+}
+
 export async function fetchProfileProposals(): Promise<ProfileProposal[]> {
   const response = await fetch("/api/profile/proposals");
   if (!response.ok) {

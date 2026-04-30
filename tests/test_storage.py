@@ -14,6 +14,7 @@ from scirssagent.models import (
 from scirssagent.storage import (
     connect,
     latest_zotero_status,
+    mark_feedback_used,
     papers_for_report,
     save_classification,
     save_feedback,
@@ -91,6 +92,39 @@ def test_report_includes_feedback_and_zotero_status() -> None:
     assert report_paper.feedback_status.used_in_profile is False
     assert report_paper.zotero_status is not None
     assert report_paper.zotero_status.saved is True
+
+
+def test_report_hides_used_feedback_status() -> None:
+    conn = connect(":memory:")
+    paper = Paper(
+        source_url="https://example.com/rss",
+        title="Used feedback paper",
+        url="https://example.com/used-feedback",
+    )
+    paper_id, _is_new = upsert_paper(conn, paper)
+    save_classification(
+        conn,
+        paper_id,
+        Classification(
+            relevance=Relevance.INDIRECT,
+            confidence=0.8,
+            reason="Fixture",
+            model="test",
+        ),
+    )
+    feedback = save_feedback(
+        conn,
+        paper_id,
+        Relevance.INDIRECT,
+        Relevance.DIRECT,
+        note="Should be direct.",
+    )
+    mark_feedback_used(conn, [feedback.id])
+    conn.commit()
+
+    report_paper = papers_for_report(conn, limit=1)[0]
+
+    assert report_paper.feedback_status is None
 
 
 def test_profile_proposal_round_trip() -> None:
