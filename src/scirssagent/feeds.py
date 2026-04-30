@@ -93,19 +93,20 @@ def parse_rss(root: ElementTree.Element, source_url: str) -> list[Paper]:
         return []
     feed_title = child_text(channel, "title")
     papers: list[Paper] = []
-    for item in children(channel, "item"):
+    items = children(channel, "item")
+    if not items:
+        items = children(root, "item")
+    for item in items:
         title = child_text(item, "title")
         link = child_text(item, "link", "guid")
         if not title or not link:
             continue
         authors = [
-            value
-            for value in [
-                child_text(item, f"{DC}creator"),
-                child_text(item, "author"),
-            ]
-            if value
+            value for value in (text(node) for node in children(item, f"{DC}creator")) if value
         ]
+        fallback_author = child_text(item, "author")
+        if fallback_author and fallback_author not in authors:
+            authors.append(fallback_author)
         abstract = child_text(item, "description", f"{CONTENT}encoded")
         doi = entry_doi(
             child_text(item, f"{PRISM}doi"),

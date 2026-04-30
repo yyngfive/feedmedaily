@@ -51,7 +51,8 @@ def patch_index_for_embedded_data(index_path: Path) -> None:
     if "report-data.js" in text:
         return
     if marker in text:
-        text = text.replace(marker, '<script src="./report-data.js"></script>\n    <script type="module"', 1)
+        replacement = '<script src="./report-data.js"></script>\n    <script type="module"'
+        text = text.replace(marker, replacement, 1)
     else:
         text = text.replace("</head>", '  <script src="./report-data.js"></script>\n  </head>')
     index_path.write_text(text, encoding="utf-8")

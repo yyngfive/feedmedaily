@@ -7,7 +7,20 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from scirssagent.metadata import paper_key
-from scirssagent.models import Classification, Paper, ReportPaper
+from scirssagent.models import (
+    Classification,
+    ClassificationProfile,
+    FeedbackRecord,
+    FeedbackState,
+    FeedbackStatus,
+    Paper,
+    ProfileProposal,
+    ProfileProposalState,
+    Relevance,
+    ReportPaper,
+    ZoteroSaveState,
+    ZoteroStatus,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -41,8 +54,47 @@ CREATE TABLE IF NOT EXISTS classifications (
   FOREIGN KEY (paper_id) REFERENCES papers(id)
 );
 
+CREATE TABLE IF NOT EXISTS feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  paper_id INTEGER NOT NULL,
+  original_relevance TEXT NOT NULL,
+  corrected_relevance TEXT NOT NULL,
+  note TEXT,
+  state TEXT NOT NULL DEFAULT 'open',
+  used_in_prompt INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+
+CREATE TABLE IF NOT EXISTS profile_proposals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  summary TEXT NOT NULL,
+  proposed_profile_json TEXT NOT NULL,
+  source_feedback_ids_json TEXT NOT NULL,
+  model TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  applied_at TEXT,
+  rejected_at TEXT,
+  applied_version INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS zotero_saves (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  paper_id INTEGER NOT NULL UNIQUE,
+  state TEXT NOT NULL,
+  item_key TEXT,
+  error_message TEXT,
+  attempted_at TEXT NOT NULL,
+  saved_at TEXT,
+  FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_papers_first_seen_at ON papers(first_seen_at);
 CREATE INDEX IF NOT EXISTS idx_classifications_paper_id ON classifications(paper_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_paper_id ON feedback(paper_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedback(created_at);
+CREATE INDEX IF NOT EXISTS idx_profile_proposals_created_at ON profile_proposals(created_at);
 """
 
 
@@ -143,6 +195,18 @@ def latest_classification(conn: sqlite3.Connection, paper_id: int) -> Classifica
     )
 
 
+def latest_classification_row(conn: sqlite3.Connection, paper_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT * FROM classifications
+        WHERE paper_id = ?
+        ORDER BY classified_at DESC, id DESC
+        LIMIT 1
+        """,
+        (paper_id,),
+    ).fetchone()
+
+
 def save_classification(
     conn: sqlite3.Connection, paper_id: int, classification: Classification
 ) -> None:
@@ -168,6 +232,316 @@ def save_classification(
     )
 
 
+def save_feedback(
+    conn: sqlite3.Connection,
+    paper_id: int,
+    original_relevance: Relevance,
+    corrected_relevance: Relevance,
+    note: str | None = None,
+) -> FeedbackRecord:
+    cursor = conn.execute(
+        """
+        INSERT INTO feedback (
+          paper_id, original_relevance, corrected_relevance, note, state, used_in_prompt, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            paper_id,
+            original_relevance.value,
+            corrected_relevance.value,
+            note,
+            FeedbackState.OPEN.value,
+            0,
+            datetime.now(UTC).isoformat(),
+        ),
+    )
+    row = feedback_by_id(conn, int(cursor.lastrowid))
+    if row is None:
+        raise ValueError("Failed to reload saved feedback row.")
+    return row
+
+
+def feedback_by_id(conn: sqlite3.Connection, feedback_id: int) -> FeedbackRecord | None:
+    row = conn.execute(
+        """
+        SELECT f.*, p.title AS paper_title
+        FROM feedback f
+        JOIN papers p ON p.id = f.paper_id
+        WHERE f.id = ?
+        """,
+        (feedback_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return FeedbackRecord(
+        id=int(row["id"]),
+        paper_id=int(row["paper_id"]),
+        paper_title=row["paper_title"],
+        original_relevance=Relevance(row["original_relevance"]),
+        corrected_relevance=Relevance(row["corrected_relevance"]),
+        note=row["note"],
+        state=FeedbackState(row["state"]),
+        used_in_profile=bool(row["used_in_prompt"]),
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )
+
+
+def list_feedback(conn: sqlite3.Connection) -> list[FeedbackRecord]:
+    rows = conn.execute(
+        """
+        SELECT f.*, p.title AS paper_title
+        FROM feedback f
+        JOIN papers p ON p.id = f.paper_id
+        ORDER BY f.created_at DESC, f.id DESC
+        """
+    ).fetchall()
+    return [
+        FeedbackRecord(
+            id=int(row["id"]),
+            paper_id=int(row["paper_id"]),
+            paper_title=row["paper_title"],
+            original_relevance=Relevance(row["original_relevance"]),
+            corrected_relevance=Relevance(row["corrected_relevance"]),
+            note=row["note"],
+            state=FeedbackState(row["state"]),
+            used_in_profile=bool(row["used_in_prompt"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+        for row in rows
+    ]
+
+
+def list_open_feedback(conn: sqlite3.Connection) -> list[FeedbackRecord]:
+    return [item for item in list_feedback(conn) if item.state == FeedbackState.OPEN]
+
+
+def mark_feedback_used(
+    conn: sqlite3.Connection,
+    feedback_ids: Iterable[int],
+    *,
+    state: FeedbackState = FeedbackState.USED,
+) -> None:
+    for feedback_id in feedback_ids:
+        conn.execute(
+            """
+            UPDATE feedback
+            SET used_in_prompt = 1,
+                state = ?
+            WHERE id = ?
+            """,
+            (state.value, feedback_id),
+        )
+
+
+def latest_feedback_status(conn: sqlite3.Connection, paper_id: int) -> FeedbackStatus | None:
+    row = conn.execute(
+        """
+        SELECT *
+        FROM feedback
+        WHERE paper_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        (paper_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return FeedbackStatus(
+        has_feedback=True,
+        corrected_relevance=Relevance(row["corrected_relevance"]),
+        note=row["note"],
+        latest_feedback_at=datetime.fromisoformat(row["created_at"]),
+        state=FeedbackState(row["state"]),
+        used_in_profile=bool(row["used_in_prompt"]),
+    )
+
+
+def save_profile_proposal(
+    conn: sqlite3.Connection,
+    *,
+    summary: str,
+    proposed_profile: ClassificationProfile,
+    source_feedback_ids: list[int],
+    model: str,
+) -> ProfileProposal:
+    cursor = conn.execute(
+        """
+        INSERT INTO profile_proposals (
+          summary, proposed_profile_json, source_feedback_ids_json, model, state, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            summary,
+            json.dumps(proposed_profile.model_dump(mode="json"), ensure_ascii=False),
+            json.dumps(source_feedback_ids),
+            model,
+            ProfileProposalState.PENDING.value,
+            datetime.now(UTC).isoformat(),
+        ),
+    )
+    proposal = profile_proposal_by_id(conn, int(cursor.lastrowid))
+    if proposal is None:
+        raise ValueError("Failed to reload saved profile proposal.")
+    return proposal
+
+
+def profile_proposal_by_id(conn: sqlite3.Connection, proposal_id: int) -> ProfileProposal | None:
+    row = conn.execute(
+        "SELECT * FROM profile_proposals WHERE id = ?",
+        (proposal_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return ProfileProposal(
+        id=int(row["id"]),
+        summary=row["summary"],
+        proposed_profile=ClassificationProfile.model_validate(
+            json.loads(row["proposed_profile_json"])
+        ),
+        source_feedback_ids=[int(item) for item in json.loads(row["source_feedback_ids_json"])],
+        model=row["model"],
+        state=ProfileProposalState(row["state"]),
+        created_at=datetime.fromisoformat(row["created_at"]),
+        applied_at=datetime.fromisoformat(row["applied_at"]) if row["applied_at"] else None,
+        rejected_at=datetime.fromisoformat(row["rejected_at"]) if row["rejected_at"] else None,
+        applied_version=row["applied_version"],
+    )
+
+
+def list_profile_proposals(conn: sqlite3.Connection) -> list[ProfileProposal]:
+    rows = conn.execute(
+        "SELECT id FROM profile_proposals ORDER BY created_at DESC, id DESC"
+    ).fetchall()
+    proposals: list[ProfileProposal] = []
+    for row in rows:
+        proposal = profile_proposal_by_id(conn, int(row["id"]))
+        if proposal is not None:
+            proposals.append(proposal)
+    return proposals
+
+
+def next_profile_version(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT MAX(applied_version) AS version FROM profile_proposals").fetchone()
+    current = int(row["version"] or 0)
+    return current + 1
+
+
+def apply_profile_proposal(conn: sqlite3.Connection, proposal_id: int, version: int) -> None:
+    conn.execute(
+        """
+        UPDATE profile_proposals
+        SET state = ?, applied_at = ?, applied_version = ?, rejected_at = NULL
+        WHERE id = ?
+        """,
+        (
+            ProfileProposalState.APPLIED.value,
+            datetime.now(UTC).isoformat(),
+            version,
+            proposal_id,
+        ),
+    )
+
+
+def reject_profile_proposal(conn: sqlite3.Connection, proposal_id: int) -> None:
+    conn.execute(
+        """
+        UPDATE profile_proposals
+        SET state = ?, rejected_at = ?
+        WHERE id = ?
+        """,
+        (
+            ProfileProposalState.REJECTED.value,
+            datetime.now(UTC).isoformat(),
+            proposal_id,
+        ),
+    )
+
+
+def upsert_zotero_status(
+    conn: sqlite3.Connection,
+    paper_id: int,
+    *,
+    state: ZoteroSaveState,
+    item_key: str | None = None,
+    error_message: str | None = None,
+) -> ZoteroStatus:
+    now = datetime.now(UTC).isoformat()
+    saved_at = now if state == ZoteroSaveState.SAVED else None
+    conn.execute(
+        """
+        INSERT INTO zotero_saves (paper_id, state, item_key, error_message, attempted_at, saved_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(paper_id) DO UPDATE SET
+          state = excluded.state,
+          item_key = excluded.item_key,
+          error_message = excluded.error_message,
+          attempted_at = excluded.attempted_at,
+          saved_at = excluded.saved_at
+        """,
+        (paper_id, state.value, item_key, error_message, now, saved_at),
+    )
+    status = latest_zotero_status(conn, paper_id)
+    if status is None:
+        raise ValueError("Failed to reload Zotero save status.")
+    return status
+
+
+def latest_zotero_status(conn: sqlite3.Connection, paper_id: int) -> ZoteroStatus | None:
+    row = conn.execute(
+        "SELECT * FROM zotero_saves WHERE paper_id = ?",
+        (paper_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    state = ZoteroSaveState(row["state"])
+    return ZoteroStatus(
+        state=state,
+        saved=state == ZoteroSaveState.SAVED,
+        item_key=row["item_key"],
+        last_error=row["error_message"],
+        attempted_at=datetime.fromisoformat(row["attempted_at"]) if row["attempted_at"] else None,
+        saved_at=datetime.fromisoformat(row["saved_at"]) if row["saved_at"] else None,
+    )
+
+
+def paper_by_id(conn: sqlite3.Connection, paper_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone()
+
+
+def recent_paper_ids(conn: sqlite3.Connection, limit: int) -> list[int]:
+    rows = conn.execute(
+        "SELECT id FROM papers ORDER BY first_seen_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [int(row["id"]) for row in rows]
+
+
+def feedback_paper_ids(conn: sqlite3.Connection) -> list[int]:
+    rows = conn.execute(
+        "SELECT DISTINCT paper_id FROM feedback ORDER BY created_at DESC, id DESC"
+    ).fetchall()
+    return [int(row["paper_id"]) for row in rows]
+
+
+def paper_ids_for_feedback_ids(conn: sqlite3.Connection, feedback_ids: Iterable[int]) -> list[int]:
+    ids = list(feedback_ids)
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT paper_id
+        FROM feedback
+        WHERE id IN ({placeholders})
+        ORDER BY created_at DESC, id DESC
+        """,
+        ids,
+    ).fetchall()
+    return [int(row["paper_id"]) for row in rows]
+
+
 def paper_from_row(row: sqlite3.Row) -> Paper:
     return Paper(
         source_url=row["source_url"],
@@ -187,6 +561,7 @@ def paper_from_row(row: sqlite3.Row) -> Paper:
 def papers_for_report(
     conn: sqlite3.Connection,
     report_date: date | None = None,
+    limit: int = 500,
 ) -> list[ReportPaper]:
     if report_date:
         rows = conn.execute(
@@ -194,7 +569,10 @@ def papers_for_report(
             (report_date.isoformat(),),
         ).fetchall()
     else:
-        rows = conn.execute("SELECT * FROM papers ORDER BY first_seen_at DESC LIMIT 200").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM papers ORDER BY first_seen_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
     report_papers: list[ReportPaper] = []
     for row in rows:
         classification = latest_classification(conn, int(row["id"]))
@@ -207,6 +585,8 @@ def papers_for_report(
                 id=int(row["id"]),
                 classification=classification,
                 seen_date=datetime.fromisoformat(row["first_seen_at"]).date(),
+                feedback_status=latest_feedback_status(conn, int(row["id"])),
+                zotero_status=latest_zotero_status(conn, int(row["id"])),
             )
         )
     return report_papers
