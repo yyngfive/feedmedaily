@@ -4,6 +4,7 @@
 .uv-python/
 .pip-audit-cache/
 .pnpm-store/
+.npm-cache/
 pytest-cache-files-*/
 __pycache__/
 .pytest_cache/
@@ -14,6 +15,7 @@ pytest_tmp/
 
 .env
 .env.*
+!.env.example
 
 node_modules/
 web/dist/

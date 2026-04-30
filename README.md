@@ -8,7 +8,6 @@ SciRSSAgent monitors journal RSS feeds, stores paper metadata in SQLite, classif
 - `tests/`: backend tests
 - `web/`: Vite + React + TypeScript UI
 - `data/rss_feeds.json`: structured RSS feed subscriptions used by the app
-- `RSS.txt`: legacy fallback feed list, still read when the JSON file does not exist
 - `data/literature.sqlite`: local paper database
 - `data/classification_profile.json`: active user classification profile (local only, Git-ignored)
 - `reports/data/latest.json`: latest report data
@@ -27,20 +26,21 @@ SciRSSAgent monitors journal RSS feeds, stores paper metadata in SQLite, classif
 - `cli.py`: expose `run`, `report`, `experiment`, `serve`, and scheduled-task commands
 
 Current flow:
-`data/rss_feeds.json` -> feed fetch -> paper dedupe/upsert -> metadata enrichment -> model A classification using `classification_profile.json` -> SQLite classifications -> report JSON -> static report or FastAPI app
+`data/rss_feeds.json` -> feed fetch -> paper dedupe/upsert -> metadata enrichment -> classifier model classification using `classification_profile.json` -> SQLite classifications -> report JSON -> static report or FastAPI app
 
 ## Web App Flow
 
 The FastAPI-hosted app is the primary interface:
 
 1. If no profile exists, onboarding asks for a natural-language description of research interests.
-2. Model B generates an initial profile proposal.
+2. The profile model generates an initial profile proposal.
 3. After approval, the profile is written to `data/classification_profile.json`.
-4. Model A uses that profile for future classifications.
+4. The classifier model uses that profile for future classifications.
 5. User feedback can trigger profile proposals; applying a proposal updates the profile and reclassifies the linked feedback papers.
 6. Manual reclassification is available for recent papers, feedback-linked papers, or the full local library.
-7. The main paper list defaults to unread papers from the last 30 days; opening a paper marks it as read persistently.
-8. Feed subscriptions can be edited from the admin panel and are saved as structured JSON.
+7. After a profile exists, the app enters a feed-setup state until at least one RSS subscription is saved.
+8. The main paper list defaults to unread papers from the last 30 days; cards are read-only previews and actions live in the detail panel on the right.
+9. Feed subscriptions can be edited from the admin panel and are saved as structured JSON in `data/rss_feeds.json`.
 
 Static export is still supported:
 `pnpm --dir web build` writes `web/dist/` -> Python publishes `reports/latest/` -> browser opens local `index.html`
@@ -56,6 +56,25 @@ uv run scirssagent serve
 
 Open `http://127.0.0.1:8000` for the interactive app.
 
+Before the first run, create a local `.env` file. The easiest way is:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+For a fresh clone, the guided setup is:
+
+1. Copy `.env.example` to `.env` and fill in your model credentials.
+2. Run `uv sync`.
+3. Run `pnpm --dir web install`.
+4. Run `pnpm --dir web build`.
+5. Start the app with `uv run scirssagent serve`.
+6. Open the app and create your classification profile.
+7. Open Admin and add one or more RSS feeds.
+8. Save feeds to create `data/rss_feeds.json`.
+9. Run `Run fetch + classify`, or wait for your scheduled task.
+10. Review new papers, use the right-side detail panel actions, and optionally save selected papers to Zotero.
+
 To fetch feeds and publish a fresh report:
 
 ```powershell
@@ -64,16 +83,17 @@ uv run scirssagent run --once
 
 ## Configuration
 
-Core `.env` settings:
+Recommended `.env` settings:
 
 ```dotenv
-SCIRSS_DEEPSEEK_API_KEY=...
-SCIRSS_DEEPSEEK_BASE_URL=https://api.deepseek.com
-
+SCIRSS_CLASSIFIER_API_KEY=...
+SCIRSS_CLASSIFIER_BASE_URL=https://api.deepseek.com
 SCIRSS_CLASSIFIER_MODEL=deepseek-v4-flash
 SCIRSS_CLASSIFIER_THINKING=disabled
 SCIRSS_CLASSIFIER_BATCH_SIZE=10
 
+SCIRSS_PROFILE_API_KEY=...
+SCIRSS_PROFILE_BASE_URL=https://api.deepseek.com
 SCIRSS_PROFILE_MODEL=deepseek-v4-pro
 SCIRSS_PROFILE_THINKING=enabled
 SCIRSS_PROFILE_PATH=data/classification_profile.json
@@ -86,6 +106,43 @@ SCIRSS_ZOTERO_COLLECTION_KEY=
 SCIRSS_SERVER_HOST=127.0.0.1
 SCIRSS_SERVER_PORT=8000
 ```
+
+Notes:
+
+- `SCIRSS_CLASSIFIER_*` is used for paper classification.
+- `SCIRSS_PROFILE_*` is used for onboarding, profile generation, and profile revision prompts.
+- `data/rss_feeds.json` is the only feed configuration source.
+- The file is user-local and can be created from the web settings screen.
+- If Zotero is configured, the UI lets the user choose a target collection before saving a paper.
+- If any model request fails because the key, base URL, or upstream provider is wrong, the app surfaces the backend error directly in the UI.
+
+### Zotero Setup
+
+Minimum Zotero settings:
+
+```dotenv
+SCIRSS_ZOTERO_API_KEY=...
+SCIRSS_ZOTERO_LIBRARY_TYPE=user
+SCIRSS_ZOTERO_LIBRARY_ID=1234567
+```
+
+How to find the library ID:
+
+- Personal library: use your Zotero `userID` as `SCIRSS_ZOTERO_LIBRARY_ID`.
+- Group library: set `SCIRSS_ZOTERO_LIBRARY_TYPE=group` and use the `groupID`.
+- Zotero documents this in the Web API basics and API keys pages:
+  - [Zotero Web API Basics](https://www.zotero.org/support/dev/web_api/v3/basics)
+  - [Zotero API Keys](https://www.zotero.org/settings/keys)
+
+### Daily Usage
+
+After setup, the normal workflow is:
+
+1. Open Admin and maintain your RSS feeds.
+2. Run `Run fetch + classify` when you want an immediate refresh, or rely on a scheduled task.
+3. Click a paper card to inspect it in the right-side detail panel.
+4. Use `DOI link`, `Mark as read`, `Save to Zotero`, and `Mark wrong` from the detail panel.
+5. Review feedback and profile proposals from Admin as your interests evolve.
 
 ## Commands
 

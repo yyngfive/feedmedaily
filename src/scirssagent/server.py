@@ -23,6 +23,7 @@ from scirssagent.models import (
     ProfileProposalState,
     Relevance,
     Report,
+    ZoteroCollectionsResponse,
     ZoteroSaveState,
 )
 from scirssagent.pipeline import reclassify_paper_ids, regenerate_latest_report, run_once
@@ -31,6 +32,7 @@ from scirssagent.reporting import build_report
 from scirssagent.services import (
     generate_initial_profile_payload,
     generate_profile_proposal_payload,
+    list_zotero_collections,
     save_paper_to_zotero,
     write_current_profile,
 )
@@ -86,6 +88,10 @@ class PaperReadResponse(BaseModel):
     read_at: datetime
 
 
+class ZoteroSaveRequest(BaseModel):
+    collection_key: str | None = None
+
+
 class JobLaunchResponse(BaseModel):
     job: JobInfo
 
@@ -116,10 +122,7 @@ def create_app() -> FastAPI:
     @app.get("/api/settings/feeds")
     def api_settings_feeds() -> list[dict[str, object]]:
         settings = load_settings()
-        return [
-            item.model_dump(mode="json")
-            for item in load_feed_settings(settings)
-        ]
+        return [item.model_dump(mode="json") for item in load_feed_settings(settings)]
 
     @app.put("/api/settings/feeds")
     def api_settings_feeds_update(payload: FeedSettingsUpdateRequest) -> list[dict[str, object]]:
@@ -313,7 +316,7 @@ def create_app() -> FastAPI:
             conn.close()
 
     @app.post("/api/zotero/save/{paper_id}")
-    def api_zotero_save(paper_id: int) -> dict[str, object]:
+    def api_zotero_save(paper_id: int, payload: ZoteroSaveRequest) -> dict[str, object]:
         settings = load_settings()
         conn = connect(settings.database_path)
         try:
@@ -328,7 +331,12 @@ def create_app() -> FastAPI:
             if current and current.saved:
                 return current.model_dump(mode="json")
             try:
-                _response_text, item_key = save_paper_to_zotero(settings, paper, classification)
+                _response_text, item_key = save_paper_to_zotero(
+                    settings,
+                    paper,
+                    classification,
+                    collection_key=payload.collection_key,
+                )
                 status = upsert_zotero_status(
                     conn,
                     paper_id,
@@ -346,6 +354,14 @@ def create_app() -> FastAPI:
             return status.model_dump(mode="json")
         finally:
             conn.close()
+
+    @app.get("/api/zotero/collections", response_model=ZoteroCollectionsResponse)
+    def api_zotero_collections() -> ZoteroCollectionsResponse:
+        settings = load_settings()
+        try:
+            return list_zotero_collections(settings)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/admin/run", response_model=JobLaunchResponse)
     def api_admin_run() -> JobLaunchResponse:
@@ -397,10 +413,7 @@ def current_report(settings: Settings) -> Report:
 
 
 def load_feed_settings(settings: Settings) -> list[FeedSubscription]:
-    try:
-        return read_feed_subscriptions(settings.feeds_path, settings.legacy_feeds_file)
-    except FileNotFoundError:
-        return []
+    return read_feed_subscriptions(settings.feeds_path)
 
 
 def launch_job(

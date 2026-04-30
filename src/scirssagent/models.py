@@ -118,6 +118,19 @@ class ZoteroStatus(BaseModel):
     saved_at: datetime | None = None
 
 
+class ZoteroCollectionOption(BaseModel):
+    key: str
+    name: str
+    path_label: str
+    parent_key: str | None = None
+    is_default: bool = False
+
+
+class ZoteroCollectionsResponse(BaseModel):
+    collections: list[ZoteroCollectionOption] = Field(default_factory=list)
+    default_collection_key: str | None = None
+
+
 class ReportPaper(Paper):
     id: int
     classification: Classification

@@ -8,6 +8,7 @@ import type {
   ProfileProposal,
   Report,
   Relevance,
+  ZoteroCollectionsResponse,
   ZoteroStatus,
 } from "./types";
 
@@ -15,6 +16,19 @@ declare global {
   interface Window {
     __SCIRSS_REPORT__?: Report;
   }
+}
+
+async function responseErrorMessage(response: Response): Promise<string> {
+  const text = await response.text();
+  try {
+    const payload = JSON.parse(text) as {detail?: string};
+    if (payload.detail) {
+      return payload.detail;
+    }
+  } catch {
+    // Fall back to the raw response body when the payload is not JSON.
+  }
+  return text || `Request failed (${response.status})`;
 }
 
 export function loadEmbeddedReport(): Report | null {
@@ -46,7 +60,7 @@ export async function saveFeedSubscriptions(
     body: JSON.stringify({feeds}),
   });
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(await responseErrorMessage(response));
   }
   return (await response.json()) as FeedSubscription[];
 }
@@ -69,7 +83,7 @@ export async function bootstrapProfile(input: {
     body: JSON.stringify(input),
   });
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(await responseErrorMessage(response));
   }
   const payload = (await response.json()) as {job: JobInfo};
   return payload.job;
@@ -94,7 +108,7 @@ export async function createFeedback(input: {
     body: JSON.stringify(input),
   });
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(await responseErrorMessage(response));
   }
   return (await response.json()) as FeedbackRecord;
 }
@@ -102,7 +116,7 @@ export async function createFeedback(input: {
 export async function deleteFeedback(feedbackId: number): Promise<void> {
   const response = await fetch(`/api/feedback/${feedbackId}`, {method: "DELETE"});
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(await responseErrorMessage(response));
   }
 }
 
@@ -125,7 +139,7 @@ export async function fetchProfileProposals(): Promise<ProfileProposal[]> {
 export async function launchProfileProposalGeneration(): Promise<JobInfo> {
   const response = await fetch("/api/profile/proposals/generate", {method: "POST"});
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(await responseErrorMessage(response));
   }
   const payload = (await response.json()) as {job: JobInfo};
   return payload.job;
@@ -134,7 +148,7 @@ export async function launchProfileProposalGeneration(): Promise<JobInfo> {
 export async function applyProfileProposal(id: number): Promise<ProfileProposal> {
   const response = await fetch(`/api/profile/proposals/${id}/apply`, {method: "POST"});
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(await responseErrorMessage(response));
   }
   return (await response.json()) as ProfileProposal;
 }
@@ -142,15 +156,30 @@ export async function applyProfileProposal(id: number): Promise<ProfileProposal>
 export async function rejectProfileProposal(id: number): Promise<ProfileProposal> {
   const response = await fetch(`/api/profile/proposals/${id}/reject`, {method: "POST"});
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(await responseErrorMessage(response));
   }
   return (await response.json()) as ProfileProposal;
 }
 
-export async function saveToZotero(paperId: number): Promise<ZoteroStatus> {
-  const response = await fetch(`/api/zotero/save/${paperId}`, {method: "POST"});
+export async function fetchZoteroCollections(): Promise<ZoteroCollectionsResponse> {
+  const response = await fetch("/api/zotero/collections");
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as ZoteroCollectionsResponse;
+}
+
+export async function saveToZotero(
+  paperId: number,
+  collectionKey?: string | null,
+): Promise<ZoteroStatus> {
+  const response = await fetch(`/api/zotero/save/${paperId}`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({collection_key: collectionKey ?? null}),
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
   }
   return (await response.json()) as ZoteroStatus;
 }
@@ -160,7 +189,7 @@ export async function launchAdminJob(
 ): Promise<JobInfo> {
   const response = await fetch(path, {method: "POST"});
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(await responseErrorMessage(response));
   }
   const payload = (await response.json()) as {job: JobInfo};
   return payload.job;
@@ -176,7 +205,7 @@ export async function launchReclassifyJob(input: {
     body: JSON.stringify(input),
   });
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(await responseErrorMessage(response));
   }
   const payload = (await response.json()) as {job: JobInfo};
   return payload.job;
@@ -185,7 +214,7 @@ export async function launchReclassifyJob(input: {
 export async function fetchJob(id: string): Promise<JobInfo> {
   const response = await fetch(`/api/admin/jobs/${id}`);
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(await responseErrorMessage(response));
   }
   return (await response.json()) as JobInfo;
 }

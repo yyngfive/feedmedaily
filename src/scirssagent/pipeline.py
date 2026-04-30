@@ -37,7 +37,7 @@ def run_once(
     reclassify: bool = False,
 ) -> str:
     configure_logging(settings)
-    urls = read_feed_urls(settings.feeds_path, settings.legacy_feeds_file)
+    urls = read_feed_urls(settings.feeds_path)
     logging.info("Fetching %s feeds", len(urls))
     papers, errors = fetch_all_feeds(urls)
     if max_papers is not None:
@@ -108,12 +108,12 @@ def regenerate_latest_report(settings: Settings) -> str:
 
 
 def build_classifier_config(settings: Settings) -> LlmConfig:
-    if not settings.deepseek_api_key:
-        raise ValueError("SCIRSS_DEEPSEEK_API_KEY is required for classification.")
+    if not settings.classifier_api_key:
+        raise ValueError("SCIRSS_CLASSIFIER_API_KEY is required for classification.")
     return LlmConfig(
-        api_key=settings.deepseek_api_key,
+        api_key=settings.classifier_api_key,
         model=settings.classifier_model,
-        base_url=settings.deepseek_base_url,
+        base_url=settings.classifier_base_url,
         thinking=settings.classifier_thinking,
     )
 

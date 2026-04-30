@@ -5,10 +5,10 @@ from uuid import uuid4
 from scirssagent.feeds import read_feed_subscriptions, read_feed_urls
 
 
-def test_read_feed_urls_reads_project_seed_file() -> None:
-    urls = read_feed_urls(Path("RSS.txt"))
+def test_read_feed_urls_returns_empty_list_when_json_file_is_missing() -> None:
+    urls = read_feed_urls(_tmp_root("missing") / "rss_feeds.json")
 
-    assert "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=jacsat" in urls
+    assert urls == []
 
 
 def test_read_feed_subscriptions_reads_json_file() -> None:
@@ -30,16 +30,13 @@ def test_read_feed_subscriptions_reads_json_file() -> None:
     assert str(subscriptions[1].url) == "https://www.science.org/rss"
 
 
-def test_read_feed_subscriptions_falls_back_to_legacy_file() -> None:
-    root = _tmp_root("legacy")
+def test_read_feed_subscriptions_returns_empty_list_when_file_is_missing() -> None:
+    root = _tmp_root("missing-subscriptions")
     path = root / "rss_feeds.json"
-    legacy = root / "RSS.txt"
-    legacy.write_text("https://www.nature.com/nature.rss\n", encoding="utf-8")
 
-    subscriptions = read_feed_subscriptions(path, legacy)
+    subscriptions = read_feed_subscriptions(path)
 
-    assert len(subscriptions) == 1
-    assert subscriptions[0].journal == "nature.com"
+    assert subscriptions == []
 
 
 def _tmp_root(name: str) -> Path:

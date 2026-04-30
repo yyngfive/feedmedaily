@@ -1,5 +1,6 @@
 import {Button, Card, Chip} from "@heroui/react";
 import React from "react";
+import {Virtuoso} from "react-virtuoso";
 
 import {
   applyProfileProposal,
@@ -12,6 +13,7 @@ import {
   fetchJob,
   fetchLatestReport,
   fetchProfileProposals,
+  fetchZoteroCollections,
   launchAdminJob,
   launchProfileProposalGeneration,
   launchReclassifyJob,
@@ -31,6 +33,7 @@ import type {
   ProfileProposal,
   Relevance,
   Report,
+  ZoteroCollectionOption,
 } from "./types";
 import {EMPTY_REPORT} from "./types";
 
@@ -72,6 +75,7 @@ const relevanceTone: Record<
   },
 };
 
+// 提取一段适合卡片和详情展示的简短摘要首句。
 function sentence(value?: string | null): string {
   if (!value) {
     return "No abstract text was available for this paper.";
@@ -81,10 +85,12 @@ function sentence(value?: string | null): string {
   return match?.[1] ?? trimmed;
 }
 
+// 统一返回文献用于筛选和展示的主日期，优先使用发表日期。
 function paperDate(paper: Paper): string {
   return paper.published_date ?? paper.seen_date;
 }
 
+// 将作者列表压缩成适合窄卡片展示的一行文本。
 function authorsLine(paper: Paper): string {
   const authors = paper.authors ?? [];
   if (authors.length === 0) {
@@ -96,6 +102,7 @@ function authorsLine(paper: Paper): string {
   return `${authors.slice(0, 3).join(", ")} +${authors.length - 3}`;
 }
 
+// 将 DOI 或原始 URL 规范成可直接打开的外链地址。
 function doiHref(paper: Paper): string {
   if (paper.doi) {
     return `https://doi.org/${paper.doi.replace(/^https?:\/\/doi.org\//i, "")}`;
@@ -103,6 +110,7 @@ function doiHref(paper: Paper): string {
   return paper.url;
 }
 
+// 判断某个日期是否落在相对报告日期的最近 N 天窗口内。
 function isWithinDays(value: string, reportDate: string, days: number): boolean {
   const current = new Date(`${value}T00:00:00`);
   const report = new Date(`${reportDate}T00:00:00`);
@@ -113,6 +121,7 @@ function isWithinDays(value: string, reportDate: string, days: number): boolean 
   return diff >= 0 && diff <= days * 24 * 60 * 60 * 1000;
 }
 
+// 统一处理日期筛选下拉框的时间范围判断。
 function matchesDateFilter(value: string, reportDate: string, filter: DateFilter): boolean {
   if (filter === "all") {
     return true;
@@ -129,6 +138,7 @@ function matchesDateFilter(value: string, reportDate: string, filter: DateFilter
   return isWithinDays(value, reportDate, 183);
 }
 
+// 统计当前筛选结果中三类相关性的数量，用于左侧卡片和顶部 tab。
 function relevanceCounts(papers: Paper[]): Record<Relevance, number> {
   return papers.reduce<Record<Relevance, number>>(
     (counts, paper) => {
@@ -139,6 +149,7 @@ function relevanceCounts(papers: Paper[]): Record<Relevance, number> {
   );
 }
 
+// 将用户反馈状态压缩成卡片上可读的一行提示。
 function feedbackLabel(paper: Paper): string | null {
   if (!paper.feedback_status?.has_feedback || !paper.feedback_status.corrected_relevance) {
     return null;
@@ -146,6 +157,7 @@ function feedbackLabel(paper: Paper): string | null {
   return `Feedback -> ${relevanceLabel[paper.feedback_status.corrected_relevance]}`;
 }
 
+// 为后台任务提供一个稳定的人类可读状态文案。
 function statusMessage(job: JobInfo): string {
   if (job.error) {
     return job.error;
@@ -156,10 +168,36 @@ function statusMessage(job: JobInfo): string {
   return job.status;
 }
 
+// 统一原生 select 的样式，避免页面上多个筛选器分散定义。
 function nativeSelectClassName(): string {
   return "w-full rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm";
 }
 
+// 复用的空状态卡片，用来承接首次配置和无结果等场景。
+function EmptyStateCard({
+  eyebrow,
+  title,
+  body,
+  actions,
+}: {
+  eyebrow: string;
+  title: string;
+  body: string;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <Card className="border border-[var(--line)] bg-white p-8 text-center">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
+        {eyebrow}
+      </p>
+      <h2 className="mt-3 text-xl font-semibold text-[var(--ink)]">{title}</h2>
+      <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">{body}</p>
+      {actions ? <div className="mt-5 flex flex-wrap justify-center gap-2">{actions}</div> : null}
+    </Card>
+  );
+}
+
+// 首次建档时展示 profile 生成入口和最新提案预览。
 function Onboarding({
   proposals,
   jobs,
@@ -269,28 +307,22 @@ function Onboarding({
   );
 }
 
+// 中间列表里的文献卡片，承载快速浏览和快捷操作。
 function PaperCard({
   paper,
   profile,
   isSelected,
   isUnread,
   onSelect,
-  onMarkRead,
-  onSave,
-  onMarkWrong,
 }: {
   paper: Paper;
   profile: ClassificationProfile | null;
   isSelected: boolean;
   isUnread: boolean;
   onSelect: () => void;
-  onMarkRead: () => void;
-  onSave: () => void;
-  onMarkWrong: () => void;
 }) {
   const tone = relevanceTone[paper.classification.relevance];
   const feedbackText = feedbackLabel(paper);
-  const zoteroSaved = paper.zotero_status?.saved ?? false;
   const handleSelectKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
@@ -357,36 +389,11 @@ function PaperCard({
           </p>
         </Card.Content>
       </div>
-      <Card.Footer
-        className="flex flex-wrap gap-2"
-        onClickCapture={(event) => event.stopPropagation()}
-        onKeyDownCapture={(event) => event.stopPropagation()}
-      >
-        <Button size="sm" variant="outline" onPress={() => window.open(doiHref(paper), "_blank")}>
-          DOI
-        </Button>
-        <Button size="sm" variant="outline" onPress={onSelect}>
-          Abstract
-        </Button>
-        <Button
-          size="sm"
-          isDisabled={!isUnread}
-          variant={isUnread ? "secondary" : "outline"}
-          onPress={onMarkRead}
-        >
-          {isUnread ? "Mark as read" : "Read"}
-        </Button>
-        <Button size="sm" variant={zoteroSaved ? "secondary" : "tertiary"} onPress={onSave}>
-          {zoteroSaved ? "Saved" : "Save to Zotero"}
-        </Button>
-        <Button size="sm" variant={feedbackText ? "danger-soft" : "ghost"} onPress={onMarkWrong}>
-          Mark wrong
-        </Button>
-      </Card.Footer>
     </Card>
   );
 }
 
+// 右侧详情面板负责展示当前选中文献的完整摘要和操作。
 function DetailPanel({
   paper,
   profile,
@@ -519,6 +526,7 @@ function DetailPanel({
   );
 }
 
+// 错误反馈弹窗负责提交人工纠正标签与说明。
 function FeedbackModal({
   paper,
   value,
@@ -592,6 +600,94 @@ function FeedbackModal({
   );
 }
 
+// Zotero 保存弹窗负责选择目标 collection 并发起保存。
+function ZoteroSaveModal({
+  paper,
+  collections,
+  selectedCollectionKey,
+  loading,
+  saving,
+  error,
+  onCollectionChange,
+  onClose,
+  onSubmit,
+}: {
+  paper: Paper | null;
+  collections: ZoteroCollectionOption[];
+  selectedCollectionKey: string;
+  loading: boolean;
+  saving: boolean;
+  error: string | null;
+  onCollectionChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  if (!paper) {
+    return null;
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4">
+      <div className="w-full max-w-xl rounded-lg border border-[var(--line)] bg-white p-5 shadow-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
+              Zotero
+            </p>
+            <h2 className="mt-2 text-lg font-semibold text-[var(--ink)]">{paper.title}</h2>
+          </div>
+          <Button size="sm" variant="ghost" onPress={onClose}>
+            Close
+          </Button>
+        </div>
+
+        <div className="mt-4 space-y-4">
+          <label className="block text-sm font-medium text-[var(--ink)]">
+            Save into collection
+            <select
+              className={`${nativeSelectClassName()} mt-2`}
+              disabled={loading || saving}
+              value={selectedCollectionKey}
+              onChange={(event) => onCollectionChange(event.target.value)}
+            >
+              <option value="">No collection (save to library only)</option>
+              {collections.map((item) => (
+                <option key={item.key} value={item.key}>
+                  {item.path_label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {loading ? (
+            <div className="rounded-md border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900">
+              Loading Zotero collections...
+            </div>
+          ) : null}
+          {error ? (
+            <div className="rounded-md border border-rose-300 bg-rose-50 p-3 text-sm text-rose-900">
+              {error}
+            </div>
+          ) : null}
+          <div className="rounded-md border border-[var(--line)] bg-slate-50 p-3 text-sm text-[var(--muted)]">
+            If you prefer the browser connector workflow, open the original article first and then
+            use the Zotero browser extension manually.
+          </div>
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button size="sm" variant="ghost" onPress={onClose}>
+            Cancel
+          </Button>
+          <Button isDisabled={loading || saving} size="sm" onPress={onSubmit}>
+            {saving ? "Saving..." : "Save to Zotero"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 在 profile 预览里复用的小规则列表组件。
 function RuleList({title, items}: {title: string; items: string[]}) {
   return (
     <div className="space-y-2">
@@ -611,6 +707,7 @@ function RuleList({title, items}: {title: string; items: string[]}) {
   );
 }
 
+// 将完整 profile proposal 格式化成适合人工审核的长面板。
 function ProfileProposalPreview({proposal}: {proposal: ProfileProposal}) {
   const profile = proposal.proposed_profile;
   return (
@@ -731,9 +828,11 @@ function ProfileProposalPreview({proposal}: {proposal: ProfileProposal}) {
   );
 }
 
+// 管理面板统一承载 feed 设置、后台任务、提案和反馈管理。
 function AdminPanel({
   open,
   profile,
+  hasFeeds,
   feeds,
   feedsSaving,
   feedback,
@@ -756,6 +855,7 @@ function AdminPanel({
 }: {
   open: boolean;
   profile: ClassificationProfile | null;
+  hasFeeds: boolean;
   feeds: FeedSubscription[];
   feedsSaving: boolean;
   feedback: FeedbackRecord[];
@@ -796,8 +896,13 @@ function AdminPanel({
 
         <section className="mt-5 rounded-lg border border-[var(--line)] bg-white p-4">
           <h3 className="text-sm font-semibold text-[var(--ink)]">Actions</h3>
+          {!hasFeeds ? (
+            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+              Add and save at least one RSS feed before running a manual fetch job.
+            </p>
+          ) : null}
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button size="sm" onPress={onRunFeedSync}>
+            <Button isDisabled={!hasFeeds} size="sm" onPress={onRunFeedSync}>
               Run fetch + classify
             </Button>
             <Button size="sm" variant="outline" onPress={onRefreshReport}>
@@ -997,10 +1102,12 @@ function AdminPanel({
   );
 }
 
+// 应用根组件负责衔接数据加载、筛选状态、后台任务和三栏式阅读界面。
 export function App() {
   const [report, setReport] = React.useState<Report>(() => loadEmbeddedReport() ?? EMPTY_REPORT);
   const [profile, setProfile] = React.useState<ClassificationProfile | null>(null);
   const [feeds, setFeeds] = React.useState<FeedSubscription[]>([]);
+  const [feedsLoaded, setFeedsLoaded] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState("");
@@ -1018,6 +1125,12 @@ export function App() {
   const [feedbackValue, setFeedbackValue] = React.useState<Relevance>("indirect");
   const [feedbackNote, setFeedbackNote] = React.useState("");
   const [feedsSaving, setFeedsSaving] = React.useState(false);
+  const [zoteroPaper, setZoteroPaper] = React.useState<Paper | null>(null);
+  const [zoteroCollections, setZoteroCollections] = React.useState<ZoteroCollectionOption[]>([]);
+  const [zoteroCollectionKey, setZoteroCollectionKey] = React.useState("");
+  const [zoteroLoading, setZoteroLoading] = React.useState(false);
+  const [zoteroSaving, setZoteroSaving] = React.useState(false);
+  const [zoteroError, setZoteroError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const deferredQuery = React.useDeferredValue(query);
 
@@ -1048,7 +1161,9 @@ export function App() {
   }, []);
 
   const refreshFeeds = React.useCallback(async () => {
-    setFeeds(await fetchFeedSubscriptions());
+    const nextFeeds = await fetchFeedSubscriptions();
+    setFeeds(nextFeeds);
+    setFeedsLoaded(true);
   }, []);
 
   const refreshProposals = React.useCallback(async () => {
@@ -1071,6 +1186,12 @@ export function App() {
   React.useEffect(() => {
     void refreshAll();
   }, [refreshAll]);
+
+  React.useEffect(() => {
+    if (profile && feedsLoaded && feeds.length === 0) {
+      setAdminOpen(true);
+    }
+  }, [feeds.length, feedsLoaded, profile]);
 
   const runningJobs = React.useMemo(
     () => jobs.filter((job) => job.status === "queued" || job.status === "running"),
@@ -1156,19 +1277,64 @@ export function App() {
     [filteredBase, relevance],
   );
 
-  const visibleTotals = React.useMemo(() => relevanceCounts(filteredBase), [filteredBase]);
+  const needsFeedSetup = Boolean(profile && feedsLoaded && feeds.length === 0);
+  const hasNoFetchedPapers = !needsFeedSetup && feeds.length > 0 && report.papers.length === 0;
+  const visibleBase = React.useMemo(
+    () => (needsFeedSetup ? [] : filteredBase),
+    [filteredBase, needsFeedSetup],
+  );
+  const visibleList = React.useMemo(
+    () => (needsFeedSetup ? [] : filtered),
+    [filtered, needsFeedSetup],
+  );
+  const visibleTotals = React.useMemo(() => relevanceCounts(visibleBase), [visibleBase]);
 
   React.useEffect(() => {
-    if (filtered.length === 0) {
+    if (visibleList.length === 0) {
       setSelectedId(null);
       return;
     }
-    if (!selectedId || !filtered.some((paper) => paper.id === selectedId)) {
-      setSelectedId(filtered[0].id);
+    if (!selectedId || !visibleList.some((paper) => paper.id === selectedId)) {
+      setSelectedId(visibleList[0].id);
     }
-  }, [filtered, report.papers, selectedId]);
+  }, [selectedId, visibleList]);
 
-  const selectedPaper = filtered.find((paper) => paper.id === selectedId) ?? null;
+  React.useEffect(() => {
+    if (!zoteroPaper) {
+      return;
+    }
+    let cancelled = false;
+    setZoteroLoading(true);
+    setZoteroError(null);
+    setZoteroCollections([]);
+    setZoteroCollectionKey("");
+
+    void fetchZoteroCollections()
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+        setZoteroCollections(payload.collections);
+        setZoteroCollectionKey(payload.default_collection_key ?? "");
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setZoteroError((error as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setZoteroLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [zoteroPaper]);
+
+  const selectedPaper = visibleList.find((paper) => paper.id === selectedId) ?? null;
 
   const updatePaper = (paperId: number, updater: (paper: Paper) => Paper) => {
     setReport((current) => ({
@@ -1197,13 +1363,31 @@ export function App() {
     setSelectedId(paper.id);
   };
 
-  const handleSaveToZotero = async (paper: Paper) => {
+  const openZoteroModal = (paper: Paper) => {
+    setZoteroPaper(paper);
+    setZoteroError(null);
+  };
+
+  const handleSaveToZotero = async () => {
+    if (!zoteroPaper) {
+      return;
+    }
     try {
-      const status = await saveToZotero(paper.id);
-      updatePaper(paper.id, (current) => ({...current, zotero_status: status}));
-      setNotice(status.saved ? "Saved to Zotero." : status.last_error ?? "Zotero save updated.");
+      setZoteroSaving(true);
+      const status = await saveToZotero(zoteroPaper.id, zoteroCollectionKey || null);
+      updatePaper(zoteroPaper.id, (current) => ({...current, zotero_status: status}));
+      if (status.saved) {
+        setNotice("Saved to Zotero.");
+        setZoteroPaper(null);
+        setZoteroError(null);
+        return;
+      }
+      setZoteroError(status.last_error ?? "Zotero save updated.");
     } catch (error) {
+      setZoteroError((error as Error).message);
       setLoadError((error as Error).message);
+    } finally {
+      setZoteroSaving(false);
     }
   };
 
@@ -1277,6 +1461,7 @@ export function App() {
       setFeedsSaving(true);
       const saved = await saveFeedSubscriptions(cleaned);
       setFeeds(saved);
+      setFeedsLoaded(true);
       setNotice("Feed subscriptions saved.");
       setLoadError(null);
     } catch (error) {
@@ -1380,6 +1565,7 @@ export function App() {
       <AdminPanel
         open={adminOpen}
         profile={profile}
+        hasFeeds={feeds.length > 0}
         feeds={feeds}
         feedsSaving={feedsSaving}
         feedback={feedbackRecords}
@@ -1409,6 +1595,17 @@ export function App() {
         onClose={() => setFeedbackPaper(null)}
         onSubmit={() => void submitFeedback()}
       />
+      <ZoteroSaveModal
+        paper={zoteroPaper}
+        collections={zoteroCollections}
+        selectedCollectionKey={zoteroCollectionKey}
+        loading={zoteroLoading}
+        saving={zoteroSaving}
+        error={zoteroError}
+        onCollectionChange={setZoteroCollectionKey}
+        onClose={() => setZoteroPaper(null)}
+        onSubmit={() => void handleSaveToZotero()}
+      />
 
       <div className="mx-auto grid max-w-[1500px] gap-4 px-4 py-4 lg:grid-cols-[260px_minmax(0,1fr)_360px]">
         <aside className="space-y-4 rounded-lg border border-[var(--line)] bg-white p-4 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:overflow-auto">
@@ -1418,7 +1615,7 @@ export function App() {
             </p>
             <h1 className="mt-2 text-2xl font-semibold">Paper review</h1>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              {report.report_date} · {filtered.length} shown · {report.papers.length} total
+              {report.report_date} · {visibleList.length} shown · {needsFeedSetup ? 0 : report.papers.length} total
             </p>
             <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
               {profile.meta.name} · v{profile.meta.version}
@@ -1558,9 +1755,7 @@ export function App() {
                       onPress={() => setRelevance(tab.id)}
                     >
                       {tab.label}{" "}
-                      {tab.id === "all"
-                        ? filteredBase.length
-                        : visibleTotals[tab.id]}
+                      {tab.id === "all" ? visibleBase.length : visibleTotals[tab.id]}
                     </Button>
                   ))}
                 </div>
@@ -1568,36 +1763,108 @@ export function App() {
             </div>
           </div>
 
-          {filtered.length === 0 ? (
-            <Card className="p-8 text-center text-sm text-[var(--muted)]">
-              No papers match the current filters.
-            </Card>
+          {needsFeedSetup ? (
+            <EmptyStateCard
+              eyebrow="Feed setup"
+              title="Add RSS feeds before reviewing papers"
+              body="No RSS feed subscriptions are saved yet. Open Admin, add one or more journal feeds, save them, and then run fetch manually or wait for your scheduled job."
+              actions={
+                <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onPress={() => {
+                      if (feeds.length === 0) {
+                        handleAddFeed();
+                      }
+                      setAdminOpen(true);
+                    }}
+                  >
+                    Add first feed
+                  </Button>
+                  <Button size="sm" variant="outline" onPress={() => setAdminOpen(true)}>
+                    Open admin
+                  </Button>
+                </>
+              }
+            />
+          ) : hasNoFetchedPapers ? (
+            <EmptyStateCard
+              eyebrow="Waiting for fetch"
+              title="Feeds are ready, but no papers have been fetched yet"
+              body="Save is complete. You can run a manual fetch right now, or let your scheduled task populate the library automatically."
+              actions={
+                <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onPress={() => void handleRunAdminJob("/api/admin/run")}
+                  >
+                    Run fetch + classify
+                  </Button>
+                  <Button size="sm" variant="outline" onPress={() => setAdminOpen(true)}>
+                    Open admin
+                  </Button>
+                </>
+              }
+            />
+          ) : visibleList.length === 0 ? (
+            <EmptyStateCard
+              eyebrow="No results"
+              title="No papers match the current filters"
+              body="Try broadening the journal, topic, date, or read-status filters to bring more papers back into view."
+              actions={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onPress={() => {
+                    setTopic("all");
+                    setJournal("all");
+                    setDateFilter("30d");
+                    setReadFilter("unread");
+                    setRelevance("all");
+                    setQuery("");
+                  }}
+                >
+                  Reset filters
+                </Button>
+              }
+            />
           ) : (
-            <div className="space-y-3">
-              {filtered.map((paper) => (
-                <PaperCard
-                  key={paper.id}
-                  paper={paper}
-                  profile={profile}
-                  isSelected={paper.id === selectedId}
-                  isUnread={!paper.read_at}
-                  onMarkRead={() => void persistReadStatus(paper.id)}
-                  onMarkWrong={() => openFeedbackModal(paper)}
-                  onSave={() => void handleSaveToZotero(paper)}
-                  onSelect={() => selectPaper(paper)}
-                />
-              ))}
+            <div className="overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--paper)] px-1 py-1">
+              <Virtuoso
+                className="min-h-[420px]"
+                computeItemKey={(index) => visibleList[index].id}
+                increaseViewportBy={{bottom: 480, top: 240}}
+                initialTopMostItemIndex={0}
+                style={{height: "calc(100vh - 13rem)"}}
+                totalCount={visibleList.length}
+                itemContent={(index) => {
+                  const paper = visibleList[index];
+                  return (
+                    <div className="px-1 py-1.5">
+                      <PaperCard
+                        paper={paper}
+                        profile={profile}
+                        isSelected={paper.id === selectedId}
+                        isUnread={!paper.read_at}
+                        onSelect={() => selectPaper(paper)}
+                      />
+                    </div>
+                  );
+                }}
+              />
             </div>
           )}
         </section>
 
         <DetailPanel
-          paper={selectedPaper}
+          paper={needsFeedSetup ? null : selectedPaper}
           profile={profile}
           isUnread={Boolean(selectedPaper && !selectedPaper.read_at)}
           onMarkRead={() => selectedPaper && void persistReadStatus(selectedPaper.id)}
           onMarkWrong={() => selectedPaper && openFeedbackModal(selectedPaper)}
-          onSave={() => selectedPaper && void handleSaveToZotero(selectedPaper)}
+          onSave={() => selectedPaper && openZoteroModal(selectedPaper)}
         />
       </div>
     </main>

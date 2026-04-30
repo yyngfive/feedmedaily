@@ -15,6 +15,8 @@ from scirssagent.models import (
     Relevance,
     RelevanceRules,
     TopicDefinition,
+    ZoteroCollectionOption,
+    ZoteroCollectionsResponse,
     ZoteroSaveState,
 )
 from scirssagent.profiles import write_profile
@@ -83,10 +85,9 @@ def test_report_latest_and_feedback_api(monkeypatch) -> None:
     assert read_response.json()["paper_id"] == paper_id
 
 
-def test_feed_settings_api_reads_legacy_and_writes_json(monkeypatch) -> None:
+def test_feed_settings_api_returns_empty_list_then_writes_json(monkeypatch) -> None:
     root = _project_root("feed-settings")
     _bootstrap_root(root)
-    (root / "RSS.txt").write_text("https://www.nature.com/nature.rss\n", encoding="utf-8")
 
     monkeypatch.chdir(root)
     from scirssagent.server import create_app
@@ -94,7 +95,7 @@ def test_feed_settings_api_reads_legacy_and_writes_json(monkeypatch) -> None:
     client = TestClient(create_app())
     get_response = client.get("/api/settings/feeds")
     assert get_response.status_code == 200
-    assert get_response.json()[0]["journal"] == "nature.com"
+    assert get_response.json() == []
 
     put_response = client.put(
         "/api/settings/feeds",
@@ -314,17 +315,23 @@ def test_zotero_save_api_updates_status(monkeypatch) -> None:
     monkeypatch.chdir(root)
     import scirssagent.server as server_module
 
+    captured: dict[str, object] = {}
+
     monkeypatch.setattr(
         server_module,
         "save_paper_to_zotero",
-        lambda settings, paper, classification: ('{"ok":true}', "ITEM1234"),
+        lambda settings, paper, classification, collection_key=None: (
+            captured.update({"collection_key": collection_key}) or '{"ok":true}',
+            "ITEM1234",
+        ),
     )
     client = TestClient(server_module.create_app())
 
-    response = client.post(f"/api/zotero/save/{paper_id}")
+    response = client.post(f"/api/zotero/save/{paper_id}", json={"collection_key": "COLL123"})
     assert response.status_code == 200
     assert response.json()["state"] == "saved"
     assert response.json()["item_key"] == "ITEM1234"
+    assert captured["collection_key"] == "COLL123"
 
     conn = connect(root / "data" / "literature.sqlite")
     saved = latest_zotero_status(conn, paper_id)
@@ -333,11 +340,72 @@ def test_zotero_save_api_updates_status(monkeypatch) -> None:
     assert saved.state == ZoteroSaveState.SAVED
 
 
+def test_zotero_collections_api_returns_flattened_options(monkeypatch) -> None:
+    root = _project_root("zotero-collections")
+    _bootstrap_root(root)
+
+    monkeypatch.chdir(root)
+    import scirssagent.server as server_module
+
+    monkeypatch.setattr(
+        server_module,
+        "list_zotero_collections",
+        lambda settings: ZoteroCollectionsResponse(
+            collections=[
+                ZoteroCollectionOption(
+                    key="PARENT",
+                    name="Top",
+                    path_label="Top",
+                    parent_key=None,
+                    is_default=False,
+                ),
+                ZoteroCollectionOption(
+                    key="CHILD",
+                    name="Child",
+                    path_label="Top / Child",
+                    parent_key="PARENT",
+                    is_default=True,
+                ),
+            ],
+            default_collection_key="CHILD",
+        ),
+    )
+    client = TestClient(server_module.create_app())
+
+    response = client.get("/api/zotero/collections")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["default_collection_key"] == "CHILD"
+    assert payload["collections"][1]["path_label"] == "Top / Child"
+
+
+def test_zotero_collections_api_returns_400_when_not_configured(monkeypatch) -> None:
+    root = _project_root("zotero-collections-error")
+    _bootstrap_root(root)
+
+    monkeypatch.chdir(root)
+    import scirssagent.server as server_module
+
+    monkeypatch.setattr(
+        server_module,
+        "list_zotero_collections",
+        lambda settings: (_ for _ in ()).throw(
+            ValueError("SCIRSS_ZOTERO_API_KEY is not configured.")
+        ),
+    )
+    client = TestClient(server_module.create_app())
+
+    response = client.get("/api/zotero/collections")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "SCIRSS_ZOTERO_API_KEY is not configured."
+
+
 def _bootstrap_root(root: Path) -> None:
     (root / "data").mkdir(parents=True, exist_ok=True)
     (root / "reports").mkdir(parents=True, exist_ok=True)
     (root / "logs").mkdir(parents=True, exist_ok=True)
-    (root / "RSS.txt").write_text("", encoding="utf-8")
 
 
 def _profile(name: str) -> ClassificationProfile:

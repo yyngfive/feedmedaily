@@ -40,6 +40,19 @@ export type ZoteroStatus = {
   saved_at?: string | null;
 };
 
+export type ZoteroCollectionOption = {
+  key: string;
+  name: string;
+  path_label: string;
+  parent_key?: string | null;
+  is_default: boolean;
+};
+
+export type ZoteroCollectionsResponse = {
+  collections: ZoteroCollectionOption[];
+  default_collection_key?: string | null;
+};
+
 export type Paper = {
   id: number;
   title: string;
