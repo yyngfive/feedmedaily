@@ -7,7 +7,8 @@ SciRSSAgent monitors journal RSS feeds, stores paper metadata in SQLite, classif
 - `src/scirssagent/`: Python backend pipeline, API, storage, and CLI
 - `tests/`: backend tests
 - `web/`: Vite + React + TypeScript UI
-- `RSS.txt`: RSS feed list, one URL per line
+- `data/rss_feeds.json`: structured RSS feed subscriptions used by the app
+- `RSS.txt`: legacy fallback feed list, still read when the JSON file does not exist
 - `data/literature.sqlite`: local paper database
 - `data/classification_profile.json`: active user classification profile (local only, Git-ignored)
 - `reports/data/latest.json`: latest report data
@@ -26,7 +27,7 @@ SciRSSAgent monitors journal RSS feeds, stores paper metadata in SQLite, classif
 - `cli.py`: expose `run`, `report`, `experiment`, `serve`, and scheduled-task commands
 
 Current flow:
-`RSS.txt` -> feed fetch -> paper dedupe/upsert -> metadata enrichment -> model A classification using `classification_profile.json` -> SQLite classifications -> report JSON -> static report or FastAPI app
+`data/rss_feeds.json` -> feed fetch -> paper dedupe/upsert -> metadata enrichment -> model A classification using `classification_profile.json` -> SQLite classifications -> report JSON -> static report or FastAPI app
 
 ## Web App Flow
 
@@ -38,6 +39,8 @@ The FastAPI-hosted app is the primary interface:
 4. Model A uses that profile for future classifications.
 5. User feedback can trigger profile proposals; applying a proposal updates the profile and reclassifies the linked feedback papers.
 6. Manual reclassification is available for recent papers, feedback-linked papers, or the full local library.
+7. The main paper list defaults to unread papers from the last 30 days; opening a paper marks it as read persistently.
+8. Feed subscriptions can be edited from the admin panel and are saved as structured JSON.
 
 Static export is still supported:
 `pnpm --dir web build` writes `web/dist/` -> Python publishes `reports/latest/` -> browser opens local `index.html`

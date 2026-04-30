@@ -25,6 +25,7 @@ web/vite.config.d.ts
 data/*.sqlite
 data/*.sqlite-*
 data/classification_profile.json
+data/rss_feeds.json
 logs/
 reports/
 

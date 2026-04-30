@@ -6,6 +6,7 @@ import {
   bootstrapProfile,
   createFeedback,
   deleteFeedback,
+  fetchFeedSubscriptions,
   fetchCurrentProfile,
   fetchFeedback,
   fetchJob,
@@ -15,12 +16,15 @@ import {
   launchProfileProposalGeneration,
   launchReclassifyJob,
   loadEmbeddedReport,
+  markPaperRead,
   rejectProfileProposal,
+  saveFeedSubscriptions,
   saveToZotero,
   tagLabel,
 } from "./reportData";
 import type {
   ClassificationProfile,
+  FeedSubscription,
   FeedbackRecord,
   JobInfo,
   Paper,
@@ -31,7 +35,8 @@ import type {
 import {EMPTY_REPORT} from "./types";
 
 type RelevanceFilter = "all" | Relevance;
-type DateFilter = "all" | "report" | "7d" | "30d";
+type DateFilter = "all" | "today" | "7d" | "30d" | "180d";
+type ReadFilter = "unread" | "read" | "all";
 
 const relevanceTabs: Array<{id: RelevanceFilter; label: string}> = [
   {id: "all", label: "All"},
@@ -106,6 +111,32 @@ function isWithinDays(value: string, reportDate: string, days: number): boolean 
   }
   const diff = report.getTime() - current.getTime();
   return diff >= 0 && diff <= days * 24 * 60 * 60 * 1000;
+}
+
+function matchesDateFilter(value: string, reportDate: string, filter: DateFilter): boolean {
+  if (filter === "all") {
+    return true;
+  }
+  if (filter === "today") {
+    return value === reportDate;
+  }
+  if (filter === "7d") {
+    return isWithinDays(value, reportDate, 7);
+  }
+  if (filter === "30d") {
+    return isWithinDays(value, reportDate, 30);
+  }
+  return isWithinDays(value, reportDate, 183);
+}
+
+function relevanceCounts(papers: Paper[]): Record<Relevance, number> {
+  return papers.reduce<Record<Relevance, number>>(
+    (counts, paper) => {
+      counts[paper.classification.relevance] += 1;
+      return counts;
+    },
+    {direct: 0, indirect: 0, unrelated: 0},
+  );
 }
 
 function feedbackLabel(paper: Paper): string | null {
@@ -244,6 +275,7 @@ function PaperCard({
   isSelected,
   isUnread,
   onSelect,
+  onMarkRead,
   onSave,
   onMarkWrong,
 }: {
@@ -252,6 +284,7 @@ function PaperCard({
   isSelected: boolean;
   isUnread: boolean;
   onSelect: () => void;
+  onMarkRead: () => void;
   onSave: () => void;
   onMarkWrong: () => void;
 }) {
@@ -319,6 +352,14 @@ function PaperCard({
         <Button size="sm" variant="outline" onPress={onSelect}>
           Abstract
         </Button>
+        <Button
+          size="sm"
+          isDisabled={!isUnread}
+          variant={isUnread ? "secondary" : "outline"}
+          onPress={onMarkRead}
+        >
+          {isUnread ? "Mark as read" : "Read"}
+        </Button>
         <Button size="sm" variant={zoteroSaved ? "secondary" : "tertiary"} onPress={onSave}>
           {zoteroSaved ? "Saved" : "Save to Zotero"}
         </Button>
@@ -337,11 +378,15 @@ function PaperCard({
 function DetailPanel({
   paper,
   profile,
+  isUnread,
+  onMarkRead,
   onSave,
   onMarkWrong,
 }: {
   paper: Paper | null;
   profile: ClassificationProfile | null;
+  isUnread: boolean;
+  onMarkRead: () => void;
   onSave: () => void;
   onMarkWrong: () => void;
 }) {
@@ -438,6 +483,14 @@ function DetailPanel({
       <div className="flex flex-wrap gap-2">
         <Button size="sm" onPress={() => window.open(doiHref(paper), "_blank")}>
           DOI link
+        </Button>
+        <Button
+          size="sm"
+          isDisabled={!isUnread}
+          variant={isUnread ? "secondary" : "outline"}
+          onPress={onMarkRead}
+        >
+          {isUnread ? "Mark as read" : "Read"}
         </Button>
         <Button size="sm" variant={zoteroSaved ? "secondary" : "tertiary"} onPress={onSave}>
           {zoteroSaved ? "Saved" : "Save to Zotero"}
@@ -669,10 +722,16 @@ function ProfileProposalPreview({proposal}: {proposal: ProfileProposal}) {
 function AdminPanel({
   open,
   profile,
+  feeds,
+  feedsSaving,
   feedback,
   jobs,
   proposals,
   onClose,
+  onFeedChange,
+  onAddFeed,
+  onRemoveFeed,
+  onSaveFeeds,
   onGenerateProposal,
   onApplyProposal,
   onRejectProposal,
@@ -685,10 +744,16 @@ function AdminPanel({
 }: {
   open: boolean;
   profile: ClassificationProfile | null;
+  feeds: FeedSubscription[];
+  feedsSaving: boolean;
   feedback: FeedbackRecord[];
   jobs: JobInfo[];
   proposals: ProfileProposal[];
   onClose: () => void;
+  onFeedChange: (index: number, field: "journal" | "url", value: string) => void;
+  onAddFeed: () => void;
+  onRemoveFeed: (index: number) => void;
+  onSaveFeeds: () => void;
   onGenerateProposal: () => void;
   onApplyProposal: (id: number) => void;
   onRejectProposal: (id: number) => void;
@@ -738,6 +803,53 @@ function AdminPanel({
             <Button size="sm" variant="secondary" onPress={onGenerateProposal}>
               Generate profile proposal
             </Button>
+          </div>
+        </section>
+
+        <section className="mt-4 rounded-lg border border-[var(--line)] bg-white p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-[var(--ink)]">Feed subscriptions</h3>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onPress={onAddFeed}>
+                Add feed
+              </Button>
+              <Button size="sm" isDisabled={feedsSaving} onPress={onSaveFeeds}>
+                {feedsSaving ? "Saving..." : "Save feeds"}
+              </Button>
+            </div>
+          </div>
+          <div className="mt-3 space-y-3">
+            {feeds.length === 0 ? (
+              <p className="text-sm text-[var(--muted)]">No RSS feeds configured yet.</p>
+            ) : (
+              feeds.map((item, index) => (
+                <Card key={`${item.url}-${index}`} className="border border-[var(--line)]">
+                  <Card.Content className="space-y-3">
+                    <label className="block text-sm font-medium text-[var(--ink)]">
+                      Journal name
+                      <input
+                        className="mt-2 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm"
+                        value={item.journal}
+                        onChange={(event) => onFeedChange(index, "journal", event.target.value)}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-[var(--ink)]">
+                      RSS URL
+                      <input
+                        className="mt-2 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm"
+                        value={item.url}
+                        onChange={(event) => onFeedChange(index, "url", event.target.value)}
+                      />
+                    </label>
+                    <div className="flex justify-end">
+                      <Button size="sm" variant="ghost" onPress={() => onRemoveFeed(index)}>
+                        Remove
+                      </Button>
+                    </div>
+                  </Card.Content>
+                </Card>
+              ))
+            )}
           </div>
         </section>
 
@@ -876,15 +988,16 @@ function AdminPanel({
 export function App() {
   const [report, setReport] = React.useState<Report>(() => loadEmbeddedReport() ?? EMPTY_REPORT);
   const [profile, setProfile] = React.useState<ClassificationProfile | null>(null);
+  const [feeds, setFeeds] = React.useState<FeedSubscription[]>([]);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState("");
   const [relevance, setRelevance] = React.useState<RelevanceFilter>("all");
   const [topic, setTopic] = React.useState("all");
   const [journal, setJournal] = React.useState("all");
-  const [dateFilter, setDateFilter] = React.useState<DateFilter>("all");
+  const [dateFilter, setDateFilter] = React.useState<DateFilter>("30d");
+  const [readFilter, setReadFilter] = React.useState<ReadFilter>("unread");
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
-  const [readIds, setReadIds] = React.useState<Set<number>>(() => new Set());
   const [feedbackRecords, setFeedbackRecords] = React.useState<FeedbackRecord[]>([]);
   const [profileProposals, setProfileProposals] = React.useState<ProfileProposal[]>([]);
   const [jobs, setJobs] = React.useState<JobInfo[]>([]);
@@ -892,6 +1005,7 @@ export function App() {
   const [feedbackPaper, setFeedbackPaper] = React.useState<Paper | null>(null);
   const [feedbackValue, setFeedbackValue] = React.useState<Relevance>("indirect");
   const [feedbackNote, setFeedbackNote] = React.useState("");
+  const [feedsSaving, setFeedsSaving] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const deferredQuery = React.useDeferredValue(query);
 
@@ -921,6 +1035,10 @@ export function App() {
     setFeedbackRecords(await fetchFeedback());
   }, []);
 
+  const refreshFeeds = React.useCallback(async () => {
+    setFeeds(await fetchFeedSubscriptions());
+  }, []);
+
   const refreshProposals = React.useCallback(async () => {
     setProfileProposals(await fetchProfileProposals());
   }, []);
@@ -928,8 +1046,7 @@ export function App() {
   const refreshAll = React.useCallback(async () => {
     try {
       const currentProfile = await refreshProfile();
-      await refreshProposals();
-      await refreshFeedback();
+      await Promise.all([refreshProposals(), refreshFeedback(), refreshFeeds()]);
       if (currentProfile) {
         await refreshReport();
       }
@@ -937,7 +1054,7 @@ export function App() {
     } catch (error) {
       setLoadError((error as Error).message);
     }
-  }, [refreshFeedback, refreshProfile, refreshProposals, refreshReport]);
+  }, [refreshFeedback, refreshFeeds, refreshProfile, refreshProposals, refreshReport]);
 
   React.useEffect(() => {
     void refreshAll();
@@ -992,7 +1109,7 @@ export function App() {
     [report.papers],
   );
 
-  const filtered = React.useMemo(
+  const filteredBase = React.useMemo(
     () =>
       report.papers.filter((paper) => {
         const haystack = [
@@ -1007,19 +1124,27 @@ export function App() {
           .join(" ")
           .toLowerCase();
         const matchesQuery = !deferredQuery || haystack.includes(deferredQuery.toLowerCase());
-        const matchesRelevance = relevance === "all" || paper.classification.relevance === relevance;
         const matchesTopic = topic === "all" || paper.classification.topic_tags.includes(topic);
         const matchesJournal = journal === "all" || paper.journal === journal;
         const dateValue = paperDate(paper);
-        const matchesDate =
-          dateFilter === "all" ||
-          (dateFilter === "report" && dateValue === report.report_date) ||
-          (dateFilter === "7d" && isWithinDays(dateValue, report.report_date, 7)) ||
-          (dateFilter === "30d" && isWithinDays(dateValue, report.report_date, 30));
-        return matchesQuery && matchesRelevance && matchesTopic && matchesJournal && matchesDate;
+        const matchesRead =
+          readFilter === "all" ||
+          (readFilter === "read" ? Boolean(paper.read_at) : !paper.read_at);
+        const matchesDate = matchesDateFilter(dateValue, report.report_date, dateFilter);
+        return matchesQuery && matchesTopic && matchesJournal && matchesRead && matchesDate;
       }),
-    [dateFilter, deferredQuery, journal, relevance, report.papers, report.report_date, topic],
+    [dateFilter, deferredQuery, journal, readFilter, report.papers, report.report_date, topic],
   );
+
+  const filtered = React.useMemo(
+    () =>
+      filteredBase.filter(
+        (paper) => relevance === "all" || paper.classification.relevance === relevance,
+      ),
+    [filteredBase, relevance],
+  );
+
+  const visibleTotals = React.useMemo(() => relevanceCounts(filteredBase), [filteredBase]);
 
   React.useEffect(() => {
     if (filtered.length === 0) {
@@ -1029,7 +1154,7 @@ export function App() {
     if (!selectedId || !filtered.some((paper) => paper.id === selectedId)) {
       setSelectedId(filtered[0].id);
     }
-  }, [filtered, selectedId]);
+  }, [filtered, report.papers, selectedId]);
 
   const selectedPaper = filtered.find((paper) => paper.id === selectedId) ?? null;
 
@@ -1040,9 +1165,24 @@ export function App() {
     }));
   };
 
+  const persistReadStatus = async (paperId: number) => {
+    const paper = report.papers.find((item) => item.id === paperId);
+    if (!paper || paper.read_at) {
+      return;
+    }
+    const optimisticReadAt = new Date().toISOString();
+    updatePaper(paperId, (current) => ({...current, read_at: optimisticReadAt}));
+    try {
+      const status = await markPaperRead(paperId);
+      updatePaper(paperId, (current) => ({...current, read_at: status.read_at}));
+    } catch (error) {
+      updatePaper(paperId, (current) => ({...current, read_at: null}));
+      setLoadError((error as Error).message);
+    }
+  };
+
   const selectPaper = (paper: Paper) => {
     setSelectedId(paper.id);
-    setReadIds((current) => new Set(current).add(paper.id));
   };
 
   const handleSaveToZotero = async (paper: Paper) => {
@@ -1094,6 +1234,43 @@ export function App() {
     setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
     if (openAdmin) {
       setAdminOpen(true);
+    }
+  };
+
+  const handleFeedChange = (index: number, field: "journal" | "url", value: string) => {
+    setFeeds((current) =>
+      current.map((item, itemIndex) =>
+        itemIndex === index ? {...item, [field]: value} : item,
+      ),
+    );
+  };
+
+  const handleAddFeed = () => {
+    setFeeds((current) => [...current, {journal: "", url: ""}]);
+  };
+
+  const handleRemoveFeed = (index: number) => {
+    setFeeds((current) => current.filter((_item, itemIndex) => itemIndex !== index));
+  };
+
+  const handleSaveFeeds = async () => {
+    const cleaned = feeds
+      .map((item) => ({journal: item.journal.trim(), url: item.url.trim()}))
+      .filter((item) => item.journal || item.url);
+    if (cleaned.some((item) => !item.journal || !item.url)) {
+      setLoadError("Each feed needs both a journal name and an RSS URL.");
+      return;
+    }
+    try {
+      setFeedsSaving(true);
+      const saved = await saveFeedSubscriptions(cleaned);
+      setFeeds(saved);
+      setNotice("Feed subscriptions saved.");
+      setLoadError(null);
+    } catch (error) {
+      setLoadError((error as Error).message);
+    } finally {
+      setFeedsSaving(false);
     }
   };
 
@@ -1191,10 +1368,16 @@ export function App() {
       <AdminPanel
         open={adminOpen}
         profile={profile}
+        feeds={feeds}
+        feedsSaving={feedsSaving}
         feedback={feedbackRecords}
         jobs={jobs}
         proposals={profileProposals}
         onClose={() => setAdminOpen(false)}
+        onFeedChange={handleFeedChange}
+        onAddFeed={handleAddFeed}
+        onRemoveFeed={handleRemoveFeed}
+        onSaveFeeds={() => void handleSaveFeeds()}
         onGenerateProposal={() => void handleGenerateProposal()}
         onApplyProposal={(id) => void handleApplyProposal(id)}
         onRejectProposal={(id) => void handleRejectProposal(id)}
@@ -1223,7 +1406,7 @@ export function App() {
             </p>
             <h1 className="mt-2 text-2xl font-semibold">Paper review</h1>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              {report.report_date} · {filtered.length}/{report.totals.total ?? report.papers.length} papers
+              {report.report_date} · {filtered.length} shown · {report.papers.length} total
             </p>
             <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
               {profile.meta.name} · v{profile.meta.version}
@@ -1234,7 +1417,7 @@ export function App() {
             {(["direct", "indirect", "unrelated"] as Relevance[]).map((item) => (
               <div key={item} className="rounded-md border border-[var(--line)] p-2">
                 <div className={`text-lg font-semibold ${relevanceTone[item].text}`}>
-                  {report.totals[item] ?? 0}
+                  {visibleTotals[item] ?? 0}
                 </div>
                 <div className="text-[11px] uppercase text-[var(--muted)]">{item}</div>
               </div>
@@ -1282,9 +1465,23 @@ export function App() {
                 onChange={(event) => setDateFilter(event.target.value as DateFilter)}
               >
                 <option value="all">All dates</option>
-                <option value="report">Report date ({report.report_date})</option>
+                <option value="today">Today</option>
                 <option value="7d">Last 7 days</option>
                 <option value="30d">Last 30 days</option>
+                <option value="180d">Last 6 months</option>
+              </select>
+            </label>
+
+            <label className="block text-sm font-medium text-[var(--ink)]">
+              Read status
+              <select
+                className={`${nativeSelectClassName()} mt-2`}
+                value={readFilter}
+                onChange={(event) => setReadFilter(event.target.value as ReadFilter)}
+              >
+                <option value="unread">Unread</option>
+                <option value="read">Read</option>
+                <option value="all">All</option>
               </select>
             </label>
           </div>
@@ -1295,7 +1492,8 @@ export function App() {
             onPress={() => {
               setTopic("all");
               setJournal("all");
-              setDateFilter("all");
+              setDateFilter("30d");
+              setReadFilter("unread");
               setRelevance("all");
               setQuery("");
             }}
@@ -1347,7 +1545,10 @@ export function App() {
                       variant={relevance === tab.id ? "secondary" : "outline"}
                       onPress={() => setRelevance(tab.id)}
                     >
-                      {tab.label}
+                      {tab.label}{" "}
+                      {tab.id === "all"
+                        ? filteredBase.length
+                        : visibleTotals[tab.id]}
                     </Button>
                   ))}
                 </div>
@@ -1367,7 +1568,8 @@ export function App() {
                   paper={paper}
                   profile={profile}
                   isSelected={paper.id === selectedId}
-                  isUnread={!readIds.has(paper.id)}
+                  isUnread={!paper.read_at}
+                  onMarkRead={() => void persistReadStatus(paper.id)}
                   onMarkWrong={() => openFeedbackModal(paper)}
                   onSave={() => void handleSaveToZotero(paper)}
                   onSelect={() => selectPaper(paper)}
@@ -1380,6 +1582,8 @@ export function App() {
         <DetailPanel
           paper={selectedPaper}
           profile={profile}
+          isUnread={Boolean(selectedPaper && !selectedPaper.read_at)}
+          onMarkRead={() => selectedPaper && void persistReadStatus(selectedPaper.id)}
           onMarkWrong={() => selectedPaper && openFeedbackModal(selectedPaper)}
           onSave={() => selectedPaper && void handleSaveToZotero(selectedPaper)}
         />

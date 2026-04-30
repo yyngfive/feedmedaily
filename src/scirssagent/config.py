@@ -10,7 +10,8 @@ from dotenv import load_dotenv
 @dataclass(frozen=True)
 class Settings:
     root: Path
-    feeds_file: Path
+    feeds_path: Path
+    legacy_feeds_file: Path
     data_dir: Path
     reports_dir: Path
     logs_dir: Path
@@ -23,7 +24,6 @@ class Settings:
     classifier_batch_size: int
     profile_model: str
     profile_thinking: str
-    report_limit: int
     zotero_api_key: str | None
     zotero_library_type: str
     zotero_library_id: str | None
@@ -46,7 +46,8 @@ def load_settings(root: Path | None = None) -> Settings:
         profile_path = (project_root / profile_path).resolve()
     return Settings(
         root=project_root,
-        feeds_file=project_root / "RSS.txt",
+        feeds_path=data_dir / "rss_feeds.json",
+        legacy_feeds_file=project_root / "RSS.txt",
         data_dir=data_dir,
         reports_dir=reports_dir,
         logs_dir=logs_dir,
@@ -59,7 +60,6 @@ def load_settings(root: Path | None = None) -> Settings:
         classifier_batch_size=max(1, int(os.getenv("SCIRSS_CLASSIFIER_BATCH_SIZE", "10"))),
         profile_model=os.getenv("SCIRSS_PROFILE_MODEL", "deepseek-v4-pro"),
         profile_thinking=os.getenv("SCIRSS_PROFILE_THINKING", "enabled").strip().lower(),
-        report_limit=max(1, int(os.getenv("SCIRSS_REPORT_LIMIT", "500"))),
         zotero_api_key=os.getenv("SCIRSS_ZOTERO_API_KEY"),
         zotero_library_type=os.getenv("SCIRSS_ZOTERO_LIBRARY_TYPE", "user").strip().lower(),
         zotero_library_id=os.getenv("SCIRSS_ZOTERO_LIBRARY_ID"),

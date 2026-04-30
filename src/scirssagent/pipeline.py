@@ -37,7 +37,7 @@ def run_once(
     reclassify: bool = False,
 ) -> str:
     configure_logging(settings)
-    urls = read_feed_urls(settings.feeds_file)
+    urls = read_feed_urls(settings.feeds_path, settings.legacy_feeds_file)
     logging.info("Fetching %s feeds", len(urls))
     papers, errors = fetch_all_feeds(urls)
     if max_papers is not None:
@@ -82,7 +82,7 @@ def run_once(
             settings.classifier_batch_size,
         )
         report_date = datetime.now(UTC).date()
-        report_papers = papers_for_report(conn, report_date=None, limit=settings.report_limit)
+        report_papers = papers_for_report(conn, report_date=None, limit=None)
         report = build_report(report_papers, report_date, errors)
         write_report_json(report, settings.reports_dir)
         index = publish_static_app(settings.root / "web" / "dist", settings.reports_dir, report)
@@ -97,7 +97,7 @@ def regenerate_latest_report(settings: Settings) -> str:
     conn = connect(settings.database_path)
     try:
         report_date = datetime.now(UTC).date()
-        report_papers = papers_for_report(conn, report_date=None, limit=settings.report_limit)
+        report_papers = papers_for_report(conn, report_date=None, limit=None)
         report = build_report(report_papers, report_date, [])
         write_report_json(report, settings.reports_dir)
         index = publish_static_app(settings.root / "web" / "dist", settings.reports_dir, report)

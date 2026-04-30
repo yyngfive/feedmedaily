@@ -14,8 +14,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from scirssagent.config import Settings, load_settings
+from scirssagent.feeds import read_feed_subscriptions, write_feed_subscriptions
 from scirssagent.models import (
     CurrentProfileResponse,
+    FeedSubscription,
     JobInfo,
     ProfileMeta,
     ProfileProposalState,
@@ -45,6 +47,7 @@ from scirssagent.storage import (
     list_open_feedback,
     list_profile_proposals,
     mark_feedback_used,
+    mark_paper_read,
     paper_by_id,
     paper_from_row,
     paper_ids_for_feedback_ids,
@@ -74,6 +77,15 @@ class ProfileBootstrapRequest(BaseModel):
     name: str | None = None
 
 
+class FeedSettingsUpdateRequest(BaseModel):
+    feeds: list[FeedSubscription] = Field(default_factory=list)
+
+
+class PaperReadResponse(BaseModel):
+    paper_id: int
+    read_at: datetime
+
+
 class JobLaunchResponse(BaseModel):
     job: JobInfo
 
@@ -100,6 +112,20 @@ def create_app() -> FastAPI:
     def api_report_latest() -> Report:
         settings = load_settings()
         return current_report(settings)
+
+    @app.get("/api/settings/feeds")
+    def api_settings_feeds() -> list[dict[str, object]]:
+        settings = load_settings()
+        return [
+            item.model_dump(mode="json")
+            for item in load_feed_settings(settings)
+        ]
+
+    @app.put("/api/settings/feeds")
+    def api_settings_feeds_update(payload: FeedSettingsUpdateRequest) -> list[dict[str, object]]:
+        settings = load_settings()
+        write_feed_subscriptions(settings.feeds_path, payload.feeds)
+        return [item.model_dump(mode="json") for item in load_feed_settings(settings)]
 
     @app.get("/api/profile/current", response_model=CurrentProfileResponse)
     def api_profile_current() -> CurrentProfileResponse:
@@ -154,6 +180,20 @@ def create_app() -> FastAPI:
             )
             conn.commit()
             return feedback.model_dump(mode="json")
+        finally:
+            conn.close()
+
+    @app.post("/api/papers/{paper_id}/read", response_model=PaperReadResponse)
+    def api_paper_mark_read(paper_id: int) -> PaperReadResponse:
+        settings = load_settings()
+        conn = connect(settings.database_path)
+        try:
+            row = paper_by_id(conn, paper_id)
+            if row is None:
+                raise HTTPException(status_code=404, detail="Paper not found.")
+            read_at = mark_paper_read(conn, paper_id)
+            conn.commit()
+            return PaperReadResponse(paper_id=paper_id, read_at=read_at)
         finally:
             conn.close()
 
@@ -350,10 +390,17 @@ def current_report(settings: Settings) -> Report:
     conn = connect(settings.database_path)
     try:
         report_date = datetime.now(UTC).date()
-        report_papers = papers_for_report(conn, report_date=None, limit=settings.report_limit)
+        report_papers = papers_for_report(conn, report_date=None, limit=None)
         return build_report(report_papers, report_date, [])
     finally:
         conn.close()
+
+
+def load_feed_settings(settings: Settings) -> list[FeedSubscription]:
+    try:
+        return read_feed_subscriptions(settings.feeds_path, settings.legacy_feeds_file)
+    except FileNotFoundError:
+        return []
 
 
 def launch_job(

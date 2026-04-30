@@ -2,6 +2,15 @@ export type Relevance = "direct" | "indirect" | "unrelated";
 export type FeedbackState = "open" | "used";
 export type ProfileProposalState = "pending" | "applied" | "rejected";
 export type ZoteroSaveState = "pending" | "saved" | "error";
+export type FeedSubscription = {
+  journal: string;
+  url: string;
+};
+
+export type PaperReadStatus = {
+  paper_id: number;
+  read_at: string;
+};
 
 export type Classification = {
   relevance: Relevance;
@@ -41,6 +50,7 @@ export type Paper = {
   abstract?: string | null;
   published_date?: string | null;
   seen_date: string;
+  read_at?: string | null;
   classification: Classification;
   feedback_status?: FeedbackStatus | null;
   zotero_status?: ZoteroStatus | null;

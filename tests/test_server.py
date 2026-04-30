@@ -78,6 +78,40 @@ def test_report_latest_and_feedback_api(monkeypatch) -> None:
     feedback_payload = feedback_response.json()
     assert feedback_payload["corrected_relevance"] == "direct"
 
+    read_response = client.post(f"/api/papers/{paper_id}/read")
+    assert read_response.status_code == 200
+    assert read_response.json()["paper_id"] == paper_id
+
+
+def test_feed_settings_api_reads_legacy_and_writes_json(monkeypatch) -> None:
+    root = _project_root("feed-settings")
+    _bootstrap_root(root)
+    (root / "RSS.txt").write_text("https://www.nature.com/nature.rss\n", encoding="utf-8")
+
+    monkeypatch.chdir(root)
+    from scirssagent.server import create_app
+
+    client = TestClient(create_app())
+    get_response = client.get("/api/settings/feeds")
+    assert get_response.status_code == 200
+    assert get_response.json()[0]["journal"] == "nature.com"
+
+    put_response = client.put(
+        "/api/settings/feeds",
+        json={
+            "feeds": [
+                {
+                    "journal": "Nature",
+                    "url": "https://www.nature.com/nature.rss",
+                }
+            ]
+        },
+    )
+    assert put_response.status_code == 200
+    payload = put_response.json()
+    assert payload[0]["journal"] == "Nature"
+    assert (root / "data" / "rss_feeds.json").exists()
+
 
 def test_profile_bootstrap_launches_job(monkeypatch) -> None:
     root = _project_root("bootstrap")

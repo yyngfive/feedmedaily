@@ -15,6 +15,7 @@ from scirssagent.storage import (
     connect,
     latest_zotero_status,
     mark_feedback_used,
+    mark_paper_read,
     papers_for_report,
     save_classification,
     save_feedback,
@@ -92,6 +93,32 @@ def test_report_includes_feedback_and_zotero_status() -> None:
     assert report_paper.feedback_status.used_in_profile is False
     assert report_paper.zotero_status is not None
     assert report_paper.zotero_status.saved is True
+
+
+def test_mark_paper_read_is_reflected_in_report() -> None:
+    conn = connect(":memory:")
+    paper = Paper(
+        source_url="https://example.com/rss",
+        title="Read status paper",
+        url="https://example.com/read-status",
+    )
+    paper_id, _is_new = upsert_paper(conn, paper)
+    save_classification(
+        conn,
+        paper_id,
+        Classification(
+            relevance=Relevance.DIRECT,
+            confidence=0.9,
+            reason="Fixture",
+            model="test",
+        ),
+    )
+
+    read_at = mark_paper_read(conn, paper_id)
+    conn.commit()
+    report_paper = papers_for_report(conn)[0]
+
+    assert report_paper.read_at == read_at
 
 
 def test_report_hides_used_feedback_status() -> None:

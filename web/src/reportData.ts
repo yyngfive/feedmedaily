@@ -1,8 +1,10 @@
 import type {
   ClassificationProfile,
   CurrentProfileResponse,
+  FeedSubscription,
   FeedbackRecord,
   JobInfo,
+  PaperReadStatus,
   ProfileProposal,
   Report,
   Relevance,
@@ -25,6 +27,28 @@ export async function fetchLatestReport(): Promise<Report> {
     throw new Error(`Could not load report data (${response.status})`);
   }
   return (await response.json()) as Report;
+}
+
+export async function fetchFeedSubscriptions(): Promise<FeedSubscription[]> {
+  const response = await fetch("/api/settings/feeds");
+  if (!response.ok) {
+    throw new Error(`Could not load feed subscriptions (${response.status})`);
+  }
+  return (await response.json()) as FeedSubscription[];
+}
+
+export async function saveFeedSubscriptions(
+  feeds: FeedSubscription[],
+): Promise<FeedSubscription[]> {
+  const response = await fetch("/api/settings/feeds", {
+    method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({feeds}),
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return (await response.json()) as FeedSubscription[];
 }
 
 export async function fetchCurrentProfile(): Promise<CurrentProfileResponse> {
@@ -80,6 +104,14 @@ export async function deleteFeedback(feedbackId: number): Promise<void> {
   if (!response.ok) {
     throw new Error(await response.text());
   }
+}
+
+export async function markPaperRead(paperId: number): Promise<PaperReadStatus> {
+  const response = await fetch(`/api/papers/${paperId}/read`, {method: "POST"});
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return (await response.json()) as PaperReadStatus;
 }
 
 export async function fetchProfileProposals(): Promise<ProfileProposal[]> {

@@ -34,6 +34,19 @@ class FeedSource(BaseModel):
     url: HttpUrl
 
 
+class FeedSubscription(BaseModel):
+    journal: str
+    url: HttpUrl
+
+    @field_validator("journal")
+    @classmethod
+    def required_journal(cls, value: str) -> str:
+        clean = value.strip()
+        if not clean:
+            raise ValueError("journal cannot be blank")
+        return clean
+
+
 class Paper(BaseModel):
     source_url: str
     feed_title: str | None = None
@@ -45,6 +58,7 @@ class Paper(BaseModel):
     abstract: str | None = None
     published_date: date | None = None
     first_seen_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    read_at: datetime | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("title", "url")
