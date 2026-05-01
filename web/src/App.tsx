@@ -26,6 +26,11 @@ import {
   matchesDateFilter,
   relevanceCounts,
 } from "./app/utils";
+import {
+  createUiMessage,
+  messageFromJob,
+  type UiMessage,
+} from "./app/messages";
 import type {
   DateFilter,
   ReadFilter,
@@ -34,6 +39,7 @@ import type {
 import {EMPTY_REPORT} from "./types";
 import {AdminPanel} from "./components/admin/AdminPanel";
 import {StatusBanner} from "./components/common/StatusBanner";
+import {TopBar} from "./components/common/TopBar";
 import {FeedbackModal} from "./components/modals/FeedbackModal";
 import {ZoteroSaveModal} from "./components/modals/ZoteroSaveModal";
 import {Onboarding} from "./components/onboarding/Onboarding";
@@ -58,10 +64,9 @@ export function App() {
   const [profile, setProfile] = React.useState<ClassificationProfile | null>(null);
   const [feeds, setFeeds] = React.useState<FeedSubscription[]>([]);
   const [feedsLoaded, setFeedsLoaded] = React.useState(false);
-  const [loadError, setLoadError] = React.useState<string | null>(null);
-  const [notice, setNotice] = React.useState<string | null>(null);
+  const [message, setMessage] = React.useState<UiMessage | null>(null);
   const [query, setQuery] = React.useState("");
-  const [relevance, setRelevance] = React.useState<RelevanceFilter>("all");
+  const [relevance, setRelevance] = React.useState<RelevanceFilter>("direct");
   const [topic, setTopic] = React.useState("all");
   const [journal, setJournal] = React.useState("all");
   const [dateFilter, setDateFilter] = React.useState<DateFilter>("30d");
@@ -82,7 +87,50 @@ export function App() {
   const [zoteroSaving, setZoteroSaving] = React.useState(false);
   const [zoteroError, setZoteroError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [themePreference, setThemePreference] = React.useState<"system" | "light" | "dark">(
+    "system",
+  );
+  const [systemTheme, setSystemTheme] = React.useState<"light" | "dark">("light");
   const deferredQuery = React.useDeferredValue(query);
+  const resolvedTheme = themePreference === "system" ? systemTheme : themePreference;
+
+  const pushMessage = React.useCallback((
+    name: string,
+    override?: {text?: string; tone?: UiMessage["tone"]},
+  ) => {
+    setMessage(createUiMessage(name, override));
+  }, []);
+
+  React.useEffect(() => {
+    if (!message) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setMessage((current) => (current?.createdAt === message.createdAt ? null : current));
+    }, message.ttlMs);
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
+  // 管理主题来源：默认跟随系统，用户手动切换后写入本地覆盖。
+  React.useEffect(() => {
+    const saved = window.localStorage.getItem("feedmedaily-theme");
+    if (saved === "light" || saved === "dark" || saved === "system") {
+      setThemePreference(saved);
+    }
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const applySystemTheme = () => setSystemTheme(media.matches ? "dark" : "light");
+    applySystemTheme();
+    media.addEventListener("change", applySystemTheme);
+    return () => media.removeEventListener("change", applySystemTheme);
+  }, []);
+
+  React.useEffect(() => {
+    document.documentElement.dataset.theme = resolvedTheme;
+  }, [resolvedTheme]);
+
+  React.useEffect(() => {
+    window.localStorage.setItem("feedmedaily-theme", themePreference);
+  }, [themePreference]);
 
   const refreshProfile = React.useCallback(async () => {
     const next = await fetchCurrentProfile();
@@ -94,17 +142,16 @@ export function App() {
     try {
       const next = await fetchLatestReport();
       React.startTransition(() => setReport(next));
-      setLoadError(null);
     } catch (error) {
       const embedded = loadEmbeddedReport();
       if (embedded) {
         React.startTransition(() => setReport(embedded));
-        setLoadError("Using embedded report data because the API is unavailable.");
+        pushMessage("app.report.embedded_fallback");
         return;
       }
       throw error;
     }
-  }, []);
+  }, [pushMessage]);
 
   const refreshFeedback = React.useCallback(async () => {
     setFeedbackRecords(await fetchFeedback());
@@ -127,11 +174,10 @@ export function App() {
       if (currentProfile) {
         await refreshReport();
       }
-      setLoadError(null);
     } catch (error) {
-      setLoadError((error as Error).message);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     }
-  }, [refreshFeedback, refreshFeeds, refreshProfile, refreshProposals, refreshReport]);
+  }, [pushMessage, refreshFeedback, refreshFeeds, refreshProfile, refreshProposals, refreshReport]);
 
   React.useEffect(() => {
     void refreshAll();
@@ -181,16 +227,25 @@ export function App() {
           });
           const failedJob = updatedJobs.find((job) => job.status === "failed" && job.error);
           if (failedJob?.error) {
-            setLoadError(failedJob.error);
+            setMessage(messageFromJob(failedJob));
+          }
+          const statusJob =
+            updatedJobs.find((job) => job.status === "running") ??
+            updatedJobs.find((job) => job.status === "queued") ??
+            updatedJobs.find((job) => job.status === "completed");
+          if (statusJob) {
+            setMessage(messageFromJob(statusJob));
           }
           if (updatedJobs.some((job) => job.status === "completed")) {
             void refreshAll();
           }
         })
-        .catch((error) => setLoadError((error as Error).message));
+        .catch((error) =>
+          pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"}),
+        );
     }, 2500);
     return () => window.clearInterval(timer);
-  }, [refreshAll, runningJobs]);
+  }, [pushMessage, refreshAll, runningJobs]);
 
   const tags = React.useMemo(
     () => profile?.topic_taxonomy.map((item) => item.id).sort() ?? [],
@@ -325,7 +380,7 @@ export function App() {
       updatePaper(paperId, (current) => ({...current, read_at: status.read_at}));
     } catch (error) {
       updatePaper(paperId, (current) => ({...current, read_at: null}));
-      setLoadError((error as Error).message);
+      pushMessage("paper.read.failed", {text: (error as Error).message, tone: "danger"});
     }
   };
 
@@ -343,7 +398,7 @@ export function App() {
       const status = await saveToZotero(zoteroPaper.id, zoteroCollectionKey || null);
       updatePaper(zoteroPaper.id, (current) => ({...current, zotero_status: status}));
       if (status.saved) {
-        setNotice("Saved to Zotero.");
+        pushMessage("zotero.save.succeeded");
         setZoteroPaper(null);
         setZoteroError(null);
         return;
@@ -351,7 +406,7 @@ export function App() {
       setZoteroError(status.last_error ?? "Zotero save updated.");
     } catch (error) {
       setZoteroError((error as Error).message);
-      setLoadError((error as Error).message);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     } finally {
       setZoteroSaving(false);
     }
@@ -376,9 +431,9 @@ export function App() {
       setFeedbackPaper(null);
       setFeedbackNote("");
       await Promise.all([refreshReport(), refreshFeedback()]);
-      setNotice("Feedback saved.");
+      pushMessage("feedback.save.succeeded");
     } catch (error) {
-      setLoadError((error as Error).message);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     }
   };
 
@@ -386,9 +441,9 @@ export function App() {
     try {
       await deleteFeedback(feedbackId);
       await Promise.all([refreshReport(), refreshFeedback(), refreshProposals()]);
-      setNotice("Feedback deleted.");
+      pushMessage("feedback.delete.succeeded");
     } catch (error) {
-      setLoadError((error as Error).message);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     }
   };
 
@@ -420,7 +475,7 @@ export function App() {
       .map((item) => ({journal: item.journal.trim(), url: item.url.trim()}))
       .filter((item) => item.journal || item.url);
     if (cleaned.some((item) => !item.journal || !item.url)) {
-      setLoadError("Each feed needs both a journal name and an RSS URL.");
+      pushMessage("feeds.validation.failed");
       return;
     }
     try {
@@ -428,10 +483,9 @@ export function App() {
       const saved = await saveFeedSubscriptions(cleaned);
       setFeeds(saved);
       setFeedsLoaded(true);
-      setNotice("Feed subscriptions saved.");
-      setLoadError(null);
+      pushMessage("feeds.save.succeeded");
     } catch (error) {
-      setLoadError((error as Error).message);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     } finally {
       setFeedsSaving(false);
     }
@@ -444,9 +498,9 @@ export function App() {
         await bootstrapProfile({interest_description: interestDescription, name}),
         false,
       );
-      setNotice("Initial profile generation started.");
+      pushMessage("profile.bootstrap.started");
     } catch (error) {
-      setLoadError((error as Error).message);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     } finally {
       setBusy(false);
     }
@@ -455,9 +509,9 @@ export function App() {
   const handleGenerateProposal = async () => {
     try {
       registerJob(await launchProfileProposalGeneration());
-      setNotice("Profile proposal job started.");
+      pushMessage("profile.proposal.started");
     } catch (error) {
-      setLoadError((error as Error).message);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     }
   };
 
@@ -466,9 +520,9 @@ export function App() {
       setBusy(true);
       await applyProfileProposal(id);
       await refreshAll();
-      setNotice("Profile proposal applied.");
+      pushMessage("profile.proposal.applied");
     } catch (error) {
-      setLoadError((error as Error).message);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     } finally {
       setBusy(false);
     }
@@ -478,29 +532,35 @@ export function App() {
     try {
       await rejectProfileProposal(id);
       await refreshProposals();
-      setNotice("Profile proposal rejected.");
+      pushMessage("profile.proposal.rejected");
     } catch (error) {
-      setLoadError((error as Error).message);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     }
   };
 
   const handleRunAdminJob = async (path: "/api/admin/run" | "/api/admin/report/latest") => {
     try {
       registerJob(await launchAdminJob(path));
-      setNotice("Job started.");
+      pushMessage("job.started");
     } catch (error) {
-      setLoadError((error as Error).message);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     }
   };
 
   const handleReclassify = async (scope: "recent" | "feedback" | "all") => {
     try {
       registerJob(await launchReclassifyJob({scope, limit: scope === "all" ? 500 : 50}));
-      setNotice("Reclassification job started.");
+      pushMessage("job.reclassify.started");
     } catch (error) {
-      setLoadError((error as Error).message);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     }
   };
+
+  const toggleTheme = React.useCallback(() => {
+    const currentSystemTheme = systemTheme;
+    const nextResolvedTheme = resolvedTheme === "dark" ? "light" : "dark";
+    setThemePreference(nextResolvedTheme === currentSystemTheme ? "system" : nextResolvedTheme);
+  }, [resolvedTheme, systemTheme]);
 
   // 统一重置筛选器，供侧栏和空状态按钮复用。
   const resetFilters = React.useCallback(() => {
@@ -515,14 +575,9 @@ export function App() {
   if (!profile) {
     return (
       <>
-        {loadError ? (
-          <StatusBanner className="mx-auto mt-4 max-w-5xl" tone="warning">
-            {loadError}
-          </StatusBanner>
-        ) : null}
-        {notice ? (
-          <StatusBanner className="mx-auto mt-4 max-w-5xl" tone="success">
-            {notice}
+        {message ? (
+          <StatusBanner className="mx-auto mt-4 max-w-5xl" tone={message.tone}>
+            {message.text}
           </StatusBanner>
         ) : null}
         <Onboarding
@@ -537,7 +592,14 @@ export function App() {
   }
 
   return (
-    <main className="min-h-screen bg-[--paper] text-[--ink]">
+    <main className="flex h-screen flex-col overflow-hidden bg-[--paper] text-[--ink]">
+      <TopBar
+        message={message}
+        onOpenAdmin={() => setAdminOpen(true)}
+        onToggleTheme={toggleTheme}
+        resolvedTheme={resolvedTheme}
+        usingSystemTheme={themePreference === "system"}
+      />
       <AdminPanel
         open={adminOpen}
         profile={profile}
@@ -584,7 +646,7 @@ export function App() {
         onSubmit={() => void handleSaveToZotero()}
       />
 
-      <div className="mx-auto grid max-w-375 gap-4 px-4 py-4 lg:grid-cols-[260px_minmax(0,1fr)_360px]">
+      <div className="mx-auto grid min-h-0 w-full max-w-375 flex-1 gap-4 overflow-hidden px-4 py-4 lg:grid-cols-[300px_minmax(0,1fr)_360px]">
         <FiltersSidebar
           dateFilter={dateFilter}
           journal={journal}
@@ -607,9 +669,7 @@ export function App() {
 
         <PaperListSection
           hasNoFetchedPapers={hasNoFetchedPapers}
-          loadError={loadError}
           needsFeedSetup={needsFeedSetup}
-          notice={notice}
           onOpenAdmin={() => setAdminOpen(true)}
           onResetFilters={resetFilters}
           onRunFetchAndClassify={() => void handleRunAdminJob("/api/admin/run")}

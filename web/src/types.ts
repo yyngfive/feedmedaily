@@ -163,6 +163,7 @@ export type JobInfo = {
   id: string;
   job_type: string;
   status: string;
+  message_key?: string | null;
   message?: string | null;
   error?: string | null;
   result?: Record<string, unknown> | null;

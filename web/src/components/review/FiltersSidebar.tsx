@@ -48,10 +48,9 @@ export function FiltersSidebar({
   visibleTotals: Record<Relevance, number>;
 }) {
   return (
-    <aside className="space-y-4 rounded-lg border border-(--line) bg-white p-4 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:overflow-auto">
+    <aside className="h-full space-y-4 overflow-hidden rounded-lg border border-(--line) bg-(--paper-accent) p-4">
       <div>
-        <h1 className="mt-2 text-2xl font-semibold">SciRSSAgent</h1>
-        <p className="mt-2 text-sm leading-6 text-muted">
+        <p className="text-sm leading-6 text-muted">
           Last Update: {reportDate}
         </p>
         <p className="mt-1 text-sm leading-6 text-muted">

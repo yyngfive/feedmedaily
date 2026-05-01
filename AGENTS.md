@@ -43,6 +43,7 @@ uv sync
 ## Repository Conventions
 
 - README should stay focused on project structure and usage.
+- `ARCHITECTURE.md` is the canonical current-architecture summary. If a change updates system boundaries, core flows, major modules, or UI ownership, update `ARCHITECTURE.md` in the same change.
 - Put internal workflow notes, safety guidance, and agent-facing conventions here.
 - Keep generated caches, databases, logs, and reports out of Git.
 - Prefer deterministic pipeline logic over free-form agent behavior for RSS ingestion, classification, and reporting.

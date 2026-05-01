@@ -30,10 +30,10 @@ export function Onboarding({
   return (
     <main className="mx-auto max-w-7xl px-4 py-6">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_520px]">
-        <Card className="border border-[var(--line)] bg-white">
+        <Card className="border border-[var(--line)] bg-(--paper-accent)">
           <Card.Header className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
-              SciRSSAgent
+              FeedMeDaily
             </p>
             <h1 className="text-2xl font-semibold text-[var(--ink)]">
               Create your classification profile
@@ -88,7 +88,7 @@ export function Onboarding({
           </Card.Footer>
         </Card>
 
-        <Card className="border border-[var(--line)] bg-white">
+        <Card className="border border-[var(--line)] bg-(--paper-accent)">
           <Card.Header>
             <h2 className="text-lg font-semibold text-[var(--ink)]">Latest proposal</h2>
           </Card.Header>

@@ -5,10 +5,10 @@ export type DateFilter = "all" | "today" | "7d" | "30d" | "180d";
 export type ReadFilter = "unread" | "read" | "all";
 
 export const relevanceTabs: Array<{id: RelevanceFilter; label: string}> = [
-  {id: "all", label: "All"},
   {id: "direct", label: "Direct"},
   {id: "indirect", label: "Indirect"},
   {id: "unrelated", label: "Unrelated"},
+  {id: "all", label: "All"},
 ];
 
 export const relevanceOrder: Relevance[] = ["direct", "indirect", "unrelated"];

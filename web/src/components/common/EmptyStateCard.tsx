@@ -13,7 +13,7 @@ export function EmptyStateCard({
   title: string;
 }) {
   return (
-    <Card className="border border-[var(--line)] bg-white p-8 text-center">
+    <Card className="border border-[var(--line)] bg-(--paper-accent) p-8 text-center">
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
         {eyebrow}
       </p>

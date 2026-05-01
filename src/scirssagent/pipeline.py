@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime
 
 from scirssagent.classifier import LlmConfig, classify_papers
@@ -20,6 +20,8 @@ from scirssagent.storage import (
     upsert_paper,
 )
 
+ProgressCallback = Callable[[str, str], None]
+
 
 def configure_logging(settings: Settings) -> None:
     settings.logs_dir.mkdir(parents=True, exist_ok=True)
@@ -35,11 +37,13 @@ def run_once(
     settings: Settings,
     max_papers: int | None = None,
     reclassify: bool = False,
+    progress: ProgressCallback | None = None,
 ) -> str:
     configure_logging(settings)
     subscriptions = read_feed_subscriptions(settings.feeds_path)
     urls = [str(item.url) for item in subscriptions]
     logging.info("Fetching %s feeds", len(urls))
+    report_progress(progress, "pipeline.feeds.fetching", "Fetching RSS feeds.")
     papers, errors = fetch_all_feeds(urls)
     if max_papers is not None:
         papers = papers[:max_papers]
@@ -65,6 +69,11 @@ def run_once(
             new_count,
             len(pending_ids),
         )
+        report_progress(
+            progress,
+            "pipeline.metadata.enriching",
+            f"Getting metadata for {len(pending_ids)} paper(s).",
+        )
         enriched_pairs: list[tuple[int, Paper]] = []
         for paper_id in pending_ids:
             row = conn.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone()
@@ -75,6 +84,11 @@ def run_once(
             upsert_paper(conn, enriched)
             enriched_pairs.append((paper_id, enriched))
         conn.commit()
+        report_progress(
+            progress,
+            "pipeline.classifier.classifying",
+            f"Classifying {len(enriched_pairs)} paper(s).",
+        )
         classify_enriched_pairs(
             conn,
             enriched_pairs,
@@ -82,6 +96,7 @@ def run_once(
             profile,
             settings.classifier_batch_size,
         )
+        report_progress(progress, "pipeline.report.writing", "Publishing the latest report.")
         report_date = datetime.now(UTC).date()
         report_papers = papers_for_report(
             conn,
@@ -147,13 +162,27 @@ def classify_enriched_pairs(
 
 
 def reclassify_paper_ids(settings: Settings, paper_ids: Iterable[int]) -> int:
+    return reclassify_paper_ids_with_progress(settings, paper_ids, progress=None)
+
+
+def reclassify_paper_ids_with_progress(
+    settings: Settings,
+    paper_ids: Iterable[int],
+    progress: ProgressCallback | None = None,
+) -> int:
     configure_logging(settings)
     conn = connect(settings.database_path)
     llm_config = build_classifier_config(settings)
     profile = ensure_profile(settings.profile_path)
     try:
+        paper_id_list = list(paper_ids)
+        report_progress(
+            progress,
+            "pipeline.metadata.enriching",
+            f"Getting metadata for {len(paper_id_list)} paper(s).",
+        )
         enriched_pairs: list[tuple[int, Paper]] = []
-        for paper_id in paper_ids:
+        for paper_id in paper_id_list:
             row = conn.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone()
             if row is None:
                 continue
@@ -164,6 +193,11 @@ def reclassify_paper_ids(settings: Settings, paper_ids: Iterable[int]) -> int:
         conn.commit()
         if not enriched_pairs:
             return 0
+        report_progress(
+            progress,
+            "pipeline.classifier.classifying",
+            f"Classifying {len(enriched_pairs)} paper(s).",
+        )
         return classify_enriched_pairs(
             conn,
             enriched_pairs,
@@ -173,3 +207,12 @@ def reclassify_paper_ids(settings: Settings, paper_ids: Iterable[int]) -> int:
         )
     finally:
         conn.close()
+
+
+def report_progress(
+    progress: ProgressCallback | None,
+    message_key: str,
+    message: str,
+) -> None:
+    if progress:
+        progress(message_key, message)

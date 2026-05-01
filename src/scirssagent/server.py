@@ -27,7 +27,12 @@ from scirssagent.models import (
     ZoteroCollectionsResponse,
     ZoteroSaveState,
 )
-from scirssagent.pipeline import reclassify_paper_ids, regenerate_latest_report, run_once
+from scirssagent.pipeline import (
+    reclassify_paper_ids,
+    reclassify_paper_ids_with_progress,
+    regenerate_latest_report,
+    run_once,
+)
 from scirssagent.profiles import read_profile
 from scirssagent.reporting import build_report
 from scirssagent.services import (
@@ -147,7 +152,9 @@ def create_app() -> FastAPI:
                 _bootstrap_profile_job,
                 settings.root,
                 payload.model_dump(),
+                queued_message_key="profile.bootstrap.queued",
                 queued_message="Queued initial profile generation.",
+                running_message_key="profile.bootstrap.generating",
                 running_message="Generating the initial classification profile proposal.",
             )
         )
@@ -425,13 +432,16 @@ def launch_job(
     job_type: str,
     target,
     *args,
+    queued_message_key: str | None = None,
     queued_message: str | None = None,
+    running_message_key: str | None = None,
     running_message: str | None = None,
 ) -> JobInfo:
     job = JobInfo(
         id=uuid.uuid4().hex,
         job_type=job_type,
         status="queued",
+        message_key=queued_message_key,
         message=queued_message,
     )
     with JOB_REGISTRY.lock:
@@ -441,15 +451,20 @@ def launch_job(
         update_job(
             job.id,
             status="running",
+            message_key=running_message_key,
             message=running_message,
             started_at=datetime.now(UTC),
         )
+        def progress(message_key: str, message: str) -> None:
+            update_job(job.id, message_key=message_key, message=message)
+
         try:
-            result = target(*args)
+            result = target(*args, progress=progress)
         except Exception as exc:
             update_job(
                 job.id,
                 status="failed",
+                message_key=f"{job_type}.failed",
                 message=None,
                 error=str(exc),
                 finished_at=datetime.now(UTC),
@@ -458,6 +473,7 @@ def launch_job(
         update_job(
             job.id,
             status="completed",
+            message_key=f"{job_type}.completed",
             message="Completed.",
             result=result if isinstance(result, dict) else {"value": result},
             finished_at=datetime.now(UTC),
@@ -474,23 +490,27 @@ def update_job(job_id: str, **updates) -> None:
         JOB_REGISTRY.jobs[job_id] = current.model_copy(update=updates)
 
 
-def _run_pipeline_job(root: Path) -> dict[str, object]:
+def _run_pipeline_job(root: Path, progress=None) -> dict[str, object]:
     settings = load_settings(root)
-    index = run_once(settings, reclassify=False)
+    index = run_once(settings, reclassify=False, progress=progress)
     return {"report": index}
 
 
-def _regenerate_report_job(root: Path) -> dict[str, object]:
+def _regenerate_report_job(root: Path, progress=None) -> dict[str, object]:
     settings = load_settings(root)
+    if progress:
+        progress("pipeline.report.writing", "Publishing the latest report.")
     index = regenerate_latest_report(settings)
     return {"report": index}
 
 
-def _generate_profile_proposal_job(root: Path) -> dict[str, object]:
+def _generate_profile_proposal_job(root: Path, progress=None) -> dict[str, object]:
     settings = load_settings(root)
     current = read_profile(settings.profile_path)
     if current is None:
         raise ValueError("No classification profile exists yet.")
+    if progress:
+        progress("profile.proposal.collecting_feedback", "Collecting feedback for profile review.")
     conn = connect(settings.database_path)
     try:
         feedback_items = list_open_feedback(conn)
@@ -510,6 +530,8 @@ def _generate_profile_proposal_job(root: Path) -> dict[str, object]:
                     note=item.note,
                 )
             )
+        if progress:
+            progress("profile.proposal.generating", "Generating profile proposal.")
         payload = generate_profile_proposal_payload(settings, current, feedback_context)
         proposal = save_profile_proposal(
             conn,
@@ -525,10 +547,16 @@ def _generate_profile_proposal_job(root: Path) -> dict[str, object]:
         conn.close()
 
 
-def _bootstrap_profile_job(root: Path, payload: dict[str, object]) -> dict[str, object]:
+def _bootstrap_profile_job(
+    root: Path,
+    payload: dict[str, object],
+    progress=None,
+) -> dict[str, object]:
     settings = load_settings(root)
     if read_profile(settings.profile_path) is not None:
         raise ValueError("A classification profile already exists.")
+    if progress:
+        progress("profile.bootstrap.generating", "Generating the initial profile proposal.")
     proposal_payload = generate_initial_profile_payload(
         settings,
         interest_description=str(payload["interest_description"]),
@@ -550,7 +578,7 @@ def _bootstrap_profile_job(root: Path, payload: dict[str, object]) -> dict[str, 
         conn.close()
 
 
-def _reclassify_job(root: Path, payload: dict[str, object]) -> dict[str, object]:
+def _reclassify_job(root: Path, payload: dict[str, object], progress=None) -> dict[str, object]:
     settings = load_settings(root)
     conn = connect(settings.database_path)
     try:
@@ -562,7 +590,9 @@ def _reclassify_job(root: Path, payload: dict[str, object]) -> dict[str, object]
             paper_ids = recent_paper_ids(conn, int(payload["limit"]))
     finally:
         conn.close()
-    count = reclassify_paper_ids(settings, paper_ids)
+    count = reclassify_paper_ids_with_progress(settings, paper_ids, progress=progress)
+    if progress:
+        progress("pipeline.report.writing", "Publishing the latest report.")
     report = regenerate_latest_report(settings)
     return {"reclassified": count, "report": report}
 

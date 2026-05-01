@@ -78,7 +78,7 @@ export function AdminPanel({
           </Button>
         </div>
 
-        <section className="mt-5 rounded-lg border border-(--line) bg-white p-4">
+        <section className="mt-5 rounded-lg border border-(--line) bg-(--paper-accent) p-4">
           <h3 className="text-sm font-semibold text-(--ink)">Actions</h3>
           {!hasFeeds ? (
             <p className="mt-2 text-sm leading-6 text-muted">
@@ -115,7 +115,7 @@ export function AdminPanel({
           </div>
         </section>
 
-        <section className="mt-4 rounded-lg border border-(--line) bg-white p-4">
+        <section className="mt-4 rounded-lg border border-(--line) bg-(--paper-accent) p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-(--ink)">Feed subscriptions</h3>
             <div className="flex flex-wrap gap-2">
@@ -127,9 +127,9 @@ export function AdminPanel({
               </Button>
             </div>
           </div>
-          <div className="mt-3 overflow-hidden rounded-lg border border-(--line)">
+          <div className="mt-3 max-h-[52vh] overflow-auto rounded-lg border border-(--line)">
             <table className="w-full border-collapse text-sm">
-              <thead className="bg-(--paper)">
+              <thead className="sticky top-0 bg-(--paper)">
                 <tr className="text-left text-(--ink)">
                   <th className="px-3 py-2 font-semibold">Name</th>
                   <th className="px-3 py-2 font-semibold">URL</th>
@@ -177,7 +177,7 @@ export function AdminPanel({
           </div>
         </section>
 
-        <section className="mt-4 rounded-lg border border-(--line) bg-white p-4">
+        <section className="mt-4 rounded-lg border border-(--line) bg-(--paper-accent) p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-(--ink)">Classification profile</h3>
             <Button
@@ -222,7 +222,7 @@ export function AdminPanel({
           </div>
         </section>
 
-        <section className="mt-4 rounded-lg border border-(--line) bg-white p-4">
+        <section className="mt-4 rounded-lg border border-(--line) bg-(--paper-accent) p-4">
           <h3 className="text-sm font-semibold text-(--ink)">Feedback queue</h3>
           <div className="mt-3 overflow-hidden rounded-lg border border-(--line)">
             {openFeedback.length === 0 ? (

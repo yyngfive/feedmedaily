@@ -30,6 +30,23 @@ class ZoteroSaveState(StrEnum):
     ERROR = "error"
 
 
+class AbstractSource(StrEnum):
+    OPENALEX = "openalex"
+    CROSSREF = "crossref"
+    RSS = "rss"
+    NONE = "none"
+
+
+def abstract_source_priority(source: AbstractSource) -> int:
+    priorities = {
+        AbstractSource.NONE: 0,
+        AbstractSource.RSS: 1,
+        AbstractSource.CROSSREF: 2,
+        AbstractSource.OPENALEX: 3,
+    }
+    return priorities[source]
+
+
 class FeedSubscription(BaseModel):
     journal: str
     url: HttpUrl
@@ -75,6 +92,7 @@ class Paper(BaseModel):
     abstract: str | None = None
     abstract_html: str | None = None
     abstract_images: list[AbstractImage] = Field(default_factory=list)
+    abstract_source: AbstractSource = AbstractSource.NONE
     published_date: date | None = None
     first_seen_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     read_at: datetime | None = None
@@ -95,6 +113,13 @@ class Paper(BaseModel):
             return None
         clean = value.strip()
         return clean or None
+
+    def model_post_init(self, __context: Any) -> None:
+        if (
+            self.abstract_source == AbstractSource.NONE
+            and (self.abstract or self.abstract_html or self.abstract_images)
+        ):
+            self.abstract_source = AbstractSource.RSS
 
 
 class Classification(BaseModel):
@@ -367,6 +392,7 @@ class JobInfo(BaseModel):
     id: str
     job_type: str
     status: str
+    message_key: str | None = None
     message: str | None = None
     error: str | None = None
     result: dict[str, Any] | None = None

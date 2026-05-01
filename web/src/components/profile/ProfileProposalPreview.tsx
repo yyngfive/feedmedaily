@@ -24,7 +24,7 @@ export function ProfileProposalPreview({proposal}: {proposal: ProfileProposal}) 
   const delta = proposal.rule_delta;
 
   return (
-    <Card className="border border-(--line) bg-white">
+    <Card className="border border-(--line) bg-(--paper-accent)">
       <Card.Header className="flex flex-col items-start gap-2">
         <p className="text-sm font-semibold text-(--ink)">Pending profile changes</p>
         <div className="space-y-1">
