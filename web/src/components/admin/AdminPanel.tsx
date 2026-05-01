@@ -64,23 +64,20 @@ export function AdminPanel({
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/20">
-      <aside className="h-full w-full max-w-[min(1100px,92vw)] overflow-auto border-l border-[var(--line)] bg-[var(--paper)] p-4 shadow-xl">
+      <aside className="h-full w-full max-w-[min(1100px,92vw)] overflow-auto border-l border-(--line) bg-(--paper) p-4 shadow-xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
-              Admin
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold text-[var(--ink)]">Control center</h2>
+            <h2 className="mt-2 text-2xl font-semibold text-(--ink)">Settings</h2>
           </div>
           <Button size="sm" variant="ghost" onPress={onClose}>
             Close
           </Button>
         </div>
 
-        <section className="mt-5 rounded-lg border border-[var(--line)] bg-white p-4">
-          <h3 className="text-sm font-semibold text-[var(--ink)]">Actions</h3>
+        <section className="mt-5 rounded-lg border border-(--line) bg-white p-4">
+          <h3 className="text-sm font-semibold text-(--ink)">Actions</h3>
           {!hasFeeds ? (
-            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+            <p className="mt-2 text-sm leading-6 text-muted">
               Add and save at least one RSS feed before running a manual fetch job.
             </p>
           ) : null}
@@ -106,9 +103,9 @@ export function AdminPanel({
           </div>
         </section>
 
-        <section className="mt-4 rounded-lg border border-[var(--line)] bg-white p-4">
+        <section className="mt-4 rounded-lg border border-(--line) bg-white p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-[var(--ink)]">Feed subscriptions</h3>
+            <h3 className="text-sm font-semibold text-(--ink)">Feed subscriptions</h3>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onPress={onAddFeed}>
                 Add feed
@@ -120,23 +117,23 @@ export function AdminPanel({
           </div>
           <div className="mt-3 space-y-3">
             {feeds.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">No RSS feeds configured yet.</p>
+              <p className="text-sm text-muted">No RSS feeds configured yet.</p>
             ) : (
               feeds.map((item, index) => (
-                <Card key={`${item.url}-${index}`} className="border border-[var(--line)]">
+                <Card key={`${item.url}-${index}`} className="border border-(--line)">
                   <Card.Content className="space-y-3">
-                    <label className="block text-sm font-medium text-[var(--ink)]">
+                    <label className="block text-sm font-medium text-(--ink)">
                       Journal name
                       <input
-                        className="mt-2 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm"
+                        className="mt-2 w-full rounded-md border border-(--line) px-3 py-2 text-sm"
                         value={item.journal}
                         onChange={(event) => onFeedChange(index, "journal", event.target.value)}
                       />
                     </label>
-                    <label className="block text-sm font-medium text-[var(--ink)]">
+                    <label className="block text-sm font-medium text-(--ink)">
                       RSS URL
                       <input
-                        className="mt-2 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm"
+                        className="mt-2 w-full rounded-md border border-(--line) px-3 py-2 text-sm"
                         value={item.url}
                         onChange={(event) => onFeedChange(index, "url", event.target.value)}
                       />
@@ -153,91 +150,61 @@ export function AdminPanel({
           </div>
         </section>
 
-        <section className="mt-4 rounded-lg border border-[var(--line)] bg-white p-4">
-          <h3 className="text-sm font-semibold text-[var(--ink)]">Current profile</h3>
-          {!profile ? (
-            <p className="mt-3 text-sm text-[var(--muted)]">No applied profile yet.</p>
-          ) : (
-            <div className="mt-3 space-y-3">
-              <div className="flex flex-wrap gap-2">
-                <Chip size="sm" variant="secondary">
-                  {profile.meta.name}
-                </Chip>
-                <Chip size="sm" variant="secondary">
-                  v{profile.meta.version}
-                </Chip>
-                <Chip size="sm" variant="secondary">
-                  {profile.topic_taxonomy.length} tags
-                </Chip>
-              </div>
-              <p className="text-sm leading-6 text-[var(--body)]">{profile.scope}</p>
-            </div>
-          )}
-        </section>
-
-        <section className="mt-4 rounded-lg border border-[var(--line)] bg-white p-4">
-          <h3 className="text-sm font-semibold text-[var(--ink)]">Profile proposals</h3>
+        <section className="mt-4 rounded-lg border border-(--line) bg-white p-4">
+          <h3 className="text-sm font-semibold text-(--ink)">Profile proposals</h3>
           <div className="mt-3 space-y-3">
             {proposals.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">No profile proposals yet.</p>
+              <p className="text-sm text-muted">No profile proposals yet.</p>
             ) : (
-              proposals.map((proposal) => (
-                <Card key={proposal.id} className="border border-[var(--line)]">
+              
+                <Card key={proposals[0].id} className="">
                   <Card.Header className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Chip size="sm" variant="secondary">
-                        {proposal.state}
-                      </Chip>
-                      <Chip size="sm" variant="secondary">
-                        {proposal.model}
-                      </Chip>
-                    </div>
-                    <span className="text-xs text-[var(--muted)]">
-                      {proposal.created_at.slice(0, 10)}
+                    <span className="text-base">
+                      {proposals[0].created_at.slice(0, 10)}
                     </span>
                   </Card.Header>
                   <Card.Content className="max-h-[78vh] overflow-y-auto pr-1">
-                    <ProfileProposalPreview proposal={proposal} />
+                    <ProfileProposalPreview proposal={proposals[0]} />
                   </Card.Content>
                   <Card.Footer className="flex flex-wrap gap-2">
                     <Button
-                      isDisabled={proposal.state !== "pending"}
+                      isDisabled={proposals[0].state !== "pending"}
                       size="sm"
-                      onPress={() => onApplyProposal(proposal.id)}
+                      onPress={() => onApplyProposal(proposals[0].id)}
                     >
                       Apply
                     </Button>
                     <Button
-                      isDisabled={proposal.state !== "pending"}
+                      isDisabled={proposals[0].state !== "pending"}
                       size="sm"
                       variant="ghost"
-                      onPress={() => onRejectProposal(proposal.id)}
+                      onPress={() => onRejectProposal(proposals[0].id)}
                     >
                       Reject
                     </Button>
                   </Card.Footer>
                 </Card>
-              ))
+              
             )}
           </div>
         </section>
 
-        <section className="mt-4 rounded-lg border border-[var(--line)] bg-white p-4">
-          <h3 className="text-sm font-semibold text-[var(--ink)]">Feedback queue</h3>
+        <section className="mt-4 rounded-lg border border-(--line) bg-white p-4">
+          <h3 className="text-sm font-semibold text-(--ink)">Feedback queue</h3>
           <div className="mt-3 space-y-3">
             {feedback.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">No feedback submitted yet.</p>
+              <p className="text-sm text-muted">No feedback submitted yet.</p>
             ) : (
               feedback.map((item) => (
-                <Card key={item.id} className="border border-[var(--line)]">
+                <Card key={item.id} className="border border-(--line)">
                   <Card.Content className="space-y-2">
-                    <p className="text-sm font-semibold text-[var(--ink)]">{item.paper_title}</p>
-                    <p className="text-sm text-[var(--muted)]">
+                    <p className="text-sm font-semibold text-(--ink)">{item.paper_title}</p>
+                    <p className="text-sm text-muted">
                       {relevanceLabel[item.original_relevance]} {" -> "}{" "}
                       {relevanceLabel[item.corrected_relevance]}
                     </p>
                     {item.note ? (
-                      <p className="text-sm leading-6 text-[var(--body)]">{item.note}</p>
+                      <p className="text-sm leading-6 text-(--body)">{item.note}</p>
                     ) : null}
                     <div className="flex flex-wrap gap-2">
                       <Chip size="sm" variant="secondary">
@@ -256,31 +223,6 @@ export function AdminPanel({
                         Delete
                       </Button>
                     </div>
-                  </Card.Content>
-                </Card>
-              ))
-            )}
-          </div>
-        </section>
-
-        <section className="mt-4 rounded-lg border border-[var(--line)] bg-white p-4">
-          <h3 className="text-sm font-semibold text-[var(--ink)]">Jobs</h3>
-          <div className="mt-3 space-y-3">
-            {jobs.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">No jobs yet.</p>
-            ) : (
-              jobs.map((job) => (
-                <Card key={job.id} className="border border-[var(--line)]">
-                  <Card.Content className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-semibold text-[var(--ink)]">
-                        {job.job_type}
-                      </span>
-                      <Chip size="sm" variant="secondary">
-                        {job.status}
-                      </Chip>
-                    </div>
-                    <p className="text-sm leading-6 text-[var(--body)]">{statusMessage(job)}</p>
                   </Card.Content>
                 </Card>
               ))

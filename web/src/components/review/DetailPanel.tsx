@@ -22,7 +22,7 @@ export function DetailPanel({
 }) {
   if (!paper) {
     return (
-      <aside className="sticky top-4 rounded-lg border border-[var(--line)] bg-white p-5 text-sm text-[var(--muted)]">
+      <aside className="sticky top-4 rounded-lg border border-(--line) bg-white p-5 text-sm text-muted">
         No paper selected.
       </aside>
     );
@@ -32,54 +32,28 @@ export function DetailPanel({
   const zoteroSaved = paper.zotero_status?.saved ?? false;
 
   return (
-    <aside className="sticky top-4 space-y-5 rounded-lg border border-[var(--line)] bg-white p-5">
+    <aside className="sticky top-4 space-y-5 rounded-lg border border-(--line) bg-white p-5">
       <div className="space-y-3">
-        <div className="flex flex-wrap gap-2">
-          <Chip color={tone.chip} size="sm" variant="soft">
-            {relevanceLabel[paper.classification.relevance]}
-          </Chip>
-          <Chip size="sm" variant="secondary">
-            {Math.round(paper.classification.confidence * 100)}% confidence
-          </Chip>
-          {feedbackText ? (
-            <Chip color="danger" size="sm" variant="soft">
-              {feedbackText}
-            </Chip>
-          ) : null}
-        </div>
-        <h2 className="text-xl font-semibold leading-7 text-[var(--ink)]">{paper.title}</h2>
-        <p className="text-sm leading-6 text-[var(--muted)]">
-          {paper.journal || "Unknown journal"} · {paperDate(paper)} · {authorsLine(paper)}
+        <h2 className="text-xl font-semibold leading-7 text-(--ink)">{paper.title}</h2>
+        <p className="text-base leading-6 text-muted)">
+          {paper.journal || "Unknown journal"}
+        </p>
+        <p className="text-sm leading-6 text-muted)">
+          {paperDate(paper)} · {authorsLine(paper)}
         </p>
       </div>
 
-      <section className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
-          Summary
-        </h3>
-        <p className="text-sm leading-6 text-[var(--body)]">
-          {sentence(paper.abstract ?? paper.classification.reason)}
-        </p>
-      </section>
-
-      <section className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
-          LLM rationale
-        </h3>
-        <p className="text-sm leading-6 text-[var(--body)]">{paper.classification.reason}</p>
-      </section>
-
       {paper.feedback_status?.note ? (
         <section className="space-y-2">
-          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
             Feedback note
           </h3>
-          <p className="text-sm leading-6 text-[var(--body)]">{paper.feedback_status.note}</p>
+          <p className="text-sm leading-6 text-(--body)">{paper.feedback_status.note}</p>
         </section>
       ) : null}
 
       <section className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
           Keywords
         </h3>
         <div className="flex flex-wrap gap-2">
@@ -90,16 +64,16 @@ export function DetailPanel({
               </Chip>
             ))
           ) : (
-            <span className="text-sm text-[var(--muted)]">No keywords</span>
+            <span className="text-sm text-muted">No keywords</span>
           )}
         </div>
       </section>
 
       <section className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
           Abstract
         </h3>
-        <p className="max-h-64 overflow-auto pr-1 text-sm leading-6 text-[var(--body)]">
+        <p className="max-h-64 overflow-auto pr-1 text-sm leading-6 text-(--body)">
           {paper.abstract || "No abstract was available in the feed metadata."}
         </p>
       </section>
@@ -111,7 +85,7 @@ export function DetailPanel({
       ) : null}
 
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" onPress={() => window.open(doiHref(paper), "_blank")}>
+        <Button size="sm" variant="primary"  onPress={() => window.open(doiHref(paper), "_blank")}>
           DOI link
         </Button>
         <Button
@@ -122,12 +96,12 @@ export function DetailPanel({
         >
           {isUnread ? "Mark as read" : "Read"}
         </Button>
-        <Button size="sm" variant={zoteroSaved ? "secondary" : "tertiary"} onPress={onSave}>
+        <Button size="sm" variant={zoteroSaved ? "tertiary" : "tertiary"} onPress={onSave}>
           {zoteroSaved ? "Saved" : "Save to Zotero"}
         </Button>
         <Button
           size="sm"
-          variant={feedbackText ? "danger-soft" : "ghost"}
+          variant={feedbackText ? "danger-soft" : "tertiary"}
           onPress={onMarkWrong}
         >
           Mark wrong

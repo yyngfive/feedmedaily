@@ -1,5 +1,8 @@
+
+import {Label, ListBox, Select} from "@heroui/react";
+
 export const nativeSelectClassName =
-  "w-full rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm";
+  "w-full rounded-md border border-(--line) bg-white px-3 py-2 text-sm";
 
 export type SelectOption = {
   label: string;
@@ -20,7 +23,7 @@ export function SelectField({
   value: string;
 }) {
   return (
-    <label className="block text-sm font-medium text-[var(--ink)]">
+    <label className="block text-sm font-medium text-(--ink)">
       {label}
       <select
         className={`${nativeSelectClassName} mt-2`}

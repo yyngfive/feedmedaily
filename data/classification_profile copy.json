@@ -1,0 +1,99 @@
+{
+  "meta": {
+    "name": "XNA",
+    "version": 2,
+    "created_at": "2025-04-06T00:00:00Z",
+    "updated_at": "2026-04-30T11:00:11.798502Z",
+    "source_description": "我关注的文献方向是：\n\n1. 核酸化学（nucleic acid chemistry）\n重点包括 DNA/RNA/XNA/TNA、修饰核苷酸/核苷、寡核苷酸化学、aptamer、SELEX、核酸探针、核酸连接与扩增相关化学，以及与核酸底物直接相关的方法开发。\n\n2. 核酸相关酶工程\n重点关注以核酸、核苷酸或 XNA 为主要底物或主要功能对象的酶，例如：\npolymerase、DNA polymerase、RNA polymerase、reverse transcriptase、ligase、terminal transferase、nucleotidyltransferase、nuclease、ribozyme、deoxyribozyme，以及 XNA/TNA 相关酶。\n如果文章的核心是这些酶的工程化、底物特异性改造或定向进化研究。"
+  },
+  "scope": "Focus on nucleic acid chemistry and engineering of enzymes that act on nucleic acids, nucleotides, or XNA substrates, especially XNA/TNA, modified oligonucleotides, aptamers/SELEX, probes, ligation/amplification chemistry, and polymerase/ligase/reverse-transcriptase engineering.",
+  "relevance_rules": {
+    "direct": [
+      "Paper directly investigates or develops nucleic acid chemistry, XNA, TNA, modified nucleotides/nucleosides, or oligonucleotide chemical modification.",
+      "Paper reports selection of aptamers via SELEX or develops new SELEX methodologies.",
+      "Paper designs or characterizes nucleic acid probes for sensing, imaging, or therapeutic applications.",
+      "Paper develops nucleic acid ligation or amplification chemistries (e.g., novel ligases, unnatural base pairs, chemical ligation methods).",
+      "Paper focuses on engineering of enzymes whose primary substrate or function involves nucleic acids, nucleotides, or XNA (e.g., polymerase engineering, reverse transcriptase engineering, terminal transferase engineering).",
+      "Paper reports directed evolution or screening campaigns for polymerases, ligases, nucleases, or other nucleic acid-acting enzymes.",
+      "Paper studies ribozymes or deoxyribozymes with focus on catalytic mechanism, engineering, or applications.",
+      "Paper presents programmable nucleic acid circuits, DNA computing, or synthetic nucleic acid-based logic systems where the chemical or structural design of the nucleic acid component is central."
+    ],
+    "indirect": [
+      "Paper uses nucleic acid chemistry tools (e.g., standard PCR, cloning, sequencing) as a peripheral technique without developing or modifying them.",
+      "Paper reports structural or biochemical characterization of nucleic acid-binding proteins but does not involve enzyme engineering or substrate modification.",
+      "Paper is about general RNA biology (e.g., microRNA profiling, RNA-seq) with no chemical or enzymatic engineering aspect.",
+      "Paper uses aptamers or SELEX as a delivery/targeting tool but the main innovation is in another field (e.g., drug delivery vehicle, biosensor platform where nucleic acid component is not the focus)."
+    ],
+    "unrelated": [
+      "Paper is about cell biology, developmental biology, cancer biology, immunology, neuroscience, or plant biology with no nucleic acid chemistry or nucleic acid enzyme engineering.",
+      "Paper uses standard PCR, gel electrophoresis, or commercial cloning kits without any method development or customization.",
+      "Paper is about small molecule drug discovery, medicinal chemistry that does not involve nucleotide or nucleic acid targets.",
+      "Paper is about protein engineering where the target protein does not interact with nucleic acids or nucleotides as substrates (e.g., metabolic enzymes, antibodies, GPCRs).",
+      "Paper is about computational modeling, machine learning, or software tool development with no direct connection to nucleic acid chemical or enzymatic research.",
+      "Paper is about chromatin structure, nucleosome dynamics, histone modifications, or epigenetic regulation without a focus on nucleic acid chemistry or enzyme engineering relevant to the reader's interests.",
+      "Paper reports pharmacological studies, metabolic disease models, or receptor agonism/antagonism without involving nucleic acid-based therapeutics or delivery systems."
+    ]
+  },
+  "topic_taxonomy": [
+    {
+      "id": "nucleic_acid_chemistry",
+      "label": "Nucleic Acid Chemistry"
+    },
+    {
+      "id": "xna",
+      "label": "XNA (Xeno Nucleic Acids)"
+    },
+    {
+      "id": "aptamer_selex",
+      "label": "Aptamer and SELEX"
+    },
+    {
+      "id": "nucleic_acid_probes",
+      "label": "Nucleic Acid Probes"
+    },
+    {
+      "id": "nucleic_acid_enzyme_engineering",
+      "label": "Nucleic Acid Enzyme Engineering"
+    },
+    {
+      "id": "polymerase",
+      "label": "Polymerase Engineering"
+    },
+    {
+      "id": "reverse_transcriptase",
+      "label": "Reverse Transcriptase Engineering"
+    },
+    {
+      "id": "ligase",
+      "label": "Ligase and Ligation Chemistry"
+    },
+    {
+      "id": "nucleic_acid_amplification",
+      "label": "Nucleic Acid Amplification Chemistry"
+    },
+    {
+      "id": "ribozyme_deoxyribozyme",
+      "label": "Ribozymes and Deoxyribozymes"
+    }
+  ],
+  "few_shots": [
+    {
+      "title": "Directed Evolution of a TNA Polymerase for Improved Substrate Acceptance",
+      "relevance": "direct",
+      "tags": [
+        "nucleic_acid_enzyme_engineering",
+        "xna",
+        "polymerase"
+      ],
+      "rationale": "Directly reports engineering of a polymerase to accept TNA substrates, aligning with both nucleic acid enzyme engineering and XNA interests."
+    },
+    {
+      "title": "Crystal Structure of HIV Reverse Transcriptase in Complex with a Non-nucleoside Inhibitor",
+      "relevance": "indirect",
+      "tags": [
+        "reverse_transcriptase"
+      ],
+      "rationale": "Structural study of a reverse transcriptase, relevant to the reader's enzyme engineering interest but lacking engineering or substrate modification aspects; thus indirect."
+    }
+  ]
+}

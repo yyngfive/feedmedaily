@@ -1,10 +1,10 @@
-import {Card, Chip} from "@heroui/react";
+import { Card, Chip } from "@heroui/react";
 import React from "react";
 
-import {relevanceLabel, relevanceTone} from "../../app/constants";
-import {authorsLine, feedbackLabel, paperDate, sentence} from "../../app/utils";
-import {tagLabel} from "../../reportData";
-import type {ClassificationProfile, Paper} from "../../types";
+import { relevanceLabel, relevanceTone } from "../../app/constants";
+import { authorsLine, feedbackLabel, paperDate, sentence } from "../../app/utils";
+import { tagLabel } from "../../reportData";
+import type { ClassificationProfile, Paper } from "../../types";
 
 export function PaperCard({
   isSelected,
@@ -30,7 +30,7 @@ export function PaperCard({
 
   return (
     <Card
-      className={`border-l-4 ${tone.ring} ${isSelected ? "outline outline-2 outline-[var(--accent)]" : ""}`}
+      className={`border-l-4 ${tone.ring} ${isSelected ? "outline outline-(--accent)" : ""}`}
     >
       <div
         className="block w-full cursor-pointer text-left"
@@ -40,14 +40,17 @@ export function PaperCard({
         onKeyDown={handleSelectKeyDown}
       >
         <Card.Header className="gap-3">
-          <div className="flex flex-1 flex-wrap items-center gap-2">
+          <div className="flex flex-1 flex-wrap items-center gap-2 my-1">
             {isUnread ? (
               <span
                 aria-label="Unread"
-                className="size-2 rounded-full bg-[var(--unread)]"
+                className="size-2 rounded-full bg-(--unread)"
                 title="Unread"
-              />
+              ></span>
             ) : null}
+            <span className={`text-sm font-semibold ${tone.text}`}>
+              {Math.round(paper.classification.confidence * 100)}%
+            </span>
             <Chip color={tone.chip} size="sm" variant="soft">
               {relevanceLabel[paper.classification.relevance]}
             </Chip>
@@ -62,28 +65,22 @@ export function PaperCard({
               </Chip>
             ) : null}
           </div>
-          <span className={`text-sm font-semibold ${tone.text}`}>
-            {Math.round(paper.classification.confidence * 100)}%
-          </span>
+
         </Card.Header>
         <Card.Content className="gap-3">
           <div>
             <Card.Title className="line-clamp-2 text-lg leading-6">{paper.title}</Card.Title>
             {paper.classification.translated_title_zh ? (
-              <Card.Description className="mt-1 line-clamp-2 text-sm">
+              <Card.Description className="mt-1 line-clamp-2 text-base">
                 {paper.classification.translated_title_zh}
               </Card.Description>
             ) : null}
           </div>
-          <p className="text-sm text-[var(--muted)]">
-            {paper.journal || "Unknown journal"} · {paperDate(paper)} · {authorsLine(paper)}
+          <p className="text-base text-muted">
+            {paper.journal || "Unknown journal"}
           </p>
-          <p className="line-clamp-2 text-sm leading-6 text-[var(--body)]">
-            {sentence(paper.abstract ?? paper.classification.reason)}
-          </p>
-          <p className="line-clamp-2 text-sm leading-6 text-[var(--body)]">
-            <span className="font-semibold text-[var(--ink)]">Why relevant:</span>{" "}
-            {paper.classification.reason}
+          <p className="text-sm text-muted">
+            {paperDate(paper)} · {authorsLine(paper)}
           </p>
         </Card.Content>
       </div>

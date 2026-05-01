@@ -48,27 +48,27 @@ export function FiltersSidebar({
   visibleTotals: Record<Relevance, number>;
 }) {
   return (
-    <aside className="space-y-4 rounded-lg border border-[var(--line)] bg-white p-4 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:overflow-auto">
+    <aside className="space-y-4 rounded-lg border border-(--line) bg-white p-4 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:overflow-auto">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
-          SciRSSAgent
+        <h1 className="mt-2 text-2xl font-semibold">SciRSSAgent</h1>
+        <p className="mt-2 text-sm leading-6 text-muted)">
+          Last Update: {reportDate}
         </p>
-        <h1 className="mt-2 text-2xl font-semibold">Paper review</h1>
-        <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-          {reportDate} · {shownCount} shown · {totalCount} total
+        <p className="mt-1 text-sm leading-6 text-muted)">
+          {shownCount} shown, {totalCount} total
         </p>
-        <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
-          {profileName} · v{profileVersion}
+        <p className="mt-1 text-sm leading-6 text-muted)">
+          Profile: {profileName} · v{profileVersion}
         </p>
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-center">
         {relevanceOrder.map((item) => (
-          <div key={item} className="rounded-md border border-[var(--line)] p-2">
+          <div key={item} className="rounded-md border border-(--line) p-2">
             <div className={`text-lg font-semibold ${relevanceTone[item].text}`}>
               {visibleTotals[item] ?? 0}
             </div>
-            <div className="text-[11px] uppercase text-[var(--muted)]">{item}</div>
+            <div className="text-xs uppercase text-muted">{item}</div>
           </div>
         ))}
       </div>

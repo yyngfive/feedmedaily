@@ -528,7 +528,7 @@ export function App() {
   }
 
   return (
-    <main className="min-h-screen bg-[var(--paper)] text-[var(--ink)]">
+    <main className="min-h-screen bg-[--paper] text-[--ink]">
       <AdminPanel
         open={adminOpen}
         profile={profile}
@@ -574,7 +574,7 @@ export function App() {
         onSubmit={() => void handleSaveToZotero()}
       />
 
-      <div className="mx-auto grid max-w-[1500px] gap-4 px-4 py-4 lg:grid-cols-[260px_minmax(0,1fr)_360px]">
+      <div className="mx-auto grid max-w-375 gap-4 px-4 py-4 lg:grid-cols-[260px_minmax(0,1fr)_360px]">
         <FiltersSidebar
           dateFilter={dateFilter}
           journal={journal}

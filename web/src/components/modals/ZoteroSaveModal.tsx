@@ -59,10 +59,6 @@ export function ZoteroSaveModal({
 
       {loading ? <StatusBanner tone="info">Loading Zotero collections...</StatusBanner> : null}
       {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
-      <div className="rounded-md border border-[var(--line)] bg-slate-50 p-3 text-sm text-[var(--muted)]">
-        If you prefer the browser connector workflow, open the original article first and then use
-        the Zotero browser extension manually.
-      </div>
     </ModalShell>
   );
 }

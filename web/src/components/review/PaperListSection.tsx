@@ -50,7 +50,7 @@ export function PaperListSection({
 }) {
   return (
     <section className="min-w-0 space-y-4">
-      <div className="rounded-lg border border-[var(--line)] bg-white p-4">
+      <div className="rounded-lg border border-(--line) bg-white p-4">
         {loadError ? <StatusBanner className="mb-4" tone="warning">{loadError}</StatusBanner> : null}
         {notice ? <StatusBanner className="mb-4" tone="success">{notice}</StatusBanner> : null}
         {reportErrors.length ? (
@@ -63,9 +63,9 @@ export function PaperListSection({
 
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <label className="block w-full xl:max-w-xl">
-            <span className="text-sm font-medium text-[var(--ink)]">Search</span>
+            <span className="text-sm font-medium text-(--ink)">Search</span>
             <input
-              className="mt-2 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm"
+              className="mt-2 w-full rounded-md border border-(--line) px-3 py-2 text-sm"
               placeholder="Search title, abstract, author, journal"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -84,7 +84,7 @@ export function PaperListSection({
                   variant={relevance === tab.id ? "secondary" : "outline"}
                   onPress={() => setRelevance(tab.id)}
                 >
-                  {tab.label} {tab.id === "all" ? visibleBaseCount : visibleTotals[tab.id]}
+                  {tab.label}
                 </Button>
               ))}
             </div>
@@ -136,9 +136,9 @@ export function PaperListSection({
           }
         />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--paper)] px-1 py-1">
+        <div className="overflow-hidden px-1 py-1">
           <Virtuoso
-            className="min-h-[420px]"
+            className="min-h-105"
             computeItemKey={(index) => papers[index].id}
             increaseViewportBy={{bottom: 480, top: 240}}
             initialTopMostItemIndex={0}
