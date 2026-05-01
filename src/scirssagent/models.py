@@ -60,6 +60,101 @@ class FeedSubscription(BaseModel):
         return clean
 
 
+class SettingOption(BaseModel):
+    value: str
+    label: str
+
+
+class SettingsConfigField(BaseModel):
+    key: str
+    label: str
+    description: str
+    section: str
+    input_type: str
+    secret: bool = False
+    configured: bool = False
+    source: str
+    stored_in_dotenv: bool = False
+    storage_label: str | None = None
+    value: str | None = None
+    default_value: str | None = None
+    options: list[SettingOption] = Field(default_factory=list)
+
+
+class SettingsConfigResponse(BaseModel):
+    fields: list[SettingsConfigField] = Field(default_factory=list)
+
+
+class SettingsConfigFieldUpdate(BaseModel):
+    value: str | None = None
+    clear: bool = False
+
+
+class SettingsConfigUpdateRequest(BaseModel):
+    fields: dict[str, SettingsConfigFieldUpdate] = Field(default_factory=dict)
+
+
+class AppMetaResponse(BaseModel):
+    name: str
+    version: str
+    mode: str
+    install_dir: str
+    data_dir: str
+    logs_dir: str
+    reports_dir: str
+    static_dir: str
+    server_url: str | None = None
+    scheduler_task_name: str
+    update_manifest_url: str | None = None
+
+
+class AppHealthResponse(BaseModel):
+    status: str = "ok"
+    name: str
+    version: str
+    mode: str
+    server_url: str | None = None
+
+
+class AppUpdateResponse(BaseModel):
+    status: str
+    current_version: str
+    latest_version: str | None = None
+    has_update: bool = False
+    download_url: str | None = None
+    release_notes_url: str | None = None
+    detail: str | None = None
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class SchedulerSettingsResponse(BaseModel):
+    installed: bool = False
+    task_name: str
+    mode: str
+    scheduled_time: str | None = None
+    state: str | None = None
+    next_run_time: str | None = None
+    last_run_time: str | None = None
+    last_result: int | None = None
+    command: str | None = None
+
+
+class SchedulerSettingsUpdateRequest(BaseModel):
+    daily_time: str
+
+    @field_validator("daily_time")
+    @classmethod
+    def validate_daily_time(cls, value: str) -> str:
+        clean = value.strip()
+        parts = clean.split(":")
+        if len(parts) != 2 or not all(part.isdigit() for part in parts):
+            raise ValueError("daily_time must be in HH:MM format")
+        hour, minute = (int(parts[0]), int(parts[1]))
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            raise ValueError("daily_time must be a valid 24-hour time")
+        return f"{hour:02d}:{minute:02d}"
+
+
 class AbstractImage(BaseModel):
     src: str
     alt: str | None = None

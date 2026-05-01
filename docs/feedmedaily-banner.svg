@@ -1,0 +1,53 @@
+<svg width="1600" height="640" viewBox="0 0 1600 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="panel" x1="120" y1="68" x2="1510" y2="610" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7FBFB"/>
+      <stop offset="1" stop-color="#E8F4F5"/>
+    </linearGradient>
+    <linearGradient id="hero" x1="160" y1="92" x2="582" y2="548" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F766E"/>
+      <stop offset="1" stop-color="#12324A"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="640" fill="#F2F7F8"/>
+  <rect x="52" y="52" width="1496" height="536" rx="40" fill="url(#panel)"/>
+  <rect x="108" y="92" width="526" height="456" rx="64" fill="url(#hero)"/>
+  <circle cx="516" cy="180" r="64" fill="#62E5D6" fill-opacity="0.12"/>
+  <circle cx="224" cy="454" r="78" fill="#D9FFF9" fill-opacity="0.08"/>
+  <path d="M220 286C266 286 302 322 302 368" stroke="#8AF3E5" stroke-width="20" stroke-linecap="round"/>
+  <path d="M220 234C292 234 350 292 350 364" stroke="#54E0CF" stroke-width="20" stroke-linecap="round"/>
+  <path d="M220 182C316 182 394 260 394 356" stroke="#D9FFF9" stroke-width="20" stroke-linecap="round"/>
+  <circle cx="220" cy="368" r="20" fill="#D9FFF9"/>
+  <rect x="332" y="158" width="184" height="260" rx="30" fill="#F7FEFD"/>
+  <rect x="360" y="202" width="128" height="16" rx="8" fill="#D3E5E8"/>
+  <rect x="360" y="238" width="108" height="16" rx="8" fill="#D3E5E8"/>
+  <rect x="360" y="286" width="128" height="20" rx="10" fill="#0F766E" fill-opacity="0.16"/>
+  <rect x="360" y="324" width="128" height="20" rx="10" fill="#0F766E" fill-opacity="0.16"/>
+  <rect x="360" y="362" width="92" height="20" rx="10" fill="#0F766E" fill-opacity="0.16"/>
+  <path d="M500 176L509.6 193.92L530 196.88L515.2 211.12L518.72 231.2L500 221.36L481.28 231.2L484.8 211.12L470 196.88L490.4 193.92L500 176Z" fill="#F6D264"/>
+  <g>
+    <text x="706" y="244" fill="#183042" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="88" font-weight="700">
+      FeedMeDaily
+    </text>
+    <text x="706" y="304" fill="#44606F" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="28" font-weight="500">
+      Daily RSS triage for research papers, with profile-driven classification and local review.
+    </text>
+    <text x="706" y="360" fill="#5E7481" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="400">
+      Review the papers that matter, keep your interests local, and sync the important ones to Zotero.
+    </text>
+  </g>
+  <g opacity="0.96">
+    <rect x="706" y="416" width="346" height="92" rx="26" fill="#FFFFFF"/>
+    <rect x="738" y="446" width="102" height="14" rx="7" fill="#0F766E" fill-opacity="0.22"/>
+    <rect x="856" y="446" width="164" height="14" rx="7" fill="#C9DADD"/>
+    <rect x="738" y="474" width="250" height="12" rx="6" fill="#DCE8EA"/>
+    <rect x="738" y="496" width="146" height="12" rx="6" fill="#DCE8EA"/>
+  </g>
+  <g opacity="0.92">
+    <rect x="1080" y="392" width="372" height="116" rx="26" fill="#13344A"/>
+    <rect x="1112" y="424" width="130" height="14" rx="7" fill="#7AE7D9" fill-opacity="0.92"/>
+    <rect x="1258" y="424" width="128" height="14" rx="7" fill="#7AE7D9" fill-opacity="0.3"/>
+    <rect x="1112" y="454" width="282" height="12" rx="6" fill="#B7CFD5" fill-opacity="0.56"/>
+    <rect x="1112" y="476" width="186" height="12" rx="6" fill="#B7CFD5" fill-opacity="0.56"/>
+  </g>
+</svg>

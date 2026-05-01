@@ -1,7 +1,7 @@
 [project]
 name = "scirssagent"
 version = "0.1.0"
-description = "Local RSS literature monitor with LLM relevance classification and static reports."
+description = "FeedMeDaily: local RSS literature triage with profile-driven LLM classification and static reports."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

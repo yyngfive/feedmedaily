@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from scirssagent.config import load_settings
 from scirssagent.models import (
     Classification,
     ClassificationProfile,
@@ -127,6 +128,201 @@ def test_feed_settings_api_returns_empty_list_then_writes_json(monkeypatch) -> N
     payload = put_response.json()
     assert payload[0]["journal"] == "Nature"
     assert (root / "data" / "rss_feeds.json").exists()
+
+
+def test_settings_config_api_masks_secrets_and_updates_local_env(monkeypatch) -> None:
+    root = _project_root("settings-config")
+    _bootstrap_root(root)
+    (root / ".env").write_text(
+        "\n".join(
+            [
+                "SCIRSS_CLASSIFIER_API_KEY=super-secret-classifier-key",
+                "SCIRSS_CLASSIFIER_MODEL=deepseek-v4-flash",
+                "SCIRSS_CLASSIFIER_BATCH_SIZE=10",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(root)
+    from scirssagent.server import create_app
+
+    client = TestClient(create_app())
+    get_response = client.get("/api/settings/config")
+
+    assert get_response.status_code == 200
+    assert "super-secret-classifier-key" not in get_response.text
+    api_key_field = next(
+        item for item in get_response.json()["fields"] if item["key"] == "SCIRSS_CLASSIFIER_API_KEY"
+    )
+    assert api_key_field["secret"] is True
+    assert api_key_field["configured"] is True
+    assert api_key_field["source"] == "dotenv"
+    assert api_key_field["value"] is None
+
+    put_response = client.put(
+        "/api/settings/config",
+        json={
+            "fields": {
+                "SCIRSS_CLASSIFIER_API_KEY": {"value": "replacement-secret"},
+                "SCIRSS_CLASSIFIER_MODEL": {"value": "deepseek-v4-pro"},
+                "SCIRSS_CLASSIFIER_BATCH_SIZE": {"value": "12"},
+                "SCIRSS_ZOTERO_COLLECTION_KEY": {"value": "INBOX"},
+            }
+        },
+    )
+
+    assert put_response.status_code == 200
+    assert "replacement-secret" not in put_response.text
+    env_text = (root / ".env").read_text(encoding="utf-8")
+    assert "SCIRSS_CLASSIFIER_API_KEY='replacement-secret'" in env_text
+    assert "SCIRSS_CLASSIFIER_MODEL='deepseek-v4-pro'" in env_text
+    assert "SCIRSS_CLASSIFIER_BATCH_SIZE='12'" in env_text
+    assert "SCIRSS_ZOTERO_COLLECTION_KEY='INBOX'" in env_text
+
+    settings = load_settings(root)
+    assert settings.classifier_api_key == "replacement-secret"
+    assert settings.classifier_model == "deepseek-v4-pro"
+    assert settings.classifier_batch_size == 12
+    assert settings.zotero_collection_key == "INBOX"
+
+
+def test_settings_config_api_shows_environment_override_source(monkeypatch) -> None:
+    root = _project_root("settings-config-env")
+    _bootstrap_root(root)
+    (root / ".env").write_text("SCIRSS_PROFILE_MODEL=local-profile-model", encoding="utf-8")
+    monkeypatch.setenv("SCIRSS_PROFILE_MODEL", "system-profile-model")
+    monkeypatch.chdir(root)
+
+    from scirssagent.server import create_app
+
+    client = TestClient(create_app())
+    response = client.get("/api/settings/config")
+
+    assert response.status_code == 200
+    profile_model_field = next(
+        item for item in response.json()["fields"] if item["key"] == "SCIRSS_PROFILE_MODEL"
+    )
+    assert profile_model_field["value"] == "system-profile-model"
+    assert profile_model_field["source"] == "environment"
+    assert profile_model_field["stored_in_dotenv"] is True
+
+
+def test_release_mode_settings_are_written_to_user_data_store(monkeypatch) -> None:
+    root = _project_root("release-settings")
+    _bootstrap_root(root)
+    data_root = (root / "user-data").resolve()
+    monkeypatch.setenv("FEEDMEDAILY_RUNTIME_MODE", "release")
+    monkeypatch.setenv("FEEDMEDAILY_DATA_ROOT", str(data_root))
+    monkeypatch.chdir(root)
+
+    from scirssagent.server import create_app
+
+    client = TestClient(create_app())
+    response = client.put(
+        "/api/settings/config",
+        json={
+            "fields": {
+                "SCIRSS_CLASSIFIER_API_KEY": {"value": "release-secret"},
+                "SCIRSS_PROFILE_MODEL": {"value": "release-profile-model"},
+                "SCIRSS_ZOTERO_LIBRARY_ID": {"value": "123456"},
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    settings_json = (data_root / "config" / "settings.json").read_text(encoding="utf-8")
+    secrets_json = (data_root / "config" / "secrets.json").read_text(encoding="utf-8")
+    assert "release-profile-model" in settings_json
+    assert "123456" in settings_json
+    assert "release-secret" not in settings_json
+    assert "release-secret" not in secrets_json
+
+    settings = load_settings(root)
+    assert settings.mode == "release"
+    assert settings.user_data_dir == data_root
+    assert settings.classifier_api_key == "release-secret"
+    assert settings.profile_model == "release-profile-model"
+
+
+def test_app_meta_update_and_scheduler_apis(monkeypatch) -> None:
+    root = _project_root("app-meta")
+    _bootstrap_root(root)
+    monkeypatch.chdir(root)
+    import scirssagent.server as server_module
+
+    monkeypatch.setattr(
+        server_module,
+        "scheduler_status",
+        lambda settings: {
+            "installed": True,
+            "task_name": "FeedMeDaily Daily Sync",
+            "mode": settings.mode,
+            "scheduled_time": "09:30",
+            "state": "Ready",
+            "next_run_time": "2026-05-02T09:30:00+00:00",
+            "last_run_time": "2026-05-01T09:30:00+00:00",
+            "last_result": 0,
+            "command": "FeedMeDaily.exe run --once",
+        },
+    )
+    monkeypatch.setattr(
+        server_module,
+        "install_scheduler_task",
+        lambda settings, daily_time: {
+            "installed": True,
+            "task_name": "FeedMeDaily Daily Sync",
+            "mode": settings.mode,
+            "scheduled_time": daily_time,
+            "state": "Ready",
+            "next_run_time": None,
+            "last_run_time": None,
+            "last_result": 0,
+            "command": "FeedMeDaily.exe run --once",
+        },
+    )
+    removed: dict[str, bool] = {"called": False}
+    monkeypatch.setattr(
+        server_module,
+        "remove_scheduler_task",
+        lambda: removed.update({"called": True}),
+    )
+
+    class DummyResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, str]:
+            return {
+                "version": "0.2.0",
+                "download_url": "https://example.com/feedmedaily-installer.exe",
+                "release_notes_url": "https://example.com/release-notes",
+            }
+
+    monkeypatch.setattr(server_module.httpx, "get", lambda *args, **kwargs: DummyResponse())
+    monkeypatch.setenv("FEEDMEDAILY_UPDATE_MANIFEST_URL", "https://example.com/update.json")
+
+    client = TestClient(server_module.create_app())
+
+    meta_response = client.get("/api/app/meta")
+    assert meta_response.status_code == 200
+    assert meta_response.json()["name"] == "FeedMeDaily"
+
+    update_response = client.get("/api/app/update")
+    assert update_response.status_code == 200
+    assert update_response.json()["has_update"] is True
+
+    scheduler_get = client.get("/api/settings/scheduler")
+    assert scheduler_get.status_code == 200
+    assert scheduler_get.json()["scheduled_time"] == "09:30"
+
+    scheduler_put = client.put("/api/settings/scheduler", json={"daily_time": "08:15"})
+    assert scheduler_put.status_code == 200
+    assert scheduler_put.json()["scheduled_time"] == "08:15"
+
+    scheduler_delete = client.delete("/api/settings/scheduler")
+    assert scheduler_delete.status_code == 200
+    assert removed["called"] is True
 
 
 def test_profile_bootstrap_launches_job(monkeypatch) -> None:

@@ -1,4 +1,6 @@
 import type {
+  AppMeta,
+  AppUpdate,
   ClassificationProfile,
   CurrentProfileResponse,
   FeedSubscription,
@@ -8,6 +10,9 @@ import type {
   ProfileProposal,
   Report,
   Relevance,
+  SchedulerSettings,
+  SettingsConfigResponse,
+  SettingsConfigUpdate,
   ZoteroCollectionsResponse,
   ZoteroStatus,
 } from "./types";
@@ -43,12 +48,78 @@ export async function fetchLatestReport(): Promise<Report> {
   return (await response.json()) as Report;
 }
 
+export async function fetchAppMeta(): Promise<AppMeta> {
+  const response = await fetch("/api/app/meta");
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as AppMeta;
+}
+
+export async function fetchAppUpdate(): Promise<AppUpdate> {
+  const response = await fetch("/api/app/update");
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as AppUpdate;
+}
+
 export async function fetchFeedSubscriptions(): Promise<FeedSubscription[]> {
   const response = await fetch("/api/settings/feeds");
   if (!response.ok) {
     throw new Error(`Could not load feed subscriptions (${response.status})`);
   }
   return (await response.json()) as FeedSubscription[];
+}
+
+export async function fetchSettingsConfig(): Promise<SettingsConfigResponse> {
+  const response = await fetch("/api/settings/config");
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as SettingsConfigResponse;
+}
+
+export async function fetchSchedulerSettings(): Promise<SchedulerSettings> {
+  const response = await fetch("/api/settings/scheduler");
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as SchedulerSettings;
+}
+
+export async function saveSchedulerSettings(dailyTime: string): Promise<SchedulerSettings> {
+  const response = await fetch("/api/settings/scheduler", {
+    method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({daily_time: dailyTime}),
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as SchedulerSettings;
+}
+
+export async function deleteSchedulerSettings(): Promise<SchedulerSettings> {
+  const response = await fetch("/api/settings/scheduler", {method: "DELETE"});
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as SchedulerSettings;
+}
+
+export async function saveSettingsConfig(
+  fields: Record<string, SettingsConfigUpdate>,
+): Promise<SettingsConfigResponse> {
+  const response = await fetch("/api/settings/config", {
+    method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({fields}),
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as SettingsConfigResponse;
 }
 
 export async function saveFeedSubscriptions(

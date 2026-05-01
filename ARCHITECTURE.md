@@ -1,8 +1,8 @@
-# SciRSSAgent Architecture
+# FeedMeDaily Architecture
 
 ## Overview
 
-SciRSSAgent is a single-user literature triage application built around a local SQLite database, a profile-driven paper classifier, and a FastAPI-served React interface.
+FeedMeDaily is the public Windows release name for this single-user literature triage application. The internal Python package name remains `scirssagent`. The app is built around a local SQLite database, a profile-driven paper classifier, and a FastAPI-served React interface.
 
 ## Repository Structure
 
@@ -37,6 +37,7 @@ It is responsible for:
 
 - serving the React build from `web/dist`
 - exposing `/api/report/latest`
+- exposing local configuration read/write APIs backed by the project `.env`
 - exposing feed settings APIs
 - exposing feedback APIs
 - exposing profile bootstrap and proposal APIs
@@ -59,7 +60,7 @@ The CLI is intentionally kept smaller than the app surface and should only conta
 ## Core Backend Modules
 
 - `src/scirssagent/config.py`
-  Loads environment-based settings and resolves project-local paths.
+  Loads environment-based settings, resolves project-local paths, and manages editable local `.env` fields with source-aware precedence (`system environment` over project `.env` over built-in defaults).
 - `src/scirssagent/feeds.py`
   Reads feed subscriptions, fetches RSS/Atom feeds, and normalizes feed items.
 - `src/scirssagent/metadata.py`
@@ -85,6 +86,7 @@ The CLI is intentionally kept smaller than the app surface and should only conta
 
 These files are local machine state and must not be committed:
 
+- `.env`
 - `data/classification_profile.json`
 - `data/literature.sqlite`
 - `data/rss_feeds.json`
@@ -103,6 +105,12 @@ Each role can use its own API key and base URL:
 
 The code owns the task shell and response schema. User interest boundaries, taxonomy, notes, and few-shot guidance live in the profile file.
 
+Editable configuration is exposed in the UI, but secret values are still handled as local-only state:
+
+- secret fields are written only to the local project `.env`
+- secret fields are never echoed back to the frontend in plain text
+- the UI shows whether a value comes from the project `.env`, the system environment, or a built-in default
+
 ## UI Architecture
 
 The main app uses a three-column layout:
@@ -113,12 +121,13 @@ The main app uses a three-column layout:
 
 Behavioral baseline:
 
-- if no profile exists, onboarding is shown first
+- if no profile exists, onboarding is shown first and also includes local configuration editing
 - if a profile exists but no feeds exist, the app opens the feed-initialization empty state
 - the default review view is `Unread + Last 30 days`
 - paper cards remain summary-only
 - paper actions live in the detail panel
-- admin owns feed editing, manual jobs, feedback review, and profile proposal review
+- admin owns local configuration editing, feed editing, manual jobs, feedback review, and profile proposal review
+- the settings/admin surface is split into tabs for configuration, feeds, and profile-plus-feedback review
 
 ## Profile Lifecycle
 
