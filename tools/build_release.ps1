@@ -59,8 +59,49 @@ function Resolve-Iscc {
   return $null
 }
 
+function Stop-ExistingReleaseProcess {
+  $running = Get-Process "FeedMeDaily" -ErrorAction SilentlyContinue
+  if (-not $running) {
+    return
+  }
+
+  foreach ($process in $running) {
+    $processPath = $null
+    try {
+      $processPath = $process.Path
+    }
+    catch {
+      $processPath = $null
+    }
+
+    if ($processPath -and $processPath.StartsWith($appDist, [System.StringComparison]::OrdinalIgnoreCase)) {
+      Write-Host "Stopping running packaged app: $processPath"
+      Stop-Process -Id $process.Id -Force
+    }
+  }
+}
+
+function Remove-BuildArtifacts {
+  $paths = @(
+    (Join-Path $root "build"),
+    $appDist,
+    (Join-Path $root "FeedMeDaily.spec")
+  )
+
+  foreach ($path in $paths) {
+    if (-not (Test-Path $path)) {
+      continue
+    }
+    Write-Host "Removing old build artifact: $path"
+    Remove-Item -LiteralPath $path -Recurse -Force
+  }
+}
+
 Push-Location $root
 try {
+  Stop-ExistingReleaseProcess
+  Remove-BuildArtifacts
+
   if (Test-Path $workspacePython) {
     Invoke-NativeStep `
       -Description "Brand asset generation" `

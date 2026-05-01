@@ -22,8 +22,10 @@ from scirssagent.config import (
 )
 from scirssagent.feeds import read_feed_subscriptions, write_feed_subscriptions
 from scirssagent.models import (
+    AppControlResponse,
     AppHealthResponse,
     AppMetaResponse,
+    AppOpenRequest,
     AppUpdateResponse,
     CurrentProfileResponse,
     FeedbackProposalContext,
@@ -53,8 +55,13 @@ from scirssagent.reporting import build_report
 from scirssagent.runtime import (
     APP_PUBLIC_NAME,
     SCHEDULER_TASK_NAME,
+    AppOpenTarget,
     is_newer_version,
+    open_external_target,
     package_version,
+    process_is_running,
+    read_runtime_state,
+    schedule_process_exit,
 )
 from scirssagent.scheduler import install_scheduler_task, remove_scheduler_task, scheduler_status
 from scirssagent.services import (
@@ -166,6 +173,42 @@ def create_app() -> FastAPI:
     def api_app_update() -> AppUpdateResponse:
         settings = load_settings()
         return fetch_update_status(settings)
+
+    @app.post("/api/app/open", response_model=AppControlResponse)
+    def api_app_open_target(
+        payload: AppOpenRequest,
+        request: Request,
+    ) -> AppControlResponse:
+        settings = load_settings()
+        update_status = (
+            fetch_update_status(settings)
+            if payload.target in {
+                AppOpenTarget.DOWNLOAD_URL.value,
+                AppOpenTarget.RELEASE_NOTES_URL.value,
+            }
+            else None
+        )
+        target = resolve_app_open_target(
+            settings=settings,
+            target=payload.target,
+            server_url=str(request.base_url).rstrip("/"),
+            update=update_status,
+        )
+        open_external_target(target)
+        return AppControlResponse(
+            action="open",
+            target=payload.target,
+            detail=target,
+        )
+
+    @app.post("/api/app/exit", response_model=AppControlResponse)
+    def api_app_exit() -> AppControlResponse:
+        settings = load_settings()
+        schedule_process_exit(settings.runtime_state_path)
+        return AppControlResponse(
+            action="exit",
+            detail="Shutting down the local FeedMeDaily service.",
+        )
 
     @app.get("/api/settings/feeds")
     def api_settings_feeds() -> list[dict[str, object]]:
@@ -516,6 +559,7 @@ def build_settings_config_response() -> list[SettingsConfigField]:
 
 
 def build_app_meta(settings: Settings, request: Request) -> AppMetaResponse:
+    runtime_state = read_runtime_state(settings.runtime_state_path)
     return AppMetaResponse(
         name=APP_PUBLIC_NAME,
         version=package_version(),
@@ -528,6 +572,7 @@ def build_app_meta(settings: Settings, request: Request) -> AppMetaResponse:
         server_url=str(request.base_url).rstrip("/"),
         scheduler_task_name=SCHEDULER_TASK_NAME,
         update_manifest_url=settings.update_manifest_url,
+        process_running=process_is_running(runtime_state.pid if runtime_state else None),
     )
 
 
@@ -561,6 +606,27 @@ def fetch_update_status(settings: Settings) -> AppUpdateResponse:
         release_notes_url=release_notes_url,
         detail=None if latest_version else "Manifest did not include a version field.",
     )
+
+
+def resolve_app_open_target(
+    settings: Settings,
+    target: str,
+    server_url: str,
+    update: AppUpdateResponse | None,
+) -> str:
+    mapping = {
+        AppOpenTarget.DATA_DIR.value: str(settings.data_dir),
+        AppOpenTarget.LOGS_DIR.value: str(settings.logs_dir),
+        AppOpenTarget.REPORTS_DIR.value: str(settings.reports_dir),
+        AppOpenTarget.INSTALL_DIR.value: str(settings.app_dir),
+        AppOpenTarget.SERVER_URL.value: server_url,
+        AppOpenTarget.DOWNLOAD_URL.value: update.download_url if update else None,
+        AppOpenTarget.RELEASE_NOTES_URL.value: update.release_notes_url if update else None,
+    }
+    resolved = mapping.get(target)
+    if not resolved:
+        raise HTTPException(status_code=400, detail=f"Unsupported app open target: {target}")
+    return resolved
 
 
 def _settings_config_fields(values) -> list[SettingsConfigField]:

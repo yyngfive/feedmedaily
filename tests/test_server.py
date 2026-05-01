@@ -307,6 +307,7 @@ def test_app_meta_update_and_scheduler_apis(monkeypatch) -> None:
     meta_response = client.get("/api/app/meta")
     assert meta_response.status_code == 200
     assert meta_response.json()["name"] == "FeedMeDaily"
+    assert meta_response.json()["process_running"] is False
 
     update_response = client.get("/api/app/update")
     assert update_response.status_code == 200
@@ -323,6 +324,38 @@ def test_app_meta_update_and_scheduler_apis(monkeypatch) -> None:
     scheduler_delete = client.delete("/api/settings/scheduler")
     assert scheduler_delete.status_code == 200
     assert removed["called"] is True
+
+
+def test_app_open_and_exit_controls(monkeypatch) -> None:
+    root = _project_root("app-controls")
+    _bootstrap_root(root)
+    monkeypatch.chdir(root)
+    import scirssagent.server as server_module
+
+    opened: dict[str, str] = {}
+    shutdown_called: dict[str, str] = {}
+
+    monkeypatch.setattr(
+        server_module,
+        "open_external_target",
+        lambda target: opened.update({"target": target}),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "schedule_process_exit",
+        lambda runtime_state_path: shutdown_called.update({"path": str(runtime_state_path)}),
+    )
+    client = TestClient(server_module.create_app())
+
+    open_response = client.post("/api/app/open", json={"target": "data_dir"})
+    assert open_response.status_code == 200
+    assert open_response.json()["action"] == "open"
+    assert opened["target"].endswith("data")
+
+    exit_response = client.post("/api/app/exit")
+    assert exit_response.status_code == 200
+    assert exit_response.json()["action"] == "exit"
+    assert shutdown_called["path"].endswith("runtime.json")
 
 
 def test_profile_bootstrap_launches_job(monkeypatch) -> None:

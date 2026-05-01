@@ -1,4 +1,6 @@
 import type {
+  AppControlResponse,
+  AppControlTarget,
   AppMeta,
   AppUpdate,
   ClassificationProfile,
@@ -62,6 +64,28 @@ export async function fetchAppUpdate(): Promise<AppUpdate> {
     throw new Error(await responseErrorMessage(response));
   }
   return (await response.json()) as AppUpdate;
+}
+
+export async function openAppTarget(target: AppControlTarget): Promise<AppControlResponse> {
+  const response = await fetch("/api/app/open", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({target}),
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as AppControlResponse;
+}
+
+export async function exitApp(): Promise<AppControlResponse> {
+  const response = await fetch("/api/app/exit", {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as AppControlResponse;
 }
 
 export async function fetchFeedSubscriptions(): Promise<FeedSubscription[]> {

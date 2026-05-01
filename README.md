@@ -52,6 +52,28 @@ FeedMeDaily does not migrate these files automatically in v1.
 - Daily fetch/classify jobs use Windows Task Scheduler.
 - The UI can create, update, and remove the scheduled task.
 
+### Update manifest
+
+`FEEDMEDAILY_UPDATE_MANIFEST_URL` should point to a public HTTPS JSON file like this:
+
+```json
+{
+  "version": "0.1.0",
+  "download_url": "https://github.com/yyngfive/feedmedaily/releases/download/v0.1.0/FeedMeDaily-Setup.exe",
+  "release_notes_url": "https://github.com/yyngfive/feedmedaily/releases/tag/v0.1.0"
+}
+```
+
+This repository includes a release-ready example at [release/update.json](./release/update.json).
+
+For GitHub Releases, the simplest stable URL is:
+
+```text
+https://github.com/yyngfive/feedmedaily/releases/latest/download/update.json
+```
+
+If every release uploads an asset named `update.json`, installed apps can always check the latest version through that single URL.
+
 ## Source mode
 
 If you want to run FeedMeDaily from source:

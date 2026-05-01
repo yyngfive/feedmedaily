@@ -4,8 +4,9 @@ import {
   applyProfileProposal,
   bootstrapProfile,
   createFeedback,
-  deleteSchedulerSettings,
   deleteFeedback,
+  deleteSchedulerSettings,
+  exitApp,
   fetchAppMeta,
   fetchAppUpdate,
   fetchCurrentProfile,
@@ -22,6 +23,7 @@ import {
   launchReclassifyJob,
   loadEmbeddedReport,
   markPaperRead,
+  openAppTarget,
   rejectProfileProposal,
   saveFeedSubscriptions,
   saveSchedulerSettings,
@@ -45,6 +47,7 @@ import type {
 } from "./app/constants";
 import {EMPTY_REPORT} from "./types";
 import {AdminPanel, type AdminTab} from "./components/admin/AdminPanel";
+import {AppStatusBar} from "./components/common/AppStatusBar";
 import {StatusBanner} from "./components/common/StatusBanner";
 import {TopBar} from "./components/common/TopBar";
 import {FeedbackModal} from "./components/modals/FeedbackModal";
@@ -104,6 +107,7 @@ export function App() {
   const [zoteroSaving, setZoteroSaving] = React.useState(false);
   const [zoteroError, setZoteroError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [appControlBusy, setAppControlBusy] = React.useState(false);
   const [adminTab, setAdminTab] = React.useState<AdminTab>("config");
   const [themePreference, setThemePreference] = React.useState<"system" | "light" | "dark">(
     "system",
@@ -586,6 +590,35 @@ export function App() {
     }
   }, [pushMessage]);
 
+  const handleOpenAppTarget = React.useCallback(
+    async (target: "data_dir" | "logs_dir" | "install_dir") => {
+      try {
+        setAppControlBusy(true);
+        await openAppTarget(target);
+        pushMessage("app.control.open.succeeded");
+      } catch (error) {
+        pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      } finally {
+        setAppControlBusy(false);
+      }
+    },
+    [pushMessage],
+  );
+
+  const handleExitApp = React.useCallback(async () => {
+    try {
+      setAppControlBusy(true);
+      await exitApp();
+      pushMessage("app.control.exit.succeeded");
+      window.setTimeout(() => {
+        window.location.href = "about:blank";
+      }, 350);
+    } catch (error) {
+      setAppControlBusy(false);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+    }
+  }, [pushMessage]);
+
   const handleBootstrap = async (interestDescription: string, name: string) => {
     try {
       setBusy(true);
@@ -684,6 +717,15 @@ export function App() {
           onBootstrap={handleBootstrap}
           onApplyProposal={handleApplyProposal}
           onSaveConfig={handleSaveConfig}
+        />
+        <AppStatusBar
+          appMeta={appMeta}
+          appUpdate={appUpdate}
+          busy={appControlBusy}
+          onExit={() => void handleExitApp()}
+          onOpenData={() => void handleOpenAppTarget("data_dir")}
+          onOpenInstall={() => void handleOpenAppTarget("install_dir")}
+          onOpenLogs={() => void handleOpenAppTarget("logs_dir")}
         />
       </>
     );
@@ -811,6 +853,15 @@ export function App() {
           onSave={() => selectedPaper && openZoteroModal(selectedPaper)}
         />
       </div>
+      <AppStatusBar
+        appMeta={appMeta}
+        appUpdate={appUpdate}
+        busy={appControlBusy}
+        onExit={() => void handleExitApp()}
+        onOpenData={() => void handleOpenAppTarget("data_dir")}
+        onOpenInstall={() => void handleOpenAppTarget("install_dir")}
+        onOpenLogs={() => void handleOpenAppTarget("logs_dir")}
+      />
     </main>
   );
 }

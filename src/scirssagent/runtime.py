@@ -5,6 +5,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 from dataclasses import dataclass
@@ -30,6 +31,16 @@ class RuntimeState:
     pid: int | None
     port: int | None
     started_at: str | None = None
+
+
+class AppOpenTarget(StrEnum):
+    DATA_DIR = "data_dir"
+    LOGS_DIR = "logs_dir"
+    REPORTS_DIR = "reports_dir"
+    INSTALL_DIR = "install_dir"
+    SERVER_URL = "server_url"
+    DOWNLOAD_URL = "download_url"
+    RELEASE_NOTES_URL = "release_notes_url"
 
 
 def package_version() -> str:
@@ -106,14 +117,57 @@ def read_runtime_state(path: Path) -> RuntimeState | None:
 
 def write_runtime_state(path: Path, pid: int, port: int, started_at: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {"pid": pid, "port": port, "started_at": started_at},
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+    payload = json.dumps(
+        {"pid": pid, "port": port, "started_at": started_at},
+        ensure_ascii=False,
+        indent=2,
     )
+    temp_path = path.with_suffix(".tmp")
+    temp_path.write_text(payload, encoding="utf-8")
+    temp_path.replace(path)
+
+
+def open_local_path(path: Path) -> None:
+    resolved = path.resolve()
+    if os.name == "nt":
+        os.startfile(str(resolved))  # type: ignore[attr-defined]
+        return
+    open_browser(resolved.as_uri())
+
+
+def open_external_target(target: str) -> None:
+    if target.startswith("http://") or target.startswith("https://"):
+        open_browser(target)
+        return
+    open_local_path(Path(target))
+
+
+def schedule_process_exit(runtime_state_path: Path, delay_seconds: float = 0.2) -> None:
+    def shutdown() -> None:
+        clear_runtime_state(runtime_state_path)
+        os._exit(0)
+
+    timer = threading.Timer(delay_seconds, shutdown)
+    timer.daemon = True
+    timer.start()
+
+
+def process_is_running(pid: int | None) -> bool:
+    if pid is None:
+        return False
+    try:
+        if os.name == "nt":
+            completed = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            return str(pid) in completed.stdout
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
 
 
 def clear_runtime_state(path: Path) -> None:

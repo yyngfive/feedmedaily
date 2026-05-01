@@ -106,6 +106,7 @@ class AppMetaResponse(BaseModel):
     server_url: str | None = None
     scheduler_task_name: str
     update_manifest_url: str | None = None
+    process_running: bool = False
 
 
 class AppHealthResponse(BaseModel):
@@ -125,6 +126,17 @@ class AppUpdateResponse(BaseModel):
     release_notes_url: str | None = None
     detail: str | None = None
     checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class AppOpenRequest(BaseModel):
+    target: str
+
+
+class AppControlResponse(BaseModel):
+    ok: bool = True
+    action: str
+    target: str | None = None
+    detail: str | None = None
 
 
 class SchedulerSettingsResponse(BaseModel):

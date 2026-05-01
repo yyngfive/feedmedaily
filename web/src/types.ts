@@ -52,6 +52,7 @@ export type AppMeta = {
   server_url?: string | null;
   scheduler_task_name: string;
   update_manifest_url?: string | null;
+  process_running: boolean;
 };
 
 export type AppHealth = {
@@ -71,6 +72,22 @@ export type AppUpdate = {
   release_notes_url?: string | null;
   detail?: string | null;
   checked_at: string;
+};
+
+export type AppControlTarget =
+  | "data_dir"
+  | "logs_dir"
+  | "reports_dir"
+  | "install_dir"
+  | "server_url"
+  | "download_url"
+  | "release_notes_url";
+
+export type AppControlResponse = {
+  ok: boolean;
+  action: string;
+  target?: string | null;
+  detail?: string | null;
 };
 
 export type SchedulerSettings = {

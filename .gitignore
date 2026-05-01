@@ -23,6 +23,9 @@ web/.vite/
 web/*.tsbuildinfo
 web/vite.config.js
 web/vite.config.d.ts
+build/
+dist/
+*.spec
 
 data/*.sqlite
 data/*.sqlite-*
