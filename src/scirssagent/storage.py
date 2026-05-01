@@ -15,12 +15,14 @@ from scirssagent.models import (
     FeedbackStatus,
     Paper,
     ProfileProposal,
+    ProfileProposalDelta,
     ProfileProposalState,
     Relevance,
     ReportPaper,
     ZoteroSaveState,
     ZoteroStatus,
 )
+from scirssagent.profile_compact import persisted_profile
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -71,6 +73,7 @@ CREATE TABLE IF NOT EXISTS profile_proposals (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   summary TEXT NOT NULL,
   proposed_profile_json TEXT NOT NULL,
+  rule_delta_json TEXT,
   source_feedback_ids_json TEXT NOT NULL,
   model TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'pending',
@@ -113,6 +116,11 @@ def connect(path: Path | str) -> sqlite3.Connection:
     }
     if "translated_title_zh" not in columns:
         conn.execute("ALTER TABLE classifications ADD COLUMN translated_title_zh TEXT")
+    proposal_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(profile_proposals)").fetchall()
+    }
+    if "rule_delta_json" not in proposal_columns:
+        conn.execute("ALTER TABLE profile_proposals ADD COLUMN rule_delta_json TEXT")
     return conn
 
 
@@ -213,18 +221,6 @@ def mark_paper_read(conn: sqlite3.Connection, paper_id: int) -> datetime:
     if row is None or row["read_at"] is None:
         raise ValueError("Failed to persist read status.")
     return datetime.fromisoformat(row["read_at"])
-
-
-def latest_classification_row(conn: sqlite3.Connection, paper_id: int) -> sqlite3.Row | None:
-    return conn.execute(
-        """
-        SELECT * FROM classifications
-        WHERE paper_id = ?
-        ORDER BY classified_at DESC, id DESC
-        LIMIT 1
-        """,
-        (paper_id,),
-    ).fetchone()
 
 
 def save_classification(
@@ -386,19 +382,23 @@ def save_profile_proposal(
     *,
     summary: str,
     proposed_profile: ClassificationProfile,
+    rule_delta: ProfileProposalDelta,
     source_feedback_ids: list[int],
     model: str,
 ) -> ProfileProposal:
+    compact_profile = persisted_profile(proposed_profile)
     cursor = conn.execute(
         """
         INSERT INTO profile_proposals (
-          summary, proposed_profile_json, source_feedback_ids_json, model, state, created_at
+          summary, proposed_profile_json, rule_delta_json,
+          source_feedback_ids_json, model, state, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (
             summary,
-            json.dumps(proposed_profile.model_dump(mode="json"), ensure_ascii=False),
+            json.dumps(compact_profile.model_dump(mode="json"), ensure_ascii=False),
+            json.dumps(rule_delta.model_dump(mode="json"), ensure_ascii=False),
             json.dumps(source_feedback_ids),
             model,
             ProfileProposalState.PENDING.value,
@@ -424,6 +424,7 @@ def profile_proposal_by_id(conn: sqlite3.Connection, proposal_id: int) -> Profil
         proposed_profile=ClassificationProfile.model_validate(
             json.loads(row["proposed_profile_json"])
         ),
+        rule_delta=ProfileProposalDelta.model_validate(json.loads(row["rule_delta_json"])),
         source_feedback_ids=[int(item) for item in json.loads(row["source_feedback_ids_json"])],
         model=row["model"],
         state=ProfileProposalState(row["state"]),
@@ -444,12 +445,6 @@ def list_profile_proposals(conn: sqlite3.Connection) -> list[ProfileProposal]:
         if proposal is not None:
             proposals.append(proposal)
     return proposals
-
-
-def next_profile_version(conn: sqlite3.Connection) -> int:
-    row = conn.execute("SELECT MAX(applied_version) AS version FROM profile_proposals").fetchone()
-    current = int(row["version"] or 0)
-    return current + 1
 
 
 def apply_profile_proposal(conn: sqlite3.Connection, proposal_id: int, version: int) -> None:
@@ -622,14 +617,6 @@ def papers_for_report(
             )
         )
     return report_papers
-
-
-def unclassified_paper_ids(conn: sqlite3.Connection, ids: Iterable[int]) -> list[int]:
-    unclassified: list[int] = []
-    for paper_id in ids:
-        if latest_classification(conn, paper_id) is None:
-            unclassified.append(paper_id)
-    return unclassified
 
 
 def paper_ids_needing_classification(

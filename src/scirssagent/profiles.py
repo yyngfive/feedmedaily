@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from json import JSONDecodeError
 from pathlib import Path
 
 from pydantic import ValidationError
 
-from scirssagent.models import ClassificationProfile, ProfileMeta
+from scirssagent.models import ClassificationProfile
+from scirssagent.profile_compact import persisted_profile
 
 
 def read_profile(path: Path | None) -> ClassificationProfile | None:
@@ -19,8 +19,9 @@ def read_profile(path: Path | None) -> ClassificationProfile | None:
 
 def write_profile(path: Path, profile: ClassificationProfile) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    compact = persisted_profile(profile)
     path.write_text(
-        json.dumps(profile.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n",
+        json.dumps(compact.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
@@ -30,27 +31,6 @@ def ensure_profile(path: Path) -> ClassificationProfile:
     if profile is None:
         raise ValueError(f"Classification profile not found: {path}")
     return profile
-
-
-def next_profile_version(profile: ClassificationProfile) -> int:
-    return profile.meta.version + 1
-
-
-def replace_profile_version(
-    profile: ClassificationProfile,
-    *,
-    version: int,
-    source_description: str | None = None,
-) -> ClassificationProfile:
-    now = datetime.now(UTC)
-    meta = ProfileMeta(
-        name=profile.meta.name,
-        version=version,
-        created_at=profile.meta.created_at,
-        updated_at=now,
-        source_description=source_description or profile.meta.source_description,
-    )
-    return profile.model_copy(update={"meta": meta})
 
 
 def _strip_code_fence(payload: str) -> str:

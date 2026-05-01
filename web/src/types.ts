@@ -100,8 +100,6 @@ export type ProfileMeta = {
 export type TopicDefinition = {
   id: string;
   label: string;
-  description: string;
-  examples: string[];
 };
 
 export type ProfileFewShot = {
@@ -123,7 +121,16 @@ export type ClassificationProfile = {
   relevance_rules: RelevanceRules;
   topic_taxonomy: TopicDefinition[];
   few_shots: ProfileFewShot[];
-  classification_notes: string[];
+};
+
+export type ProfileProposalDelta = {
+  summary: string;
+  direct_rule_additions: string[];
+  indirect_rule_additions: string[];
+  unrelated_rule_additions: string[];
+  scope_rewrite?: string | null;
+  tag_additions: TopicDefinition[];
+  tag_removals: string[];
 };
 
 export type CurrentProfileResponse = {
@@ -134,6 +141,7 @@ export type ProfileProposal = {
   id: number;
   summary: string;
   proposed_profile: ClassificationProfile;
+  rule_delta: ProfileProposalDelta;
   source_feedback_ids: number[];
   model: string;
   state: ProfileProposalState;

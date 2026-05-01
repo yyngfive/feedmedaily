@@ -1,22 +1,30 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from textwrap import dedent
 from typing import Any
 
 import httpx
 from openai import OpenAI
+from pydantic import ValidationError
 
 from scirssagent.config import Settings
 from scirssagent.models import (
     Classification,
     ClassificationProfile,
-    FeedbackRecord,
+    FeedbackProposalContext,
     Paper,
     ProfileMeta,
-    RelevanceRules,
+    ProfileProposalDelta,
     ZoteroCollectionOption,
     ZoteroCollectionsResponse,
+)
+from scirssagent.profile_compact import (
+    compact_profile,
+    merge_rule_list,
+    profile_prompt_payload,
+    slim_topic_taxonomy,
 )
 from scirssagent.profiles import validate_profile_json, write_profile
 
@@ -29,7 +37,7 @@ def profile_model_client(settings: Settings) -> OpenAI:
     return OpenAI(api_key=settings.profile_api_key, base_url=settings.profile_base_url)
 
 
-def _profile_contract() -> str:
+def _compact_profile_contract() -> str:
     return json.dumps(
         {
             "meta": {
@@ -49,8 +57,6 @@ def _profile_contract() -> str:
                 {
                     "id": "snake_case_tag",
                     "label": "Display Label",
-                    "description": "what this tag means",
-                    "examples": ["optional example"],
                 }
             ],
             "few_shots": [
@@ -61,7 +67,6 @@ def _profile_contract() -> str:
                     "rationale": "why this label is correct",
                 }
             ],
-            "classification_notes": ["special boundary or exclusion rule"],
         },
         ensure_ascii=False,
         indent=2,
@@ -112,7 +117,7 @@ def _repair_profile_json(
         - If the draft was truncated, infer the smallest sensible completion.
 
         Required JSON shape:
-        {_profile_contract()}
+        {_compact_profile_contract()}
 
         Malformed draft:
         {malformed_content}
@@ -126,6 +131,84 @@ def _repair_profile_json(
         max_tokens=4200,
     )
     return validate_profile_json(repaired)
+
+
+def _profile_delta_contract() -> str:
+    return json.dumps(
+        {
+            "summary": "short summary of what changed based on feedback",
+            "direct_rule_additions": ["rule to append to direct relevance rules"],
+            "indirect_rule_additions": ["rule to append to indirect relevance rules"],
+            "unrelated_rule_additions": ["rule to append to unrelated relevance rules"],
+            "scope_rewrite": "optional short rewritten scope summary",
+            "tag_additions": [{"id": "snake_case_tag", "label": "Display Label"}],
+            "tag_removals": ["old_tag_id"],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+def _load_json_object(payload: str) -> dict[str, Any]:
+    loaded = json.loads(payload)
+    if not isinstance(loaded, dict):
+        raise ValueError("Model JSON response must be an object.")
+    return loaded
+
+
+def _repair_profile_delta_json(
+    client: OpenAI,
+    settings: Settings,
+    *,
+    malformed_content: str,
+) -> ProfileProposalDelta:
+    prompt = dedent(
+        f"""
+        Repair the malformed profile-update delta below.
+
+        Requirements:
+        - Return valid JSON only.
+        - Return a complete delta object.
+        - Follow the required schema exactly.
+        - Keep the repaired content faithful to the original intent.
+        - If the draft was truncated, infer the smallest sensible completion.
+
+        Required JSON shape:
+        {_profile_delta_contract()}
+
+        Malformed draft:
+        {malformed_content}
+        """
+    ).strip()
+    repaired = _request_profile_json(
+        client,
+        settings,
+        system_prompt="You repair malformed JSON profile update deltas.",
+        user_prompt=prompt,
+        max_tokens=2200,
+    )
+    try:
+        return ProfileProposalDelta.model_validate(_load_json_object(repaired))
+    except (ValidationError, ValueError) as exc:
+        raise ValueError(f"Invalid profile delta JSON: {exc}") from exc
+
+
+def _coerce_profile_delta_json(
+    client: OpenAI,
+    settings: Settings,
+    *,
+    content: str,
+) -> ProfileProposalDelta:
+    try:
+        return ProfileProposalDelta.model_validate(_load_json_object(content))
+    except (ValidationError, ValueError) as first_error:
+        try:
+            return _repair_profile_delta_json(client, settings, malformed_content=content)
+        except ValueError as second_error:
+            raise ValueError(
+                "Model returned invalid profile delta JSON. "
+                f"First parse failed: {first_error} Repair attempt failed: {second_error}"
+            ) from second_error
 
 
 def _coerce_profile_json(
@@ -146,6 +229,124 @@ def _coerce_profile_json(
             ) from second_error
 
 
+def _normalized_profile_meta(current_profile: ClassificationProfile) -> ProfileMeta:
+    return ProfileMeta(
+        name=current_profile.meta.name,
+        version=current_profile.meta.version + 1,
+        created_at=current_profile.meta.created_at,
+        updated_at=datetime.now(UTC),
+        source_description=current_profile.meta.source_description,
+    )
+
+
+def _bounded_rule_delta(rule_delta: ProfileProposalDelta) -> ProfileProposalDelta:
+    return rule_delta.model_copy(
+        update={
+            "direct_rule_additions": rule_delta.direct_rule_additions[:6],
+            "indirect_rule_additions": rule_delta.indirect_rule_additions[:6],
+            "unrelated_rule_additions": rule_delta.unrelated_rule_additions[:6],
+            "tag_additions": slim_topic_taxonomy(rule_delta.tag_additions[:3]),
+            "tag_removals": rule_delta.tag_removals[:3],
+        }
+    )
+
+
+def _initial_profile_delta(
+    profile: ClassificationProfile,
+    *,
+    summary: str,
+) -> ProfileProposalDelta:
+    return ProfileProposalDelta(
+        summary=summary,
+        direct_rule_additions=profile.relevance_rules.direct,
+        indirect_rule_additions=profile.relevance_rules.indirect,
+        unrelated_rule_additions=profile.relevance_rules.unrelated,
+        scope_rewrite=profile.scope,
+        tag_additions=profile.topic_taxonomy,
+        tag_removals=[],
+    )
+
+
+def _merge_profile_delta(
+    current_profile: ClassificationProfile,
+    rule_delta: ProfileProposalDelta,
+) -> ClassificationProfile:
+    current_compact = compact_profile(
+        current_profile,
+        include_few_shots=bool(current_profile.few_shots),
+    )
+    bounded_delta = _bounded_rule_delta(rule_delta)
+    removals = set(bounded_delta.tag_removals)
+    merged_topics = [
+        topic for topic in current_compact.topic_taxonomy if topic.id not in removals
+    ]
+    merged_ids = {topic.id for topic in merged_topics}
+    for topic in bounded_delta.tag_additions:
+        if topic.id in merged_ids:
+            continue
+        merged_topics.append(topic)
+        merged_ids.add(topic.id)
+
+    merged_few_shots = [
+        item.model_copy(update={"tags": [tag for tag in item.tags if tag in merged_ids]})
+        for item in current_compact.few_shots
+    ]
+
+    return current_compact.model_copy(
+        update={
+            "scope": bounded_delta.scope_rewrite or current_compact.scope,
+            "relevance_rules": current_compact.relevance_rules.model_copy(
+                update={
+                    "direct": merge_rule_list(
+                        current_compact.relevance_rules.direct,
+                        bounded_delta.direct_rule_additions,
+                    ),
+                    "indirect": merge_rule_list(
+                        current_compact.relevance_rules.indirect,
+                        bounded_delta.indirect_rule_additions,
+                    ),
+                    "unrelated": merge_rule_list(
+                        current_compact.relevance_rules.unrelated,
+                        bounded_delta.unrelated_rule_additions,
+                    ),
+                }
+            ),
+            "topic_taxonomy": merged_topics,
+            "few_shots": merged_few_shots,
+        }
+    )
+
+
+def _destructive_revision_reason(
+    current_profile: ClassificationProfile,
+    proposed_profile: ClassificationProfile,
+) -> str | None:
+    current_tags = {item.id for item in current_profile.topic_taxonomy}
+    proposed_tags = {item.id for item in proposed_profile.topic_taxonomy}
+    overlap = current_tags & proposed_tags
+
+    if current_tags and not proposed_tags:
+        return "Generated proposal removed every existing topic tag."
+
+    if (
+        len(current_tags) >= 5
+        and len(proposed_tags) <= max(2, len(current_tags) // 3)
+        and len(overlap) < max(2, len(current_tags) // 3)
+    ):
+        return (
+            "Generated proposal collapsed the topic taxonomy too aggressively "
+            f"({len(current_tags)} -> {len(proposed_tags)} tags, overlap {len(overlap)})."
+        )
+
+    if (
+        "general scientific literature" in proposed_profile.scope.lower()
+        and current_profile.scope.strip() != proposed_profile.scope.strip()
+    ):
+        return "Generated proposal replaced the specific research scope with a generic scope."
+
+    return None
+
+
 def generate_initial_profile_payload(
     settings: Settings,
     *,
@@ -162,9 +363,11 @@ def generate_initial_profile_payload(
         - Return valid JSON only.
         - Use exactly the schema shape shown below.
         - The fixed relevance labels are direct, indirect, unrelated.
-        - topic_taxonomy must define the only allowed topic tags.
+        - topic_taxonomy must be lightweight and contain only id + label.
         - Write practical, compact, reusable rules.
-        - Include enough few-shot examples to teach the profile's boundaries.
+        - few_shots are optional and must contain at most 2 examples total.
+        - Do not include description/examples fields for tags.
+        - Do not include a generic placeholder profile.
 
         User profile name hint:
         {name or "Default profile"}
@@ -173,7 +376,7 @@ def generate_initial_profile_payload(
         {interest_description}
 
         Required JSON shape:
-        {_profile_contract()}
+        {_compact_profile_contract()}
         """
     ).strip()
     content = _request_profile_json(
@@ -183,27 +386,41 @@ def generate_initial_profile_payload(
         user_prompt=prompt,
         max_tokens=4200,
     )
-    profile = _coerce_profile_json(client, settings, content=content)
+    profile = compact_profile(
+        _coerce_profile_json(client, settings, content=content),
+        include_few_shots=True,
+    )
     summary = (
         f"Initial profile for {profile.meta.name} with "
         f"{len(profile.topic_taxonomy)} topic tags and {len(profile.few_shots)} few-shot examples."
     )
-    return {"summary": summary, "proposed_profile": profile}
+    return {
+        "summary": summary,
+        "proposed_profile": profile,
+        "rule_delta": _initial_profile_delta(profile, summary=summary),
+    }
 
 
 def generate_profile_proposal_payload(
     settings: Settings,
     current_profile: ClassificationProfile,
-    feedback_items: list[FeedbackRecord],
+    feedback_items: list[FeedbackProposalContext],
 ) -> dict[str, object]:
     if not feedback_items:
         raise ValueError("No feedback is available for profile proposal generation.")
     client = profile_model_client(settings)
+    compact_profile_json = json.dumps(
+        profile_prompt_payload(current_profile, include_few_shots=False),
+        ensure_ascii=False,
+        indent=2,
+    )
     feedback_payload = [
         {
-            "feedback_id": item.id,
+            "feedback_id": item.feedback_id,
             "paper_id": item.paper_id,
             "paper_title": item.paper_title,
+            "journal": item.journal,
+            "abstract": item.abstract,
             "original_relevance": item.original_relevance.value,
             "corrected_relevance": item.corrected_relevance.value,
             "note": item.note,
@@ -212,74 +429,72 @@ def generate_profile_proposal_payload(
     ]
     prompt = dedent(
         f"""
-        Revise the current scientific-literature classification profile using human feedback.
+        Summarize the human feedback and propose compact rule updates for the current
+        scientific-literature classification profile.
 
         Requirements:
         - Return valid JSON only.
-        - Return a complete new profile, not a patch.
-        - Preserve useful existing rules and tags unless the feedback implies they should change.
+        - Return a compact delta object, not a full profile.
+        - First infer the shared patterns behind the corrected labels.
+        - Then convert those patterns into reusable relevance-rule additions.
+        - Keep the current profile as the base document.
+        - Do not rewrite unrelated sections of the profile.
+        - Do not replace a specific scientific-interest profile with a generic
+          or placeholder profile.
         - Keep direct/indirect/unrelated as the only relevance labels.
-        - topic_taxonomy defines the only allowed topic tags.
-        - Update few-shot examples and notes when they help future classification.
+        - Only propose small bounded tag edits when clearly necessary.
+        - Do not generate few-shot examples.
         - Use the feedback to sharpen boundaries and reduce future mistakes.
 
-        Current profile:
-        {json.dumps(current_profile.model_dump(mode="json"), ensure_ascii=False, indent=2)}
+        Current compact profile context:
+        {compact_profile_json}
 
         Human feedback:
         {json.dumps(feedback_payload, ensure_ascii=False, indent=2)}
 
+        Return:
+        - a short summary of the shared patterns you found
+        - direct_rule_additions for patterns that should be treated as directly relevant
+        - indirect_rule_additions for patterns that should be treated as indirectly relevant
+        - unrelated_rule_additions for patterns that should be treated as unrelated
+        - optional scope_rewrite only if the current scope summary is misleading
+        - optional bounded tag_additions and tag_removals
+
         Required JSON shape:
-        {_profile_contract()}
+        {_profile_delta_contract()}
         """
     ).strip()
     content = _request_profile_json(
         client,
         settings,
-        system_prompt="You revise structured classification profiles.",
+        system_prompt="You summarize feedback into compact profile rule deltas.",
         user_prompt=prompt,
-        max_tokens=4600,
+        max_tokens=2600,
     )
-    proposed_profile = _coerce_profile_json(client, settings, content=content)
-    summary = (
-        f"Updated profile from {len(feedback_items)} feedback item(s); "
-        f"{len(proposed_profile.topic_taxonomy)} topic tags, "
-        f"{len(proposed_profile.few_shots)} few-shot examples."
+    rule_delta = _bounded_rule_delta(
+        _coerce_profile_delta_json(client, settings, content=content)
     )
+    merged_profile = _merge_profile_delta(current_profile, rule_delta)
+    proposed_profile = merged_profile.model_copy(
+        update={"meta": _normalized_profile_meta(current_profile)}
+    )
+    destructive_reason = _destructive_revision_reason(current_profile, proposed_profile)
+    if destructive_reason:
+        raise ValueError(
+            "Model generated an unsafe profile proposal. "
+            f"{destructive_reason} Current profile was kept unchanged."
+        )
     return {
-        "summary": summary,
+        "summary": rule_delta.summary,
         "proposed_profile": proposed_profile,
+        "rule_delta": rule_delta,
         "model": settings.profile_model,
-        "source_feedback_ids": [item.id for item in feedback_items],
+        "source_feedback_ids": [item.feedback_id for item in feedback_items],
     }
 
 
 def write_current_profile(settings: Settings, profile: ClassificationProfile) -> None:
     write_profile(settings.profile_path, profile)
-
-
-def default_profile(
-    *,
-    source_description: str,
-    name: str = "Default profile",
-) -> ClassificationProfile:
-    from datetime import UTC, datetime
-
-    now = datetime.now(UTC)
-    return ClassificationProfile(
-        meta=ProfileMeta(
-            name=name,
-            version=1,
-            created_at=now,
-            updated_at=now,
-            source_description=source_description,
-        ),
-        scope=source_description,
-        relevance_rules=RelevanceRules(),
-        topic_taxonomy=[],
-        few_shots=[],
-        classification_notes=[],
-    )
 
 
 def zotero_item_payload(

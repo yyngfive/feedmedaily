@@ -5,6 +5,7 @@ from scirssagent.models import (
     ClassificationProfile,
     Paper,
     ProfileMeta,
+    ProfileProposalDelta,
     ProfileProposalState,
     Relevance,
     RelevanceRules,
@@ -161,6 +162,10 @@ def test_profile_proposal_round_trip() -> None:
         conn,
         summary="Use narrower rules for broad genomics.",
         proposed_profile=_profile(),
+        rule_delta=ProfileProposalDelta(
+            summary="Add a stricter direct rule for chemistry-first genomics papers.",
+            direct_rule_additions=["Chemistry-led genomics methods stay direct."],
+        ),
         source_feedback_ids=[1, 2],
         model="deepseek-v4-pro",
     )
@@ -168,6 +173,10 @@ def test_profile_proposal_round_trip() -> None:
 
     assert proposal.state == ProfileProposalState.PENDING
     assert proposal.source_feedback_ids == [1, 2]
+    assert proposal.rule_delta is not None
+    assert proposal.rule_delta.direct_rule_additions == [
+        "Chemistry-led genomics methods stay direct."
+    ]
     assert proposal.proposed_profile.topic_taxonomy[0].id == "genomics_boundary"
     assert latest_zotero_status(conn, 999) is None
 
@@ -192,10 +201,7 @@ def _profile() -> ClassificationProfile:
             TopicDefinition(
                 id="genomics_boundary",
                 label="Genomics Boundary",
-                description="Boundary cases around genomics and chemistry.",
-                examples=[],
             )
         ],
         few_shots=[],
-        classification_notes=[],
     )

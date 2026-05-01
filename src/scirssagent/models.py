@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 
 class Relevance(StrEnum):
@@ -28,10 +28,6 @@ class ZoteroSaveState(StrEnum):
     PENDING = "pending"
     SAVED = "saved"
     ERROR = "error"
-
-
-class FeedSource(BaseModel):
-    url: HttpUrl
 
 
 class FeedSubscription(BaseModel):
@@ -160,6 +156,8 @@ class FeedbackRecord(BaseModel):
 
 
 class ProfileMeta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     version: int = 1
     created_at: datetime
@@ -168,10 +166,10 @@ class ProfileMeta(BaseModel):
 
 
 class TopicDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     label: str
-    description: str
-    examples: list[str] = Field(default_factory=list)
 
     @field_validator("id")
     @classmethod
@@ -181,8 +179,18 @@ class TopicDefinition(BaseModel):
             raise ValueError("topic id cannot be blank")
         return clean
 
+    @field_validator("label")
+    @classmethod
+    def normalize_label(cls, value: str) -> str:
+        clean = " ".join(value.split()).strip()
+        if not clean:
+            raise ValueError("topic label cannot be blank")
+        return clean
+
 
 class ProfileFewShot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
     relevance: Relevance
     tags: list[str] = Field(default_factory=list)
@@ -202,18 +210,82 @@ class ProfileFewShot(BaseModel):
 
 
 class RelevanceRules(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     direct: list[str] = Field(default_factory=list)
     indirect: list[str] = Field(default_factory=list)
     unrelated: list[str] = Field(default_factory=list)
 
 
+class ProfileProposalDelta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str
+    direct_rule_additions: list[str] = Field(default_factory=list)
+    indirect_rule_additions: list[str] = Field(default_factory=list)
+    unrelated_rule_additions: list[str] = Field(default_factory=list)
+    scope_rewrite: str | None = None
+    tag_additions: list[TopicDefinition] = Field(default_factory=list)
+    tag_removals: list[str] = Field(default_factory=list)
+
+    @field_validator("summary")
+    @classmethod
+    def normalize_summary(cls, value: str) -> str:
+        clean = " ".join(value.split()).strip()
+        if not clean:
+            raise ValueError("summary cannot be blank")
+        return clean
+
+    @field_validator(
+        "direct_rule_additions",
+        "indirect_rule_additions",
+        "unrelated_rule_additions",
+        mode="before",
+    )
+    @classmethod
+    def normalize_rule_lists(cls, value: list[str] | None) -> list[str]:
+        if not value:
+            return []
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            clean = " ".join(str(item).split()).strip()
+            if clean and clean not in seen:
+                seen.add(clean)
+                normalized.append(clean)
+        return normalized
+
+    @field_validator("scope_rewrite")
+    @classmethod
+    def normalize_scope_rewrite(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = " ".join(value.split()).strip()
+        return clean or None
+
+    @field_validator("tag_removals", mode="before")
+    @classmethod
+    def normalize_tag_removals(cls, value: list[str] | None) -> list[str]:
+        if not value:
+            return []
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            clean = str(item).strip().lower().replace(" ", "_").replace("-", "_")
+            if clean and clean not in seen:
+                seen.add(clean)
+                normalized.append(clean)
+        return normalized
+
+
 class ClassificationProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     meta: ProfileMeta
     scope: str
     relevance_rules: RelevanceRules
     topic_taxonomy: list[TopicDefinition] = Field(default_factory=list)
     few_shots: list[ProfileFewShot] = Field(default_factory=list)
-    classification_notes: list[str] = Field(default_factory=list)
 
     @field_validator("scope")
     @classmethod
@@ -222,6 +294,13 @@ class ClassificationProfile(BaseModel):
         if not clean:
             raise ValueError("scope cannot be blank")
         return clean
+
+    @field_validator("few_shots")
+    @classmethod
+    def capped_few_shots(cls, value: list[ProfileFewShot]) -> list[ProfileFewShot]:
+        if len(value) > 2:
+            raise ValueError("few_shots cannot contain more than 2 items")
+        return value
 
 
 class CurrentProfileResponse(BaseModel):
@@ -232,6 +311,7 @@ class ProfileProposal(BaseModel):
     id: int
     summary: str
     proposed_profile: ClassificationProfile
+    rule_delta: ProfileProposalDelta
     source_feedback_ids: list[int] = Field(default_factory=list)
     model: str
     state: ProfileProposalState = ProfileProposalState.PENDING
@@ -239,6 +319,17 @@ class ProfileProposal(BaseModel):
     applied_at: datetime | None = None
     rejected_at: datetime | None = None
     applied_version: int | None = None
+
+
+class FeedbackProposalContext(BaseModel):
+    feedback_id: int
+    paper_id: int
+    paper_title: str
+    journal: str | None = None
+    abstract: str | None = None
+    original_relevance: Relevance
+    corrected_relevance: Relevance
+    note: str | None = None
 
 
 class JobInfo(BaseModel):
