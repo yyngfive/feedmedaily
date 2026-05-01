@@ -2,22 +2,30 @@ import {Button, Card} from "@heroui/react";
 import React from "react";
 
 import {statusMessage} from "../../app/utils";
+import type {SettingsConfigUpdate} from "../../types";
+import {SettingsConfigEditor} from "../admin/SettingsConfigEditor";
 import {StatusBanner} from "../common/StatusBanner";
 import {ProfileProposalPreview} from "../profile/ProfileProposalPreview";
 import {ProfileRulesDocument} from "../profile/ProfileRulesDocument";
-import type {JobInfo, ProfileProposal} from "../../types";
+import type {JobInfo, ProfileProposal, SettingsConfigField} from "../../types";
 
 export function Onboarding({
   busy,
+  configFields,
+  configSaving,
   jobs,
   onApplyProposal,
   onBootstrap,
+  onSaveConfig,
   proposals,
 }: {
   busy: boolean;
+  configFields: SettingsConfigField[];
+  configSaving: boolean;
   jobs: JobInfo[];
   onApplyProposal: (proposalId: number) => Promise<void>;
   onBootstrap: (interestDescription: string, name: string) => Promise<void>;
+  onSaveConfig: (fields: Record<string, SettingsConfigUpdate>) => Promise<void>;
   proposals: ProfileProposal[];
 }) {
   const [name, setName] = React.useState("Default profile");
@@ -29,66 +37,81 @@ export function Onboarding({
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-6">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_520px]">
-        <Card className="border border-[var(--line)] bg-white">
-          <Card.Header className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
-              SciRSSAgent
-            </p>
-            <h1 className="text-2xl font-semibold text-[var(--ink)]">
-              Create your classification profile
-            </h1>
-            <p className="text-sm leading-6 text-[var(--muted)]">
-              Describe your research interests in natural language. Model B will turn it into a
-              structured classification profile for approval.
-            </p>
-          </Card.Header>
-          <Card.Content className="space-y-4">
-            <label className="block text-sm font-medium text-[var(--ink)]">
-              Profile name
-              <input
-                className="mt-2 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </label>
-            <label className="block text-sm font-medium text-[var(--ink)]">
-              Research interests
-              <textarea
-                className="mt-2 min-h-52 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm"
-                placeholder="Example: I care about nucleic acid chemistry, engineered polymerases, XNA enzymes, and method-focused directed evolution papers..."
-                value={interestDescription}
-                onChange={(event) => setInterestDescription(event.target.value)}
-              />
-            </label>
-            {latestBootstrapJob ? (
-              <StatusBanner
-                tone={
-                  latestBootstrapJob.status === "failed"
-                    ? "danger"
-                    : latestBootstrapJob.status === "completed"
-                      ? "success"
-                      : "info"
-                }
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_520px]">
+        <div className="space-y-4">
+          <Card className="border border-[var(--line)] bg-(--paper-accent)">
+            <Card.Header className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
+                FeedMeDaily
+              </p>
+              <h1 className="text-2xl font-semibold text-[var(--ink)]">
+                Create your classification profile
+              </h1>
+              <p className="text-sm leading-6 text-[var(--muted)]">
+                Describe your research interests in natural language. Model B will turn it into a
+                structured classification profile for approval.
+              </p>
+            </Card.Header>
+            <Card.Content className="space-y-4">
+              <label className="block text-sm font-medium text-[var(--ink)]">
+                Profile name
+                <input
+                  className="mt-2 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </label>
+              <label className="block text-sm font-medium text-[var(--ink)]">
+                Research interests
+                <textarea
+                  className="mt-2 min-h-52 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm"
+                  placeholder="Example: I care about nucleic acid chemistry, engineered polymerases, XNA enzymes, and method-focused directed evolution papers..."
+                  value={interestDescription}
+                  onChange={(event) => setInterestDescription(event.target.value)}
+                />
+              </label>
+              {latestBootstrapJob ? (
+                <StatusBanner
+                  tone={
+                    latestBootstrapJob.status === "failed"
+                      ? "danger"
+                      : latestBootstrapJob.status === "completed"
+                        ? "success"
+                        : "info"
+                  }
+                >
+                  <p className="font-medium">
+                    {bootstrapRunning ? "Generating profile..." : "Latest profile generation job"}
+                  </p>
+                  <p className="mt-1 leading-6">{statusMessage(latestBootstrapJob)}</p>
+                </StatusBanner>
+              ) : null}
+            </Card.Content>
+            <Card.Footer>
+              <Button
+                isDisabled={busy || !interestDescription.trim()}
+                onPress={() => void onBootstrap(interestDescription.trim(), name.trim() || "Default profile")}
               >
-                <p className="font-medium">
-                  {bootstrapRunning ? "Generating profile..." : "Latest profile generation job"}
-                </p>
-                <p className="mt-1 leading-6">{statusMessage(latestBootstrapJob)}</p>
-              </StatusBanner>
-            ) : null}
-          </Card.Content>
-          <Card.Footer>
-            <Button
-              isDisabled={busy || !interestDescription.trim()}
-              onPress={() => void onBootstrap(interestDescription.trim(), name.trim() || "Default profile")}
-            >
-              {bootstrapRunning ? "Generating..." : "Generate initial profile"}
-            </Button>
-          </Card.Footer>
-        </Card>
+                {bootstrapRunning ? "Generating..." : "Generate initial profile"}
+              </Button>
+            </Card.Footer>
+          </Card>
 
-        <Card className="border border-[var(--line)] bg-white">
+          <SettingsConfigEditor
+            fields={configFields}
+            intro={
+              <p className="text-sm leading-6 text-muted">
+                You can fill model credentials, provider URLs, Zotero settings, and server defaults
+                here before generating the first profile.
+              </p>
+            }
+            saving={configSaving}
+            saveLabel="Save .env settings"
+            onSave={onSaveConfig}
+          />
+        </div>
+
+        <Card className="border border-[var(--line)] bg-(--paper-accent)">
           <Card.Header>
             <h2 className="text-lg font-semibold text-[var(--ink)]">Latest proposal</h2>
           </Card.Header>

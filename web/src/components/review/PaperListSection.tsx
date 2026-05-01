@@ -9,9 +9,7 @@ import type {ClassificationProfile, Paper, Relevance} from "../../types";
 
 export function PaperListSection({
   hasNoFetchedPapers,
-  loadError,
   needsFeedSetup,
-  notice,
   onOpenAdmin,
   onResetFilters,
   onRunFetchAndClassify,
@@ -29,9 +27,7 @@ export function PaperListSection({
   visibleTotals,
 }: {
   hasNoFetchedPapers: boolean;
-  loadError: string | null;
   needsFeedSetup: boolean;
-  notice: string | null;
   onOpenAdmin: () => void;
   onResetFilters: () => void;
   onRunFetchAndClassify: () => void;
@@ -49,10 +45,8 @@ export function PaperListSection({
   visibleTotals: Record<Relevance, number>;
 }) {
   return (
-    <section className="min-w-0 space-y-4">
-      <div className="rounded-lg border border-(--line) bg-white p-4">
-        {loadError ? <StatusBanner className="mb-4" tone="warning">{loadError}</StatusBanner> : null}
-        {notice ? <StatusBanner className="mb-4" tone="success">{notice}</StatusBanner> : null}
+    <section className="flex h-full min-w-0 min-h-0 flex-col gap-4">
+      <div className="flex-none rounded-lg border border-(--line) bg-(--paper-accent) p-4">
         {reportErrors.length ? (
           <StatusBanner className="mb-4" tone="danger">
             {reportErrors.map((item) => (
@@ -61,34 +55,36 @@ export function PaperListSection({
           </StatusBanner>
         ) : null}
 
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <label className="block w-full xl:max-w-xl">
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {relevanceTabs.map((tab) => (
+              <Button
+                key={tab.id}
+                size="sm"
+                variant={
+                  relevance === tab.id
+                    ? "secondary"
+                    : tab.id === "all"
+                      ? "ghost"
+                      : "outline"
+                }
+                onPress={() => setRelevance(tab.id)}
+              >
+                {tab.label}
+                {tab.id !== "all" ? ` (${visibleTotals[tab.id] ?? 0})` : ` (${visibleBaseCount})`}
+              </Button>
+            ))}
+          </div>
+
+          <label className="block w-full">
             <span className="text-sm font-medium text-(--ink)">Search</span>
             <input
-              className="mt-2 w-full rounded-md border border-(--line) px-3 py-2 text-sm"
+              className="mt-2 w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink) placeholder:text-muted"
               placeholder="Search title, abstract, author, journal"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
-
-          <div className="flex flex-col gap-3 xl:items-end">
-            <Button size="sm" variant="secondary" onPress={onOpenAdmin}>
-              Open admin
-            </Button>
-            <div className="flex flex-wrap gap-2">
-              {relevanceTabs.map((tab) => (
-                <Button
-                  key={tab.id}
-                  size="sm"
-                  variant={relevance === tab.id ? "secondary" : "outline"}
-                  onPress={() => setRelevance(tab.id)}
-                >
-                  {tab.label}
-                </Button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -136,13 +132,13 @@ export function PaperListSection({
           }
         />
       ) : (
-        <div className="overflow-hidden px-1 py-1">
+        <div className="min-h-0 flex-1 overflow-hidden px-1 py-1">
           <Virtuoso
-            className="min-h-105"
+            className="h-full"
             computeItemKey={(index) => papers[index].id}
             increaseViewportBy={{bottom: 480, top: 240}}
             initialTopMostItemIndex={0}
-            style={{height: "calc(100vh - 13rem)"}}
+            style={{height: "100%"}}
             totalCount={papers.length}
             itemContent={(index) => {
               const paper = papers[index];

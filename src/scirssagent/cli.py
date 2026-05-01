@@ -1,60 +1,37 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
+import uvicorn
 
 from scirssagent.config import load_settings
-from scirssagent.experiments import (
-    default_experiment_output_dir,
-    default_gold_sample_path,
-    load_gold_rows,
-    missing_gold_label_ids,
-    parse_batch_sizes,
-    run_batch_size_experiment,
-    select_gold_sample_rows,
-    write_experiment_outputs,
-    write_gold_template,
+from scirssagent.pipeline import regenerate_latest_report, run_once
+from scirssagent.runtime import (
+    APP_PUBLIC_NAME,
+    find_available_local_port,
+    launch_background_process,
+    open_browser,
+    package_version,
+    read_runtime_state,
+    wait_for_healthcheck,
+    write_runtime_state,
 )
-from scirssagent.pipeline import build_classifier_config, regenerate_latest_report, run_once
-from scirssagent.profiles import ensure_profile
-from scirssagent.repair import repair_all_abstracts
-from scirssagent.storage import connect
+from scirssagent.scheduler import install_scheduler_task, remove_scheduler_task, scheduler_status
+from scirssagent.server import create_app
 
-app = typer.Typer(help="SciRSSAgent literature monitor.")
+app = typer.Typer(help=f"{APP_PUBLIC_NAME} literature monitor.")
 report_app = typer.Typer(help="Report commands.")
-experiment_app = typer.Typer(help="Experiment commands.")
+scheduler_app = typer.Typer(help="Windows Task Scheduler commands.")
 app.add_typer(report_app, name="report")
-app.add_typer(experiment_app, name="experiment")
+app.add_typer(scheduler_app, name="scheduler")
 
 ONCE_OPTION = typer.Option(False, "--once", help="Run one fetch/classify/report cycle.")
-ROOT_OPTION = typer.Option(None, "--root", help="Project root. Defaults to cwd.")
-PRINT_TASK_OPTION = typer.Option(
-    True,
-    "--print-only/--create",
-    help="Print or create task command.",
-)
-SAMPLE_SIZE_OPTION = typer.Option(
-    80,
-    "--sample-size",
-    min=1,
-    help="Number of papers to include in the gold-label sample.",
-)
-BATCH_SIZES_OPTION = typer.Option(
-    "1,5,10,20,30",
-    "--batch-sizes",
-    help="Comma-separated LLM batch sizes to test.",
-)
-SEED_OPTION = typer.Option(42, "--seed", help="Deterministic sample seed.")
-GOLD_FILE_OPTION = typer.Option(
+ROOT_OPTION = typer.Option(
     None,
-    "--gold-file",
-    help="Gold-label CSV. Created when it does not exist.",
-)
-OUTPUT_DIR_OPTION = typer.Option(
-    None,
-    "--output-dir",
-    help="Directory for experiment JSON/CSV reports.",
+    "--root",
+    help="Application root. Defaults to cwd or the packaged app directory.",
 )
 HOST_OPTION = typer.Option(None, "--host", help="Server host. Defaults to configured value.")
 PORT_OPTION = typer.Option(None, "--port", help="Server port. Defaults to configured value.")
@@ -90,88 +67,57 @@ def latest(root: Path | None = ROOT_OPTION) -> None:
     typer.echo(f"Report: {index}")
 
 
-@app.command("repair-abstracts")
-def repair_abstracts(root: Path | None = ROOT_OPTION) -> None:
+@app.command("version")
+def version() -> None:
+    typer.echo(package_version())
+
+
+@app.command("open")
+def open_app(root: Path | None = ROOT_OPTION) -> None:
     settings = load_settings(root)
-    result = repair_all_abstracts(settings)
-    typer.echo(f"Database backup: {result['database_backup_path']}")
-    typer.echo(f"Repair report: {result['repair_report_path']}")
-    typer.echo(f"Report: {result['report_index']}")
-    summary = result["summary"]
-    typer.echo(
-        "Summary: "
-        f"total={summary['total']} "
-        f"updated={summary['updated']} "
-        f"fallback_from_db_html={summary['fallback_from_db_html']} "
-        f"cleared_metadata_only={summary['cleared_metadata_only']} "
-        f"unmatched={summary['unmatched']} "
-        f"unchanged={summary['unchanged']}"
+    state = read_runtime_state(settings.runtime_state_path)
+    if state and state.port:
+        existing_url = f"http://{settings.server_host}:{state.port}"
+        if wait_for_healthcheck(f"{existing_url}/api/app/health", timeout_seconds=1.2):
+            open_browser(existing_url)
+            typer.echo(existing_url)
+            return
+
+    port = find_available_local_port(settings.server_host, settings.server_port)
+    command = _serve_command(settings, port)
+    process = launch_background_process(command, settings.root)
+    url = f"http://{settings.server_host}:{port}"
+    if not wait_for_healthcheck(f"{url}/api/app/health"):
+        raise typer.Exit(code=1)
+    write_runtime_state(
+        settings.runtime_state_path,
+        pid=process.pid,
+        port=port,
+        started_at=datetime.now(UTC).isoformat(),
     )
+    open_browser(url)
+    typer.echo(url)
 
 
-@experiment_app.command("batch-size")
-def experiment_batch_size(
-    root: Path | None = ROOT_OPTION,
-    sample_size: int = SAMPLE_SIZE_OPTION,
-    batch_sizes: str = BATCH_SIZES_OPTION,
-    seed: int = SEED_OPTION,
-    gold_file: Path | None = GOLD_FILE_OPTION,
-    output_dir: Path | None = OUTPUT_DIR_OPTION,
-) -> None:
+@scheduler_app.command("show")
+def scheduler_show(root: Path | None = ROOT_OPTION) -> None:
     settings = load_settings(root)
-    sizes = parse_batch_sizes(batch_sizes)
-    sample_path = gold_file or default_gold_sample_path(settings.root)
-    output_root = output_dir or default_experiment_output_dir(settings.root)
-    if not sample_path.exists():
-        conn = connect(settings.database_path)
-        try:
-            rows = select_gold_sample_rows(conn, sample_size=sample_size, seed=seed)
-        finally:
-            conn.close()
-        write_gold_template(rows, sample_path)
-        typer.echo(f"Gold-label template written: {sample_path}")
-        typer.echo(
-            "Fill the gold_relevance column with direct, indirect, or unrelated, then rerun."
-        )
-        return
-
-    rows = load_gold_rows(sample_path)
-    missing_ids = missing_gold_label_ids(rows)
-    if missing_ids:
-        preview = ", ".join(missing_ids[:10])
-        suffix = "..." if len(missing_ids) > 10 else ""
-        raise typer.BadParameter(f"gold_relevance is missing for paper_id: {preview}{suffix}")
-    if not settings.classifier_api_key:
-        raise typer.BadParameter("SCIRSS_CLASSIFIER_API_KEY is required.")
-    profile = ensure_profile(settings.profile_path)
-    llm_config = build_classifier_config(settings)
-    typer.echo(f"Gold labels: {sample_path}")
-    typer.echo(f"Output dir: {output_root}")
-    typer.echo(f"Model: {settings.classifier_model} | Papers: {len(rows)}")
-    report = run_batch_size_experiment(rows, sizes, llm_config, profile, progress=typer.echo)
-    json_path, csv_path = write_experiment_outputs(report, output_root)
-    typer.echo(f"Selected batch size: {report['selected_batch_size']}")
-    typer.echo(f"JSON: {json_path}")
-    typer.echo(f"CSV: {csv_path}")
+    typer.echo(scheduler_status(settings))
 
 
-@app.command("init-task")
-def init_task(
-    print_only: bool = PRINT_TASK_OPTION,
+@scheduler_app.command("install")
+def scheduler_install(
+    daily_time: str = typer.Option("10:00", "--time", help="Daily local time in HH:MM format."),
     root: Path | None = ROOT_OPTION,
 ) -> None:
     settings = load_settings(root)
-    command = (
-        "schtasks /Create /TN SciRSSAgent /SC DAILY /ST 10:00 /F "
-        f'/TR "powershell -NoProfile -ExecutionPolicy Bypass -Command '
-        f"cd '{settings.root}'; uv run scirssagent run --once" + '"'
-    )
-    if print_only:
-        typer.echo(command)
-        return
-    import subprocess
+    typer.echo(install_scheduler_task(settings, daily_time))
 
-    subprocess.run(command, shell=True, check=True)
+
+@scheduler_app.command("remove")
+def scheduler_remove() -> None:
+    remove_scheduler_task()
+    typer.echo("Removed scheduler task.")
 
 
 @app.command()
@@ -181,14 +127,37 @@ def serve(
     port: int | None = PORT_OPTION,
 ) -> None:
     settings = load_settings(root)
-    import uvicorn
 
     uvicorn.run(
-        "scirssagent.server:app",
+        create_app(),
         host=host or settings.server_host,
         port=port or settings.server_port,
         reload=False,
     )
+
+
+def _serve_command(settings, port: int) -> list[str]:
+    if settings.mode == "release":
+        return [
+            str(settings.launch_command_path),
+            "serve",
+            "--host",
+            settings.server_host,
+            "--port",
+            str(port),
+        ]
+    return [
+        str(settings.launch_command_path),
+        "-m",
+        "scirssagent.cli",
+        "serve",
+        "--root",
+        str(settings.root),
+        "--host",
+        settings.server_host,
+        "--port",
+        str(port),
+    ]
 
 
 if __name__ == "__main__":

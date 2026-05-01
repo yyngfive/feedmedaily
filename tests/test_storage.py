@@ -1,6 +1,10 @@
+import sqlite3
 from datetime import UTC, datetime
+from pathlib import Path
+from uuid import uuid4
 
 from scirssagent.models import (
+    AbstractSource,
     Classification,
     ClassificationProfile,
     Paper,
@@ -94,6 +98,99 @@ def test_report_includes_feedback_and_zotero_status() -> None:
     assert report_paper.feedback_status.used_in_profile is False
     assert report_paper.zotero_status is not None
     assert report_paper.zotero_status.saved is True
+
+
+def test_upsert_preserves_higher_priority_abstract_source() -> None:
+    conn = connect(":memory:")
+    paper_id, _is_new = upsert_paper(
+        conn,
+        Paper(
+            source_url="https://example.com/rss",
+            title="Priority paper",
+            url="https://example.com/priority",
+            abstract="OpenAlex abstract",
+            abstract_source=AbstractSource.OPENALEX,
+        ),
+    )
+
+    upsert_paper(
+        conn,
+        Paper(
+            source_url="https://example.com/rss",
+            title="Priority paper",
+            url="https://example.com/priority",
+            abstract="RSS abstract",
+            abstract_html="<p>RSS abstract</p>",
+            abstract_source=AbstractSource.RSS,
+        ),
+    )
+    save_classification(
+        conn,
+        paper_id,
+        Classification(
+            relevance=Relevance.DIRECT,
+            confidence=0.8,
+            reason="Fixture",
+            model="test",
+        ),
+    )
+    conn.commit()
+
+    report_paper = papers_for_report(conn, limit=1)[0]
+
+    assert report_paper.abstract == "OpenAlex abstract"
+    assert report_paper.abstract_source == AbstractSource.OPENALEX
+    assert report_paper.abstract_html is None
+
+
+def test_connect_adds_abstract_source_column_for_legacy_db() -> None:
+    base_dir = Path(".tmp") / f"legacy-db-{uuid4().hex}"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    database_path = base_dir / "legacy.sqlite"
+    conn = connect(database_path)
+    conn.close()
+
+    raw = sqlite3.connect(database_path)
+    raw.execute("ALTER TABLE papers RENAME TO papers_old")
+    raw.executescript(
+        """
+        CREATE TABLE papers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          paper_key TEXT NOT NULL UNIQUE,
+          doi TEXT,
+          title TEXT NOT NULL,
+          journal TEXT,
+          url TEXT NOT NULL,
+          source_url TEXT NOT NULL,
+          feed_title TEXT,
+          authors_json TEXT NOT NULL,
+          abstract TEXT,
+          published_date TEXT,
+          first_seen_at TEXT NOT NULL,
+          read_at TEXT,
+          last_checked_at TEXT NOT NULL,
+          raw_json TEXT NOT NULL
+        );
+        INSERT INTO papers (
+          id, paper_key, doi, title, journal, url, source_url, feed_title, authors_json,
+          abstract, published_date, first_seen_at, read_at, last_checked_at, raw_json
+        )
+        SELECT
+          id, paper_key, doi, title, journal, url, source_url, feed_title, authors_json,
+          abstract, published_date, first_seen_at, read_at, last_checked_at, raw_json
+        FROM papers_old;
+        DROP TABLE papers_old;
+        """
+    )
+    raw.commit()
+    raw.close()
+
+    migrated = connect(database_path)
+    columns = {
+        row["name"] for row in migrated.execute("PRAGMA table_info(papers)").fetchall()
+    }
+
+    assert "abstract_source" in columns
 
 
 def test_mark_paper_read_is_reflected_in_report() -> None:

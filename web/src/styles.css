@@ -15,6 +15,46 @@
   --indirect: #b7791f;
   --unrelated: #68707a;
   --unread: #2563eb;
+  --success-bg: #ecfdf5;
+  --success-line: #6ee7b7;
+  --success-ink: #065f46;
+  --warning-bg: #fffbeb;
+  --warning-line: #fcd34d;
+  --warning-ink: #92400e;
+  --danger-bg: #fff1f2;
+  --danger-line: #fda4af;
+  --danger-ink: #9f1239;
+  --info-bg: #eff6ff;
+  --info-line: #93c5fd;
+  --info-ink: #1d4ed8;
+}
+
+:root[data-theme="dark"] {
+  --paper: #0f1720;
+  --paper-accent: #17212b;
+  --ink: #edf3f7;
+  --subtle-ink: #c2d0da;
+  --body: #d6e0e8;
+  --muted: #8ea1af;
+  --line: #2b3a47;
+  --line-strong: #3f5261;
+  --accent: #4fd1c5;
+  --direct: #34d399;
+  --indirect: #f6ad55;
+  --unrelated: #94a3b8;
+  --unread: #60a5fa;
+  --success-bg: #0f2f26;
+  --success-line: #1f8f67;
+  --success-ink: #b7f7d6;
+  --warning-bg: #3a2a0e;
+  --warning-line: #a16207;
+  --warning-ink: #fde68a;
+  --danger-bg: #3c1620;
+  --danger-line: #be4b62;
+  --danger-ink: #fecdd3;
+  --info-bg: #15253f;
+  --info-line: #2563eb;
+  --info-ink: #bfdbfe;
 }
 
 * {
@@ -26,6 +66,7 @@ body {
   font-family:
     "Helvetica Neue", "Segoe UI", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
   background: var(--paper);
+  color: var(--ink);
 }
 
 a {

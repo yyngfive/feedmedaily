@@ -23,7 +23,7 @@ export function ProfileRulesDocument({
   title?: string;
 }) {
   return (
-    <Card className="border border-(--line) bg-white">
+    <Card className="border border-(--line) bg-(--paper-accent)">
       <Card.Header className="flex flex-col items-start gap-2">
         <p className="text-sm font-semibold text-(--ink)">{title}</p>
         <div className="space-y-1">

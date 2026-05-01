@@ -1,0 +1,26 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="64" y1="48" x2="456" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F766E"/>
+      <stop offset="1" stop-color="#12324A"/>
+    </linearGradient>
+    <linearGradient id="card" x1="180" y1="136" x2="356" y2="376" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E8F4F6"/>
+    </linearGradient>
+  </defs>
+  <rect x="36" y="36" width="440" height="440" rx="108" fill="url(#bg)"/>
+  <circle cx="388" cy="144" r="58" fill="#1CB5A3" fill-opacity="0.16"/>
+  <circle cx="146" cy="382" r="70" fill="#7AE7D9" fill-opacity="0.08"/>
+  <path d="M144 230C184 230 216 262 216 302" stroke="#8AF3E5" stroke-width="18" stroke-linecap="round"/>
+  <path d="M144 188C207 188 258 239 258 302" stroke="#54E0CF" stroke-width="18" stroke-linecap="round"/>
+  <path d="M144 146C231 146 302 217 302 304" stroke="#D9FFF9" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="144" cy="304" r="18" fill="#D9FFF9"/>
+  <rect x="214" y="118" width="162" height="234" rx="26" fill="url(#card)"/>
+  <rect x="238" y="158" width="114" height="14" rx="7" fill="#D5E8EA"/>
+  <rect x="238" y="192" width="96" height="14" rx="7" fill="#D5E8EA"/>
+  <rect x="238" y="236" width="114" height="18" rx="9" fill="#0F766E" fill-opacity="0.16"/>
+  <rect x="238" y="270" width="114" height="18" rx="9" fill="#0F766E" fill-opacity="0.16"/>
+  <rect x="238" y="304" width="80" height="18" rx="9" fill="#0F766E" fill-opacity="0.16"/>
+  <path d="M363 139L371.68 155.32L390 158L376.8 170.84L379.92 189L363 180.08L346.08 189L349.2 170.84L336 158L354.32 155.32L363 139Z" fill="#F8D66D"/>
+</svg>

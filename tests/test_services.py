@@ -76,13 +76,23 @@ def test_generate_profile_proposal_payload_rejects_generic_collapse(monkeypatch)
 def _settings() -> Settings:
     root = Path(".").resolve()
     return Settings(
+        mode="source",
         root=root,
+        app_dir=root,
+        user_data_dir=root,
+        config_dir=root,
+        settings_store_path=None,
+        secrets_store_path=None,
+        runtime_state_path=root / "runtime.json",
+        web_dist_dir=root / "web" / "dist",
         feeds_path=root / "data" / "rss_feeds.json",
         data_dir=root / "data",
         reports_dir=root / "reports",
         logs_dir=root / "logs",
         database_path=root / "data" / "literature.sqlite",
         profile_path=root / "data" / "classification_profile.json",
+        launch_command_path=root / "FeedMeDaily.exe",
+        update_manifest_url=None,
         classifier_api_key="classifier-key",
         classifier_base_url="https://example.com",
         classifier_model="classifier-model",

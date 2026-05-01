@@ -7,15 +7,26 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+import httpx
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from scirssagent.config import Settings, load_settings
+from scirssagent.config import (
+    Settings,
+    load_settings,
+    resolved_config_values,
+    update_local_settings,
+)
 from scirssagent.feeds import read_feed_subscriptions, write_feed_subscriptions
 from scirssagent.models import (
+    AppControlResponse,
+    AppHealthResponse,
+    AppMetaResponse,
+    AppOpenRequest,
+    AppUpdateResponse,
     CurrentProfileResponse,
     FeedbackProposalContext,
     FeedSubscription,
@@ -24,12 +35,35 @@ from scirssagent.models import (
     ProfileProposalState,
     Relevance,
     Report,
+    SchedulerSettingsResponse,
+    SchedulerSettingsUpdateRequest,
+    SettingOption,
+    SettingsConfigField,
+    SettingsConfigResponse,
+    SettingsConfigUpdateRequest,
     ZoteroCollectionsResponse,
     ZoteroSaveState,
 )
-from scirssagent.pipeline import reclassify_paper_ids, regenerate_latest_report, run_once
+from scirssagent.pipeline import (
+    reclassify_paper_ids,
+    reclassify_paper_ids_with_progress,
+    regenerate_latest_report,
+    run_once,
+)
 from scirssagent.profiles import read_profile
 from scirssagent.reporting import build_report
+from scirssagent.runtime import (
+    APP_PUBLIC_NAME,
+    SCHEDULER_TASK_NAME,
+    AppOpenTarget,
+    is_newer_version,
+    open_external_target,
+    package_version,
+    process_is_running,
+    read_runtime_state,
+    schedule_process_exit,
+)
+from scirssagent.scheduler import install_scheduler_task, remove_scheduler_task, scheduler_status
 from scirssagent.services import (
     generate_initial_profile_payload,
     generate_profile_proposal_payload,
@@ -107,7 +141,7 @@ JOB_REGISTRY = JobRegistry(lock=threading.Lock(), jobs={})
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="SciRSSAgent")
+    app = FastAPI(title=APP_PUBLIC_NAME)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -120,16 +154,113 @@ def create_app() -> FastAPI:
         settings = load_settings()
         return current_report(settings)
 
+    @app.get("/api/app/meta", response_model=AppMetaResponse)
+    def api_app_meta(request: Request) -> AppMetaResponse:
+        settings = load_settings()
+        return build_app_meta(settings, request)
+
+    @app.get("/api/app/health", response_model=AppHealthResponse)
+    def api_app_health(request: Request) -> AppHealthResponse:
+        settings = load_settings()
+        return AppHealthResponse(
+            name=APP_PUBLIC_NAME,
+            version=package_version(),
+            mode=settings.mode,
+            server_url=str(request.base_url).rstrip("/"),
+        )
+
+    @app.get("/api/app/update", response_model=AppUpdateResponse)
+    def api_app_update() -> AppUpdateResponse:
+        settings = load_settings()
+        return fetch_update_status(settings)
+
+    @app.post("/api/app/open", response_model=AppControlResponse)
+    def api_app_open_target(
+        payload: AppOpenRequest,
+        request: Request,
+    ) -> AppControlResponse:
+        settings = load_settings()
+        update_status = (
+            fetch_update_status(settings)
+            if payload.target in {
+                AppOpenTarget.DOWNLOAD_URL.value,
+                AppOpenTarget.RELEASE_NOTES_URL.value,
+            }
+            else None
+        )
+        target = resolve_app_open_target(
+            settings=settings,
+            target=payload.target,
+            server_url=str(request.base_url).rstrip("/"),
+            update=update_status,
+        )
+        open_external_target(target)
+        return AppControlResponse(
+            action="open",
+            target=payload.target,
+            detail=target,
+        )
+
+    @app.post("/api/app/exit", response_model=AppControlResponse)
+    def api_app_exit() -> AppControlResponse:
+        settings = load_settings()
+        schedule_process_exit(settings.runtime_state_path)
+        return AppControlResponse(
+            action="exit",
+            detail="Shutting down the local FeedMeDaily service.",
+        )
+
     @app.get("/api/settings/feeds")
     def api_settings_feeds() -> list[dict[str, object]]:
         settings = load_settings()
         return [item.model_dump(mode="json") for item in load_feed_settings(settings)]
+
+    @app.get("/api/settings/config", response_model=SettingsConfigResponse)
+    def api_settings_config() -> SettingsConfigResponse:
+        settings = build_settings_config_response()
+        return SettingsConfigResponse(fields=settings)
+
+    @app.put("/api/settings/config", response_model=SettingsConfigResponse)
+    def api_settings_config_update(
+        payload: SettingsConfigUpdateRequest,
+    ) -> SettingsConfigResponse:
+        try:
+            updated = update_local_settings(
+                load_settings().root,
+                {
+                    key: value.model_dump(mode="python")
+                    for key, value in payload.fields.items()
+                },
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return SettingsConfigResponse(fields=_settings_config_fields(updated))
 
     @app.put("/api/settings/feeds")
     def api_settings_feeds_update(payload: FeedSettingsUpdateRequest) -> list[dict[str, object]]:
         settings = load_settings()
         write_feed_subscriptions(settings.feeds_path, payload.feeds)
         return [item.model_dump(mode="json") for item in load_feed_settings(settings)]
+
+    @app.get("/api/settings/scheduler", response_model=SchedulerSettingsResponse)
+    def api_settings_scheduler() -> SchedulerSettingsResponse:
+        settings = load_settings()
+        return SchedulerSettingsResponse.model_validate(scheduler_status(settings))
+
+    @app.put("/api/settings/scheduler", response_model=SchedulerSettingsResponse)
+    def api_settings_scheduler_update(
+        payload: SchedulerSettingsUpdateRequest,
+    ) -> SchedulerSettingsResponse:
+        settings = load_settings()
+        return SchedulerSettingsResponse.model_validate(
+            install_scheduler_task(settings, payload.daily_time)
+        )
+
+    @app.delete("/api/settings/scheduler", response_model=SchedulerSettingsResponse)
+    def api_settings_scheduler_delete() -> SchedulerSettingsResponse:
+        settings = load_settings()
+        remove_scheduler_task()
+        return SchedulerSettingsResponse.model_validate(scheduler_status(settings))
 
     @app.get("/api/profile/current", response_model=CurrentProfileResponse)
     def api_profile_current() -> CurrentProfileResponse:
@@ -147,7 +278,9 @@ def create_app() -> FastAPI:
                 _bootstrap_profile_job,
                 settings.root,
                 payload.model_dump(),
+                queued_message_key="profile.bootstrap.queued",
                 queued_message="Queued initial profile generation.",
+                running_message_key="profile.bootstrap.generating",
                 running_message="Generating the initial classification profile proposal.",
             )
         )
@@ -421,17 +554,119 @@ def load_feed_settings(settings: Settings) -> list[FeedSubscription]:
     return read_feed_subscriptions(settings.feeds_path)
 
 
+def build_settings_config_response() -> list[SettingsConfigField]:
+    return _settings_config_fields(resolved_config_values(load_settings().root))
+
+
+def build_app_meta(settings: Settings, request: Request) -> AppMetaResponse:
+    runtime_state = read_runtime_state(settings.runtime_state_path)
+    return AppMetaResponse(
+        name=APP_PUBLIC_NAME,
+        version=package_version(),
+        mode=settings.mode,
+        install_dir=str(settings.app_dir),
+        data_dir=str(settings.data_dir),
+        logs_dir=str(settings.logs_dir),
+        reports_dir=str(settings.reports_dir),
+        static_dir=str(settings.web_dist_dir),
+        server_url=str(request.base_url).rstrip("/"),
+        scheduler_task_name=SCHEDULER_TASK_NAME,
+        update_manifest_url=settings.update_manifest_url,
+        process_running=process_is_running(runtime_state.pid if runtime_state else None),
+    )
+
+
+def fetch_update_status(settings: Settings) -> AppUpdateResponse:
+    if not settings.update_manifest_url:
+        return AppUpdateResponse(
+            status="not_configured",
+            current_version=package_version(),
+            detail="Update checks are not configured for this build.",
+        )
+    try:
+        response = httpx.get(settings.update_manifest_url, timeout=5.0)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        return AppUpdateResponse(
+            status="check_failed",
+            current_version=package_version(),
+            detail=str(exc),
+        )
+    latest_version = str(payload.get("version") or "").strip() or None
+    download_url = str(payload.get("download_url") or "").strip() or None
+    release_notes_url = str(payload.get("release_notes_url") or "").strip() or None
+    has_update = bool(latest_version and is_newer_version(latest_version, package_version()))
+    return AppUpdateResponse(
+        status="update_available" if has_update else "up_to_date",
+        current_version=package_version(),
+        latest_version=latest_version,
+        has_update=has_update,
+        download_url=download_url,
+        release_notes_url=release_notes_url,
+        detail=None if latest_version else "Manifest did not include a version field.",
+    )
+
+
+def resolve_app_open_target(
+    settings: Settings,
+    target: str,
+    server_url: str,
+    update: AppUpdateResponse | None,
+) -> str:
+    mapping = {
+        AppOpenTarget.DATA_DIR.value: str(settings.data_dir),
+        AppOpenTarget.LOGS_DIR.value: str(settings.logs_dir),
+        AppOpenTarget.REPORTS_DIR.value: str(settings.reports_dir),
+        AppOpenTarget.INSTALL_DIR.value: str(settings.app_dir),
+        AppOpenTarget.SERVER_URL.value: server_url,
+        AppOpenTarget.DOWNLOAD_URL.value: update.download_url if update else None,
+        AppOpenTarget.RELEASE_NOTES_URL.value: update.release_notes_url if update else None,
+    }
+    resolved = mapping.get(target)
+    if not resolved:
+        raise HTTPException(status_code=400, detail=f"Unsupported app open target: {target}")
+    return resolved
+
+
+def _settings_config_fields(values) -> list[SettingsConfigField]:
+    return [
+        SettingsConfigField(
+            key=item.option.key,
+            label=item.option.label,
+            description=item.option.description,
+            section=item.option.section,
+            input_type=item.option.input_type,
+            secret=item.option.secret,
+            configured=item.configured,
+            source=item.source,
+            stored_in_dotenv=item.stored_in_dotenv,
+            storage_label=item.storage_label,
+            value=None if item.option.secret else item.value,
+            default_value=item.option.default,
+            options=[
+                SettingOption(value=value, label=label)
+                for value, label in item.option.options
+            ],
+        )
+        for item in values
+    ]
+
+
 def launch_job(
     job_type: str,
     target,
     *args,
+    queued_message_key: str | None = None,
     queued_message: str | None = None,
+    running_message_key: str | None = None,
     running_message: str | None = None,
 ) -> JobInfo:
     job = JobInfo(
         id=uuid.uuid4().hex,
         job_type=job_type,
         status="queued",
+        message_key=queued_message_key,
         message=queued_message,
     )
     with JOB_REGISTRY.lock:
@@ -441,15 +676,20 @@ def launch_job(
         update_job(
             job.id,
             status="running",
+            message_key=running_message_key,
             message=running_message,
             started_at=datetime.now(UTC),
         )
+        def progress(message_key: str, message: str) -> None:
+            update_job(job.id, message_key=message_key, message=message)
+
         try:
-            result = target(*args)
+            result = target(*args, progress=progress)
         except Exception as exc:
             update_job(
                 job.id,
                 status="failed",
+                message_key=f"{job_type}.failed",
                 message=None,
                 error=str(exc),
                 finished_at=datetime.now(UTC),
@@ -458,6 +698,7 @@ def launch_job(
         update_job(
             job.id,
             status="completed",
+            message_key=f"{job_type}.completed",
             message="Completed.",
             result=result if isinstance(result, dict) else {"value": result},
             finished_at=datetime.now(UTC),
@@ -474,23 +715,27 @@ def update_job(job_id: str, **updates) -> None:
         JOB_REGISTRY.jobs[job_id] = current.model_copy(update=updates)
 
 
-def _run_pipeline_job(root: Path) -> dict[str, object]:
+def _run_pipeline_job(root: Path, progress=None) -> dict[str, object]:
     settings = load_settings(root)
-    index = run_once(settings, reclassify=False)
+    index = run_once(settings, reclassify=False, progress=progress)
     return {"report": index}
 
 
-def _regenerate_report_job(root: Path) -> dict[str, object]:
+def _regenerate_report_job(root: Path, progress=None) -> dict[str, object]:
     settings = load_settings(root)
+    if progress:
+        progress("pipeline.report.writing", "Publishing the latest report.")
     index = regenerate_latest_report(settings)
     return {"report": index}
 
 
-def _generate_profile_proposal_job(root: Path) -> dict[str, object]:
+def _generate_profile_proposal_job(root: Path, progress=None) -> dict[str, object]:
     settings = load_settings(root)
     current = read_profile(settings.profile_path)
     if current is None:
         raise ValueError("No classification profile exists yet.")
+    if progress:
+        progress("profile.proposal.collecting_feedback", "Collecting feedback for profile review.")
     conn = connect(settings.database_path)
     try:
         feedback_items = list_open_feedback(conn)
@@ -510,6 +755,8 @@ def _generate_profile_proposal_job(root: Path) -> dict[str, object]:
                     note=item.note,
                 )
             )
+        if progress:
+            progress("profile.proposal.generating", "Generating profile proposal.")
         payload = generate_profile_proposal_payload(settings, current, feedback_context)
         proposal = save_profile_proposal(
             conn,
@@ -525,10 +772,16 @@ def _generate_profile_proposal_job(root: Path) -> dict[str, object]:
         conn.close()
 
 
-def _bootstrap_profile_job(root: Path, payload: dict[str, object]) -> dict[str, object]:
+def _bootstrap_profile_job(
+    root: Path,
+    payload: dict[str, object],
+    progress=None,
+) -> dict[str, object]:
     settings = load_settings(root)
     if read_profile(settings.profile_path) is not None:
         raise ValueError("A classification profile already exists.")
+    if progress:
+        progress("profile.bootstrap.generating", "Generating the initial profile proposal.")
     proposal_payload = generate_initial_profile_payload(
         settings,
         interest_description=str(payload["interest_description"]),
@@ -550,7 +803,7 @@ def _bootstrap_profile_job(root: Path, payload: dict[str, object]) -> dict[str, 
         conn.close()
 
 
-def _reclassify_job(root: Path, payload: dict[str, object]) -> dict[str, object]:
+def _reclassify_job(root: Path, payload: dict[str, object], progress=None) -> dict[str, object]:
     settings = load_settings(root)
     conn = connect(settings.database_path)
     try:
@@ -562,7 +815,9 @@ def _reclassify_job(root: Path, payload: dict[str, object]) -> dict[str, object]
             paper_ids = recent_paper_ids(conn, int(payload["limit"]))
     finally:
         conn.close()
-    count = reclassify_paper_ids(settings, paper_ids)
+    count = reclassify_paper_ids_with_progress(settings, paper_ids, progress=progress)
+    if progress:
+        progress("pipeline.report.writing", "Publishing the latest report.")
     report = regenerate_latest_report(settings)
     return {"reclassified": count, "report": report}
 
@@ -576,7 +831,7 @@ def _feedback_paper_ids_for_apply(settings: Settings, feedback_ids: list[int]) -
 
 
 def mount_static_app(app: FastAPI) -> None:
-    dist_dir = load_settings().root / "web" / "dist"
+    dist_dir = load_settings().web_dist_dir
     assets_dir = dist_dir / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
@@ -585,11 +840,23 @@ def mount_static_app(app: FastAPI) -> None:
     def spa_entry(full_path: str):
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="API route not found.")
+        requested = (dist_dir / full_path).resolve()
+        if (
+            full_path
+            and requested.exists()
+            and requested.is_file()
+            and dist_dir.resolve() in requested.parents
+        ):
+            return FileResponse(requested)
         index = dist_dir / "index.html"
         if index.exists():
             return FileResponse(index)
         return HTMLResponse(
-            "<h1>SciRSSAgent</h1><p>Frontend build not found. Run pnpm --dir web build.</p>",
+            (
+                f"<h1>{APP_PUBLIC_NAME}</h1>"
+                "<p>Frontend build not found. "
+                "Build the web assets before packaging this release.</p>"
+            ),
             status_code=200,
         )
 

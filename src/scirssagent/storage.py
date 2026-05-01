@@ -9,6 +9,7 @@ from pathlib import Path
 from scirssagent.metadata import paper_key
 from scirssagent.models import (
     AbstractImage,
+    AbstractSource,
     Classification,
     ClassificationProfile,
     FeedbackRecord,
@@ -22,6 +23,7 @@ from scirssagent.models import (
     ReportPaper,
     ZoteroSaveState,
     ZoteroStatus,
+    abstract_source_priority,
 )
 from scirssagent.profile_compact import persisted_profile
 
@@ -37,6 +39,7 @@ CREATE TABLE IF NOT EXISTS papers (
   feed_title TEXT,
   authors_json TEXT NOT NULL,
   abstract TEXT,
+  abstract_source TEXT NOT NULL DEFAULT 'none',
   published_date TEXT,
   first_seen_at TEXT NOT NULL,
   read_at TEXT,
@@ -112,6 +115,8 @@ def connect(path: Path | str) -> sqlite3.Connection:
     paper_columns = {row["name"] for row in conn.execute("PRAGMA table_info(papers)").fetchall()}
     if "read_at" not in paper_columns:
         conn.execute("ALTER TABLE papers ADD COLUMN read_at TEXT")
+    if "abstract_source" not in paper_columns:
+        conn.execute("ALTER TABLE papers ADD COLUMN abstract_source TEXT NOT NULL DEFAULT 'none'")
     columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(classifications)").fetchall()
     }
@@ -128,13 +133,14 @@ def connect(path: Path | str) -> sqlite3.Connection:
 def upsert_paper(conn: sqlite3.Connection, paper: Paper) -> tuple[int, bool]:
     key = paper_key(paper)
     now = datetime.now(UTC).isoformat()
-    raw_payload = {
-        **paper.raw,
-        "_abstract_html": paper.abstract_html,
-        "_abstract_images": [item.model_dump(mode="json") for item in paper.abstract_images],
-    }
-    existing = conn.execute("SELECT id FROM papers WHERE paper_key = ?", (key,)).fetchone()
+    existing = conn.execute("SELECT * FROM papers WHERE paper_key = ?", (key,)).fetchone()
     if existing:
+        merged = merge_paper_content(paper_from_row(existing), paper)
+        raw_payload = {
+            **merged.raw,
+            "_abstract_html": merged.abstract_html,
+            "_abstract_images": [item.model_dump(mode="json") for item in merged.abstract_images],
+        }
         conn.execute(
             """
             UPDATE papers
@@ -142,32 +148,39 @@ def upsert_paper(conn: sqlite3.Connection, paper: Paper) -> tuple[int, bool]:
                 title = ?,
                 journal = COALESCE(?, journal),
                 url = ?,
-                abstract = COALESCE(?, abstract),
+                abstract = ?,
+                abstract_source = ?,
                 published_date = COALESCE(?, published_date),
                 last_checked_at = ?,
                 raw_json = ?
             WHERE id = ?
             """,
             (
-                paper.doi,
-                paper.title,
-                paper.journal,
-                paper.url,
-                paper.abstract,
-                paper.published_date.isoformat() if paper.published_date else None,
+                merged.doi,
+                merged.title,
+                merged.journal,
+                merged.url,
+                merged.abstract,
+                merged.abstract_source.value,
+                merged.published_date.isoformat() if merged.published_date else None,
                 now,
                 json.dumps(raw_payload, ensure_ascii=False),
                 existing["id"],
             ),
         )
         return int(existing["id"]), False
+    raw_payload = {
+        **paper.raw,
+        "_abstract_html": paper.abstract_html,
+        "_abstract_images": [item.model_dump(mode="json") for item in paper.abstract_images],
+    }
     cursor = conn.execute(
         """
         INSERT INTO papers (
           paper_key, doi, title, journal, url, source_url, feed_title, authors_json,
-          abstract, published_date, first_seen_at, last_checked_at, raw_json
+          abstract, abstract_source, published_date, first_seen_at, last_checked_at, raw_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             key,
@@ -179,6 +192,7 @@ def upsert_paper(conn: sqlite3.Connection, paper: Paper) -> tuple[int, bool]:
             paper.feed_title,
             json.dumps(paper.authors, ensure_ascii=False),
             paper.abstract,
+            paper.abstract_source.value,
             paper.published_date.isoformat() if paper.published_date else None,
             paper.first_seen_at.isoformat(),
             now,
@@ -619,6 +633,7 @@ def paper_from_row(row: sqlite3.Row) -> Paper:
         journal=row["journal"],
         authors=json.loads(row["authors_json"]),
         abstract=row["abstract"],
+        abstract_source=AbstractSource(row["abstract_source"] or AbstractSource.NONE.value),
         abstract_html=raw_payload.get("_abstract_html"),
         abstract_images=[
             AbstractImage.model_validate(item) for item in raw_payload.get("_abstract_images", [])
@@ -676,6 +691,61 @@ def papers_for_report(
             )
         )
     return report_papers
+
+
+def merge_paper_content(existing: Paper, incoming: Paper) -> Paper:
+    chosen_abstract = pick_abstract_payload(existing, incoming)
+    merged_raw = {**existing.raw, **incoming.raw}
+    return existing.model_copy(
+        update={
+            "feed_title": incoming.feed_title or existing.feed_title,
+            "title": incoming.title or existing.title,
+            "url": incoming.url or existing.url,
+            "doi": incoming.doi or existing.doi,
+            "journal": incoming.journal or existing.journal,
+            "authors": incoming.authors or existing.authors,
+            "abstract": chosen_abstract["abstract"],
+            "abstract_source": chosen_abstract["abstract_source"],
+            "abstract_html": chosen_abstract["abstract_html"],
+            "abstract_images": chosen_abstract["abstract_images"],
+            "published_date": incoming.published_date or existing.published_date,
+            "read_at": existing.read_at,
+            "raw": merged_raw,
+        }
+    )
+
+
+def pick_abstract_payload(existing: Paper, incoming: Paper) -> dict[str, object]:
+    existing_has_content = bool(
+        existing.abstract or existing.abstract_html or existing.abstract_images
+    )
+    incoming_has_content = bool(
+        incoming.abstract or incoming.abstract_html or incoming.abstract_images
+    )
+    if incoming_has_content and (
+        not existing_has_content
+        or abstract_source_priority(incoming.abstract_source)
+        >= abstract_source_priority(existing.abstract_source)
+    ):
+        return {
+            "abstract": incoming.abstract,
+            "abstract_source": incoming.abstract_source,
+            "abstract_html": incoming.abstract_html,
+            "abstract_images": incoming.abstract_images,
+        }
+    if existing_has_content:
+        return {
+            "abstract": existing.abstract,
+            "abstract_source": existing.abstract_source,
+            "abstract_html": existing.abstract_html,
+            "abstract_images": existing.abstract_images,
+        }
+    return {
+        "abstract": incoming.abstract or existing.abstract,
+        "abstract_source": AbstractSource.NONE,
+        "abstract_html": None,
+        "abstract_images": [],
+    }
 
 
 def paper_ids_needing_classification(

@@ -1,7 +1,6 @@
 import {Button, Chip} from "@heroui/react";
 
-import {relevanceLabel, relevanceTone} from "../../app/constants";
-import {authorsLine, doiHref, feedbackLabel, paperDate, sentence} from "../../app/utils";
+import {authorsLine, doiHref, feedbackLabel, paperDate} from "../../app/utils";
 import {tagLabel} from "../../reportData";
 import type {ClassificationProfile, Paper} from "../../types";
 
@@ -22,12 +21,11 @@ export function DetailPanel({
 }) {
   if (!paper) {
     return (
-      <aside className="sticky top-4 rounded-lg border border-(--line) bg-white p-5 text-sm text-muted">
+      <aside className="h-full overflow-hidden rounded-lg border border-(--line) bg-(--paper-accent) p-5 text-sm text-muted">
         No paper selected.
       </aside>
     );
   }
-  const tone = relevanceTone[paper.classification.relevance];
   const feedbackText = feedbackLabel(paper);
   const zoteroSaved = paper.zotero_status?.saved ?? false;
   const hasAbstractHtml = Boolean(paper.abstract_html);
@@ -35,7 +33,7 @@ export function DetailPanel({
   const hasAbstractImages = abstractImages.length > 0;
 
   return (
-    <aside className="sticky top-4 space-y-5 rounded-lg border border-(--line) bg-white p-5">
+    <aside className="h-full space-y-5 overflow-hidden rounded-lg border border-(--line) bg-(--paper-accent) p-5">
       <div className="space-y-3">
         <h2 className="text-xl font-semibold leading-7 text-(--ink)">{paper.title}</h2>
         <p className="text-base leading-6 text-muted">{paper.journal || "Unknown journal"}</p>
@@ -84,7 +82,7 @@ export function DetailPanel({
             {paper.abstract}
           </p>
         ) : (
-          <p className="text-sm text-muted">No abstract was available in the feed metadata.</p>
+          <p className="text-sm text-muted">No abstract is available for this paper.</p>
         )}
         {hasAbstractImages ? (
           <details className="rounded-md border border-(--line) p-3">
@@ -110,7 +108,7 @@ export function DetailPanel({
       </section>
 
       {paper.zotero_status?.last_error ? (
-        <div className="rounded-md border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800">
+        <div className="rounded-md border border-[var(--danger-line)] bg-[var(--danger-bg)] p-3 text-sm text-[var(--danger-ink)]">
           {paper.zotero_status.last_error}
         </div>
       ) : null}

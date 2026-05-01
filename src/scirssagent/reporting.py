@@ -107,10 +107,10 @@ def publish_static_app(web_dist: Path, reports_dir: Path, report: Report) -> Pat
             f"""
             <!doctype html>
             <meta charset="utf-8">
-            <title>SciRSSAgent</title>
+            <title>FeedMeDaily</title>
             <body>
-              <h1>SciRSSAgent report data generated</h1>
-              <p>Run <code>pnpm --dir web build</code> to build the React dashboard.</p>
+              <h1>FeedMeDaily report data generated</h1>
+              <p>Build the bundled web assets before publishing this static dashboard.</p>
               <pre id="report-json">{json.dumps(payload, ensure_ascii=False, indent=2)}</pre>
             </body>
             """.strip(),

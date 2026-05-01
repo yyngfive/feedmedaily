@@ -1,23 +1,29 @@
 import React from "react";
 
 const toneClasses = {
-  danger: "border-rose-300 bg-rose-50 text-rose-900",
-  info: "border-sky-300 bg-sky-50 text-sky-900",
-  success: "border-emerald-300 bg-emerald-50 text-emerald-900",
-  warning: "border-amber-300 bg-amber-50 text-amber-900",
+  danger: "border-[var(--danger-line)] bg-[var(--danger-bg)] text-[var(--danger-ink)]",
+  info: "border-[var(--info-line)] bg-[var(--info-bg)] text-[var(--info-ink)]",
+  success: "border-[var(--success-line)] bg-[var(--success-bg)] text-[var(--success-ink)]",
+  warning: "border-[var(--warning-line)] bg-[var(--warning-bg)] text-[var(--warning-ink)]",
 } as const;
+
+export type StatusTone = keyof typeof toneClasses;
 
 export function StatusBanner({
   children,
   className = "",
+  compact = false,
   tone,
 }: {
   children: React.ReactNode;
   className?: string;
-  tone: keyof typeof toneClasses;
+  compact?: boolean;
+  tone: StatusTone;
 }) {
   return (
-    <div className={`rounded-md border p-3 text-sm ${toneClasses[tone]} ${className}`.trim()}>
+    <div
+      className={`rounded-md border text-sm ${compact ? "px-3 py-1.5" : "p-3"} ${toneClasses[tone]} ${className}`.trim()}
+    >
       {children}
     </div>
   );
