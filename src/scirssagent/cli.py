@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
+import uvicorn
 
 from scirssagent.config import load_settings
 from scirssagent.pipeline import regenerate_latest_report, run_once
@@ -18,6 +19,7 @@ from scirssagent.runtime import (
     write_runtime_state,
 )
 from scirssagent.scheduler import install_scheduler_task, remove_scheduler_task, scheduler_status
+from scirssagent.server import create_app
 
 app = typer.Typer(help=f"{APP_PUBLIC_NAME} literature monitor.")
 report_app = typer.Typer(help="Report commands.")
@@ -125,10 +127,9 @@ def serve(
     port: int | None = PORT_OPTION,
 ) -> None:
     settings = load_settings(root)
-    import uvicorn
 
     uvicorn.run(
-        "scirssagent.server:app",
+        create_app(),
         host=host or settings.server_host,
         port=port or settings.server_port,
         reload=False,
