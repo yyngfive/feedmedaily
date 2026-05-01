@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from scirssagent.models import (
     ClassificationProfile,
     ProfileFewShot,
@@ -27,6 +29,22 @@ def test_validate_profile_json_accepts_markdown_fence_and_extra_text() -> None:
     assert parsed.topic_taxonomy[0].id == "polymerase_engineering"
 
 
+def test_validate_profile_json_rejects_legacy_tag_shape() -> None:
+    profile = _profile().model_dump(mode="json")
+    profile["topic_taxonomy"][0]["description"] = "Legacy field should be rejected."
+
+    with pytest.raises(ValueError, match="topic_taxonomy.0.description"):
+        validate_profile_json(profile)
+
+
+def test_validate_profile_json_rejects_legacy_classification_notes() -> None:
+    profile = _profile().model_dump(mode="json")
+    profile["classification_notes"] = ["Legacy notes field should be rejected."]
+
+    with pytest.raises(ValueError, match="classification_notes"):
+        validate_profile_json(profile)
+
+
 def _profile() -> ClassificationProfile:
     now = datetime(2026, 4, 30, tzinfo=UTC)
     return ClassificationProfile(
@@ -47,8 +65,6 @@ def _profile() -> ClassificationProfile:
             TopicDefinition(
                 id="polymerase_engineering",
                 label="Polymerase Engineering",
-                description="Engineered polymerases and related evolution studies.",
-                examples=["Directed evolution of an XNA polymerase"],
             )
         ],
         few_shots=[
@@ -59,5 +75,4 @@ def _profile() -> ClassificationProfile:
                 rationale="Matches direct polymerase interest.",
             )
         ],
-        classification_notes=["Keep tags limited to the taxonomy above."],
     )

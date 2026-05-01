@@ -7,6 +7,7 @@ from textwrap import dedent
 from openai import OpenAI
 
 from scirssagent.models import Classification, ClassificationProfile, Paper
+from scirssagent.profile_compact import profile_prompt_payload
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,11 @@ BASE_CLASSIFICATION_INSTRUCTIONS = dedent(
 
 
 def profile_prompt_block(profile: ClassificationProfile) -> str:
-    return json.dumps(profile.model_dump(mode="json"), ensure_ascii=False, indent=2)
+    return json.dumps(
+        profile_prompt_payload(profile, include_few_shots=bool(profile.few_shots)),
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 def classification_prompt(paper: Paper, profile: ClassificationProfile) -> str:
@@ -68,6 +73,11 @@ def batch_classification_prompt(
     papers: list[tuple[str, Paper]],
     profile: ClassificationProfile,
 ) -> str:
+    compact_profile_json = json.dumps(
+        profile_prompt_payload(profile, include_few_shots=bool(profile.few_shots)),
+        ensure_ascii=False,
+        indent=2,
+    )
     items = []
     for item_id, paper in papers:
         items.append(
@@ -83,7 +93,7 @@ def batch_classification_prompt(
         {BASE_CLASSIFICATION_INSTRUCTIONS}
 
         User classification profile:
-        {profile_prompt_block(profile)}
+        {compact_profile_json}
 
         Return valid JSON only, with this exact shape:
         {{
@@ -133,32 +143,6 @@ def _openai_client(config: LlmConfig) -> OpenAI:
     if config.base_url:
         client_kwargs["base_url"] = config.base_url
     return OpenAI(**client_kwargs)
-
-
-def llm_classify(paper: Paper, profile: ClassificationProfile, config: LlmConfig) -> Classification:
-    client = _openai_client(config)
-    request_kwargs: dict[str, object] = {
-        "model": config.model,
-        "messages": [
-            {"role": "system", "content": "You are a careful scientific literature classifier."},
-            {"role": "user", "content": classification_prompt(paper, profile)},
-        ],
-        "temperature": 0,
-        "max_tokens": 400,
-        "response_format": {"type": "json_object"},
-        "extra_body": {"thinking": {"type": config.thinking}},
-    }
-
-    last_content = ""
-    for _ in range(2):
-        response = client.chat.completions.create(**request_kwargs)
-        content = response.choices[0].message.content or ""
-        if content.strip():
-            payload = json.loads(content)
-            return Classification.model_validate({**payload, "model": config.model})
-        last_content = content
-
-    raise ValueError(f"Model returned empty JSON content: {last_content!r}")
 
 
 def llm_classify_batch(
@@ -261,15 +245,6 @@ def llm_translate_titles_batch(
         if translated_title:
             translations[str(item["id"])] = translated_title
     return translations
-
-
-def classify_paper(
-    paper: Paper,
-    *,
-    profile: ClassificationProfile,
-    config: LlmConfig,
-) -> Classification:
-    return llm_classify(paper, profile, config)
 
 
 def classify_papers(

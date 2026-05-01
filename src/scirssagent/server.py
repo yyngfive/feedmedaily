@@ -17,6 +17,7 @@ from scirssagent.config import Settings, load_settings
 from scirssagent.feeds import read_feed_subscriptions, write_feed_subscriptions
 from scirssagent.models import (
     CurrentProfileResponse,
+    FeedbackProposalContext,
     FeedSubscription,
     JobInfo,
     ProfileMeta,
@@ -489,11 +490,28 @@ def _generate_profile_proposal_job(root: Path) -> dict[str, object]:
     conn = connect(settings.database_path)
     try:
         feedback_items = list_open_feedback(conn)
-        payload = generate_profile_proposal_payload(settings, current, feedback_items)
+        feedback_context: list[FeedbackProposalContext] = []
+        for item in feedback_items:
+            row = paper_by_id(conn, item.paper_id)
+            paper = paper_from_row(row) if row is not None else None
+            feedback_context.append(
+                FeedbackProposalContext(
+                    feedback_id=item.id,
+                    paper_id=item.paper_id,
+                    paper_title=item.paper_title,
+                    journal=paper.journal if paper is not None else None,
+                    abstract=paper.abstract if paper is not None else None,
+                    original_relevance=item.original_relevance,
+                    corrected_relevance=item.corrected_relevance,
+                    note=item.note,
+                )
+            )
+        payload = generate_profile_proposal_payload(settings, current, feedback_context)
         proposal = save_profile_proposal(
             conn,
             summary=str(payload["summary"]),
             proposed_profile=payload["proposed_profile"],
+            rule_delta=payload["rule_delta"],
             source_feedback_ids=list(payload["source_feedback_ids"]),
             model=str(payload["model"]),
         )
@@ -518,6 +536,7 @@ def _bootstrap_profile_job(root: Path, payload: dict[str, object]) -> dict[str, 
             conn,
             summary=str(proposal_payload["summary"]),
             proposed_profile=proposal_payload["proposed_profile"],
+            rule_delta=proposal_payload["rule_delta"],
             source_feedback_ids=[],
             model=settings.profile_model,
         )

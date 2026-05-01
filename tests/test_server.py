@@ -12,6 +12,7 @@ from scirssagent.models import (
     JobInfo,
     Paper,
     ProfileMeta,
+    ProfileProposalDelta,
     Relevance,
     RelevanceRules,
     TopicDefinition,
@@ -249,6 +250,19 @@ def test_profile_proposal_apply_updates_profile_and_feedback(monkeypatch) -> Non
         conn,
         summary="Tighten direct scope.",
         proposed_profile=_profile("Updated profile"),
+        rule_delta=ProfileProposalDelta(
+            summary="Initial compact proposal review.",
+            direct_rule_additions=["Polymerase and nucleotide chemistry."],
+            indirect_rule_additions=["General protein engineering."],
+            unrelated_rule_additions=["No overlap."],
+            scope_rewrite="Nucleic acid chemistry and engineered enzymes.",
+            tag_additions=[
+                TopicDefinition(
+                    id="polymerase_engineering",
+                    label="Polymerase Engineering",
+                )
+            ],
+        ),
         model="deepseek-v4-pro",
         source_feedback_ids=[feedback.id],
     )
@@ -428,12 +442,9 @@ def _profile(name: str) -> ClassificationProfile:
             TopicDefinition(
                 id="polymerase_engineering",
                 label="Polymerase Engineering",
-                description="Engineered polymerases.",
-                examples=[],
             )
         ],
         few_shots=[],
-        classification_notes=[],
     )
 
 

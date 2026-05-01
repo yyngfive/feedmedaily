@@ -24,9 +24,11 @@ def test_prompt_embeds_profile_rules_and_taxonomy() -> None:
     assert "User classification profile" in prompt
     assert "Polymerase Engineering" in prompt
     assert "Only emit tag ids that exist in the profile topic taxonomy." in prompt
+    assert "source_description" not in prompt
+    assert "Engineered polymerases and related evolution studies." not in prompt
 
 
-def test_batch_prompt_mentions_profile_tag_ids() -> None:
+def test_batch_prompt_mentions_profile_tag_ids_and_trims_few_shots() -> None:
     paper = Paper(
         source_url="https://example.com/rss",
         title="Chemical ligation in nucleic acid systems",
@@ -39,6 +41,8 @@ def test_batch_prompt_mentions_profile_tag_ids() -> None:
     assert "polymerase_engineering" in prompt
     assert "nucleic_acid_chemistry" in prompt
     assert "Chemical ligation in nucleic acid systems" in prompt
+    assert "Directed evolution of an XNA polymerase" in prompt
+    assert "Modified nucleotide ligation chemistry" in prompt
 
 
 def _profile() -> ClassificationProfile:
@@ -61,14 +65,10 @@ def _profile() -> ClassificationProfile:
             TopicDefinition(
                 id="polymerase_engineering",
                 label="Polymerase Engineering",
-                description="Engineered polymerases and related evolution studies.",
-                examples=["Directed evolution of an XNA polymerase"],
             ),
             TopicDefinition(
                 id="nucleic_acid_chemistry",
                 label="Nucleic Acid Chemistry",
-                description="Chemistry centered on nucleic acids and modified nucleotides.",
-                examples=["Modified nucleotide ligation chemistry"],
             ),
         ],
         few_shots=[
@@ -77,7 +77,12 @@ def _profile() -> ClassificationProfile:
                 relevance=Relevance.DIRECT,
                 tags=["polymerase_engineering"],
                 rationale="Matches direct polymerase interest.",
-            )
+            ),
+            ProfileFewShot(
+                title="Modified nucleotide ligation chemistry",
+                relevance=Relevance.DIRECT,
+                tags=["nucleic_acid_chemistry"],
+                rationale="Matches direct chemistry interest.",
+            ),
         ],
-        classification_notes=["Keep tags limited to the taxonomy above."],
     )

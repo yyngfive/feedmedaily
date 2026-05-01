@@ -272,10 +272,7 @@ def _profile() -> ClassificationProfile:
             TopicDefinition(
                 id="fixture_tag",
                 label="Fixture Tag",
-                description="Fixture topic.",
-                examples=[],
             )
         ],
         few_shots=[],
-        classification_notes=[],
     )
