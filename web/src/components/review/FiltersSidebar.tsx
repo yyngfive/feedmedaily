@@ -51,13 +51,13 @@ export function FiltersSidebar({
     <aside className="space-y-4 rounded-lg border border-(--line) bg-white p-4 lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:overflow-auto">
       <div>
         <h1 className="mt-2 text-2xl font-semibold">SciRSSAgent</h1>
-        <p className="mt-2 text-sm leading-6 text-muted)">
+        <p className="mt-2 text-sm leading-6 text-muted">
           Last Update: {reportDate}
         </p>
-        <p className="mt-1 text-sm leading-6 text-muted)">
+        <p className="mt-1 text-sm leading-6 text-muted">
           {shownCount} shown, {totalCount} total
         </p>
-        <p className="mt-1 text-sm leading-6 text-muted)">
+        <p className="mt-1 text-sm leading-6 text-muted">
           Profile: {profileName} · v{profileVersion}
         </p>
       </div>

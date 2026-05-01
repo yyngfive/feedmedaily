@@ -1,8 +1,8 @@
-import {Button, Card, Chip} from "@heroui/react";
+import {Button, Input, Spinner} from "@heroui/react";
 
 import {relevanceLabel} from "../../app/constants";
-import {statusMessage} from "../../app/utils";
 import {ProfileProposalPreview} from "../profile/ProfileProposalPreview";
+import {ProfileRulesDocument} from "../profile/ProfileRulesDocument";
 import type {
   ClassificationProfile,
   FeedSubscription,
@@ -33,6 +33,7 @@ export function AdminPanel({
   onSaveFeeds,
   open,
   profile,
+  proposalGenerating,
   proposals,
 }: {
   feedback: FeedbackRecord[];
@@ -56,11 +57,14 @@ export function AdminPanel({
   onSaveFeeds: () => void;
   open: boolean;
   profile: ClassificationProfile | null;
+  proposalGenerating: boolean;
   proposals: ProfileProposal[];
 }) {
   if (!open) {
     return null;
   }
+  const pendingProposal = proposals.find((item) => item.state === "pending") ?? null;
+  const openFeedback = feedback.filter((item) => item.state === "open");
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/20">
@@ -97,8 +101,16 @@ export function AdminPanel({
             <Button size="sm" variant="outline" onPress={onReclassifyAll}>
               Reclassify all
             </Button>
-            <Button size="sm" variant="secondary" onPress={onGenerateProposal}>
-              Generate profile proposal
+            <Button
+              isDisabled={proposalGenerating}
+              size="sm"
+              variant="secondary"
+              onPress={onGenerateProposal}
+            >
+              <span className="inline-flex items-center gap-2">
+                {proposalGenerating ? <Spinner color="current" size="sm" /> : null}
+                Generate profile proposal
+              </span>
             </Button>
           </div>
         </section>
@@ -108,124 +120,150 @@ export function AdminPanel({
             <h3 className="text-sm font-semibold text-(--ink)">Feed subscriptions</h3>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onPress={onAddFeed}>
-                Add feed
+                Add row
               </Button>
               <Button size="sm" isDisabled={feedsSaving} onPress={onSaveFeeds}>
                 {feedsSaving ? "Saving..." : "Save feeds"}
               </Button>
             </div>
           </div>
-          <div className="mt-3 space-y-3">
-            {feeds.length === 0 ? (
-              <p className="text-sm text-muted">No RSS feeds configured yet.</p>
-            ) : (
-              feeds.map((item, index) => (
-                <Card key={`${item.url}-${index}`} className="border border-(--line)">
-                  <Card.Content className="space-y-3">
-                    <label className="block text-sm font-medium text-(--ink)">
-                      Journal name
-                      <input
-                        className="mt-2 w-full rounded-md border border-(--line) px-3 py-2 text-sm"
-                        value={item.journal}
-                        onChange={(event) => onFeedChange(index, "journal", event.target.value)}
-                      />
-                    </label>
-                    <label className="block text-sm font-medium text-(--ink)">
-                      RSS URL
-                      <input
-                        className="mt-2 w-full rounded-md border border-(--line) px-3 py-2 text-sm"
-                        value={item.url}
-                        onChange={(event) => onFeedChange(index, "url", event.target.value)}
-                      />
-                    </label>
-                    <div className="flex justify-end">
-                      <Button size="sm" variant="ghost" onPress={() => onRemoveFeed(index)}>
-                        Remove
-                      </Button>
-                    </div>
-                  </Card.Content>
-                </Card>
-              ))
-            )}
+          <div className="mt-3 overflow-hidden rounded-lg border border-(--line)">
+            <table className="w-full border-collapse text-sm">
+              <thead className="bg-(--paper)">
+                <tr className="text-left text-(--ink)">
+                  <th className="px-3 py-2 font-semibold">Name</th>
+                  <th className="px-3 py-2 font-semibold">URL</th>
+                  <th className="w-20 px-3 py-2 font-semibold">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {feeds.length === 0 ? (
+                  <tr>
+                    <td className="px-3 py-4 text-muted" colSpan={3}>
+                      No RSS feeds configured yet.
+                    </td>
+                  </tr>
+                ) : (
+                  feeds.map((item, index) => (
+                    <tr key={`${item.url}-${index}`} className="border-t border-(--line)">
+                      <td className="px-3 py-2 align-top">
+                        <Input
+                          aria-label={`Feed name ${index + 1}`}
+                          className="w-full"
+                          value={item.journal}
+                          onChange={(event) =>
+                            onFeedChange(index, "journal", event.target.value)
+                          }
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <Input
+                          aria-label={`Feed URL ${index + 1}`}
+                          className="w-full"
+                          value={item.url}
+                          onChange={(event) => onFeedChange(index, "url", event.target.value)}
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <Button size="sm" variant="ghost" onPress={() => onRemoveFeed(index)}>
+                          Delete
+                        </Button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </section>
 
         <section className="mt-4 rounded-lg border border-(--line) bg-white p-4">
-          <h3 className="text-sm font-semibold text-(--ink)">Profile proposals</h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-(--ink)">Classification profile</h3>
+            <Button
+              isDisabled={proposalGenerating}
+              size="sm"
+              variant="secondary"
+              onPress={onGenerateProposal}
+            >
+              <span className="inline-flex items-center gap-2">
+                {proposalGenerating ? <Spinner color="current" size="sm" /> : null}
+                Generate proposal
+              </span>
+            </Button>
+          </div>
           <div className="mt-3 space-y-3">
-            {proposals.length === 0 ? (
-              <p className="text-sm text-muted">No profile proposals yet.</p>
+            {pendingProposal ? (
+              <>
+                <ProfileProposalPreview proposal={pendingProposal} />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    isDisabled={pendingProposal.state !== "pending"}
+                    size="sm"
+                    onPress={() => onApplyProposal(pendingProposal.id)}
+                  >
+                    Apply
+                  </Button>
+                  <Button
+                    isDisabled={pendingProposal.state !== "pending"}
+                    size="sm"
+                    variant="ghost"
+                    onPress={() => onRejectProposal(pendingProposal.id)}
+                  >
+                    Reject
+                  </Button>
+                </div>
+              </>
+            ) : profile ? (
+              <ProfileRulesDocument profile={profile} />
             ) : (
-              
-                <Card key={proposals[0].id} className="">
-                  <Card.Header className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-base">
-                      {proposals[0].created_at.slice(0, 10)}
-                    </span>
-                  </Card.Header>
-                  <Card.Content className="max-h-[78vh] overflow-y-auto pr-1">
-                    <ProfileProposalPreview proposal={proposals[0]} />
-                  </Card.Content>
-                  <Card.Footer className="flex flex-wrap gap-2">
-                    <Button
-                      isDisabled={proposals[0].state !== "pending"}
-                      size="sm"
-                      onPress={() => onApplyProposal(proposals[0].id)}
-                    >
-                      Apply
-                    </Button>
-                    <Button
-                      isDisabled={proposals[0].state !== "pending"}
-                      size="sm"
-                      variant="ghost"
-                      onPress={() => onRejectProposal(proposals[0].id)}
-                    >
-                      Reject
-                    </Button>
-                  </Card.Footer>
-                </Card>
-              
+              <p className="text-sm text-muted">No profile available yet.</p>
             )}
           </div>
         </section>
 
         <section className="mt-4 rounded-lg border border-(--line) bg-white p-4">
           <h3 className="text-sm font-semibold text-(--ink)">Feedback queue</h3>
-          <div className="mt-3 space-y-3">
-            {feedback.length === 0 ? (
+          <div className="mt-3 overflow-hidden rounded-lg border border-(--line)">
+            {openFeedback.length === 0 ? (
               <p className="text-sm text-muted">No feedback submitted yet.</p>
             ) : (
-              feedback.map((item) => (
-                <Card key={item.id} className="border border-(--line)">
-                  <Card.Content className="space-y-2">
-                    <p className="text-sm font-semibold text-(--ink)">{item.paper_title}</p>
-                    <p className="text-sm text-muted">
-                      {relevanceLabel[item.original_relevance]} {" -> "}{" "}
-                      {relevanceLabel[item.corrected_relevance]}
-                    </p>
-                    {item.note ? (
-                      <p className="text-sm leading-6 text-(--body)">{item.note}</p>
-                    ) : null}
-                    <div className="flex flex-wrap gap-2">
-                      <Chip size="sm" variant="secondary">
-                        {item.state}
-                      </Chip>
-                      {item.used_in_profile ? (
-                        <Chip color="success" size="sm" variant="soft">
-                          Used in profile
-                        </Chip>
-                      ) : null}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onPress={() => onDeleteFeedback(item.id)}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </Card.Content>
-                </Card>
-              ))
+              <table className="w-full border-collapse text-sm">
+                <thead className="bg-(--paper)">
+                  <tr className="text-left text-(--ink)">
+                    <th className="px-3 py-2 font-semibold">Paper</th>
+                    <th className="px-3 py-2 font-semibold">From</th>
+                    <th className="px-3 py-2 font-semibold">To</th>
+                    <th className="px-3 py-2 font-semibold">Note</th>
+                    <th className="px-3 py-2 font-semibold">Created</th>
+                    <th className="w-20 px-3 py-2 font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {openFeedback.map((item) => (
+                    <tr key={item.id} className="border-t border-(--line) align-top">
+                      <td className="px-3 py-2 text-(--ink)">{item.paper_title}</td>
+                      <td className="px-3 py-2 text-muted">
+                        {relevanceLabel[item.original_relevance]}
+                      </td>
+                      <td className="px-3 py-2 text-muted">
+                        {relevanceLabel[item.corrected_relevance]}
+                      </td>
+                      <td className="px-3 py-2 leading-6 text-(--body)">
+                        {item.note?.trim() ? item.note : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-muted">
+                        {new Date(item.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-3 py-2">
+                        <Button size="sm" variant="ghost" onPress={() => onDeleteFeedback(item.id)}>
+                          Delete
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         </section>

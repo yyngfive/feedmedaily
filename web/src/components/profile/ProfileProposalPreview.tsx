@@ -1,53 +1,21 @@
-import {Chip} from "@heroui/react";
+import {Card} from "@heroui/react";
 
-import {relevanceLabel} from "../../app/constants";
 import type {ProfileProposal} from "../../types";
 
-function RuleList({title, items}: {title: string; items: string[]}) {
+function RuleSection({items, title}: {items: string[]; title: string}) {
   return (
-    <div className="space-y-2">
-      <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
-        {title}
-      </h4>
+    <section className="space-y-2">
+      <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-muted">{title}</h3>
       {items.length === 0 ? (
-        <p className="text-sm text-[var(--muted)]">No rules.</p>
+        <p className="text-sm text-muted">No changes proposed.</p>
       ) : (
-        <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-[var(--body)]">
+        <ul className="list-disc space-y-2 pl-5 text-sm leading-6 text-(--body)">
           {items.map((item) => (
             <li key={`${title}-${item}`}>{item}</li>
           ))}
         </ul>
       )}
-    </div>
-  );
-}
-
-function CompactTagList({
-  emptyLabel,
-  items,
-  title,
-}: {
-  emptyLabel: string;
-  items: Array<{id: string; label: string}>;
-  title: string;
-}) {
-  return (
-    <div className="space-y-2">
-      <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
-        {title}
-      </h4>
-      {items.length === 0 ? (
-        <p className="text-sm text-[var(--muted)]">{emptyLabel}</p>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          {items.map((item) => (
-            <Chip key={item.id} size="sm" variant="secondary">
-              {item.label} · {item.id}
-            </Chip>
-          ))}
-        </div>
-      )}
-    </div>
+    </section>
   );
 }
 
@@ -56,100 +24,32 @@ export function ProfileProposalPreview({proposal}: {proposal: ProfileProposal}) 
   const delta = proposal.rule_delta;
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Chip size="sm" variant="secondary">
-          {proposal.state}
-        </Chip>
-        <Chip size="sm" variant="secondary">
-          {proposal.model}
-        </Chip>
-        <Chip size="sm" variant="secondary">
-          v{profile.meta.version}
-        </Chip>
-      </div>
-      <p className="text-sm leading-6 text-[var(--body)]">{delta.summary}</p>
-      {delta.scope_rewrite ? (
-        <div className="rounded-md border border-[var(--line)] p-3">
-          <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
-            Scope Rewrite
-          </h4>
-          <p className="mt-2 text-sm leading-6 text-[var(--body)]">{delta.scope_rewrite}</p>
+    <Card className="border border-(--line) bg-white">
+      <Card.Header className="flex flex-col items-start gap-2">
+        <p className="text-sm font-semibold text-(--ink)">Pending profile changes</p>
+        <div className="space-y-1">
+          <h2 className="text-2xl font-semibold text-(--ink)">
+            {profile.meta.name} · v{profile.meta.version}
+          </h2>
+          <p className="text-sm text-muted">
+            {proposal.created_at.slice(0, 10)} · {proposal.state}
+          </p>
         </div>
-      ) : null}
-      <div className="grid gap-4 xl:grid-cols-3">
-        <div className="rounded-md border border-[var(--line)] p-3">
-          <RuleList title="Direct additions" items={delta.direct_rule_additions} />
-        </div>
-        <div className="rounded-md border border-[var(--line)] p-3">
-          <RuleList title="Indirect additions" items={delta.indirect_rule_additions} />
-        </div>
-        <div className="rounded-md border border-[var(--line)] p-3">
-          <RuleList title="Unrelated additions" items={delta.unrelated_rule_additions} />
-        </div>
-      </div>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <div className="rounded-md border border-[var(--line)] p-3">
-          <CompactTagList
-            emptyLabel="No tag additions."
-            items={delta.tag_additions}
-            title="Tag additions"
-          />
-        </div>
-        <div className="rounded-md border border-[var(--line)] p-3">
-          <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
-            Tag removals
-          </h4>
-          {delta.tag_removals.length === 0 ? (
-            <p className="mt-2 text-sm text-[var(--muted)]">No tag removals.</p>
-          ) : (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {delta.tag_removals.map((item) => (
-                <Chip key={item} size="sm" variant="secondary">
-                  {item}
-                </Chip>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="rounded-md border border-[var(--line)] p-3">
-        <CompactTagList
-          emptyLabel="No tags in merged profile."
-          items={profile.topic_taxonomy}
-          title="Merged tags"
-        />
-      </div>
-      {profile.few_shots.length ? (
-        <div className="rounded-md border border-[var(--line)] p-3">
-          <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
-            Retained few-shot examples
-          </h4>
-          <div className="mt-3 space-y-3">
-            {profile.few_shots.map((item) => (
-              <div
-                key={`${item.title}-${item.relevance}`}
-                className="rounded-md border border-[var(--line)] p-3"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <Chip size="sm" variant="secondary">
-                    {relevanceLabel[item.relevance]}
-                  </Chip>
-                  {item.tags.map((tag) => (
-                    <Chip key={`${item.title}-${tag}`} size="sm" variant="secondary">
-                      {tag}
-                    </Chip>
-                  ))}
-                </div>
-                <p className="mt-2 text-sm font-medium leading-6 text-[var(--ink)]">
-                  {item.title}
-                </p>
-                <p className="mt-1 text-sm leading-6 text-[var(--body)]">{item.rationale}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
+      </Card.Header>
+      <Card.Content className="space-y-6">
+        <p className="text-sm leading-6 text-(--body)">{delta.summary}</p>
+        {delta.scope_rewrite ? (
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-muted">
+              Scope rewrite
+            </h3>
+            <p className="text-sm leading-6 text-(--body)">{delta.scope_rewrite}</p>
+          </section>
+        ) : null}
+        <RuleSection items={delta.direct_rule_additions} title="Direct" />
+        <RuleSection items={delta.indirect_rule_additions} title="Indirect" />
+        <RuleSection items={delta.unrelated_rule_additions} title="Unrelated" />
+      </Card.Content>
+    </Card>
   );
 }

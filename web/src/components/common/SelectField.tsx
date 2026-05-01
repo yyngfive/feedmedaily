@@ -1,8 +1,5 @@
-
-import {Label, ListBox, Select} from "@heroui/react";
-
-export const nativeSelectClassName =
-  "w-full rounded-md border border-(--line) bg-white px-3 py-2 text-sm";
+import type {Key} from "react";
+import {Label, ListBox, ListBoxItem, Select} from "@heroui/react";
 
 export type SelectOption = {
   label: string;
@@ -23,20 +20,28 @@ export function SelectField({
   value: string;
 }) {
   return (
-    <label className="block text-sm font-medium text-(--ink)">
-      {label}
-      <select
-        className={`${nativeSelectClassName} mt-2`}
-        disabled={disabled}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Select
+        aria-label={label}
+        isDisabled={disabled}
+        selectedKey={value}
+        onSelectionChange={(key: Key | null) => onChange(String(key ?? ""))}
       >
-        {options.map((option) => (
-          <option key={`${label}-${option.value}`} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        <Select.Trigger>
+          <Select.Value />
+          <Select.Indicator />
+        </Select.Trigger>
+        <Select.Popover>
+          <ListBox aria-label={label}>
+            {options.map((option) => (
+              <ListBoxItem key={option.value} id={option.value} textValue={option.label}>
+                {option.label}
+              </ListBoxItem>
+            ))}
+          </ListBox>
+        </Select.Popover>
+      </Select>
+    </div>
   );
 }

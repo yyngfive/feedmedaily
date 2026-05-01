@@ -18,6 +18,7 @@ from scirssagent.experiments import (
 )
 from scirssagent.pipeline import build_classifier_config, regenerate_latest_report, run_once
 from scirssagent.profiles import ensure_profile
+from scirssagent.repair import repair_all_abstracts
 from scirssagent.storage import connect
 
 app = typer.Typer(help="SciRSSAgent literature monitor.")
@@ -87,6 +88,25 @@ def latest(root: Path | None = ROOT_OPTION) -> None:
     settings = load_settings(root)
     index = regenerate_latest_report(settings)
     typer.echo(f"Report: {index}")
+
+
+@app.command("repair-abstracts")
+def repair_abstracts(root: Path | None = ROOT_OPTION) -> None:
+    settings = load_settings(root)
+    result = repair_all_abstracts(settings)
+    typer.echo(f"Database backup: {result['database_backup_path']}")
+    typer.echo(f"Repair report: {result['repair_report_path']}")
+    typer.echo(f"Report: {result['report_index']}")
+    summary = result["summary"]
+    typer.echo(
+        "Summary: "
+        f"total={summary['total']} "
+        f"updated={summary['updated']} "
+        f"fallback_from_db_html={summary['fallback_from_db_html']} "
+        f"cleared_metadata_only={summary['cleared_metadata_only']} "
+        f"unmatched={summary['unmatched']} "
+        f"unchanged={summary['unchanged']}"
+    )
 
 
 @experiment_app.command("batch-size")

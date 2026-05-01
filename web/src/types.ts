@@ -7,6 +7,11 @@ export type FeedSubscription = {
   url: string;
 };
 
+export type AbstractImage = {
+  src: string;
+  alt?: string | null;
+};
+
 export type PaperReadStatus = {
   paper_id: number;
   read_at: string;
@@ -59,8 +64,11 @@ export type Paper = {
   url: string;
   doi?: string | null;
   journal?: string | null;
+  feed_title?: string | null;
   authors?: string[];
   abstract?: string | null;
+  abstract_html?: string | null;
+  abstract_images: AbstractImage[];
   published_date?: string | null;
   seen_date: string;
   read_at?: string | null;

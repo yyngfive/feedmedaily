@@ -407,7 +407,11 @@ def current_report(settings: Settings) -> Report:
     conn = connect(settings.database_path)
     try:
         report_date = datetime.now(UTC).date()
-        report_papers = papers_for_report(conn, report_date=None, limit=None)
+        report_papers = papers_for_report(
+            conn,
+            report_date=None,
+            limit=None,
+        )
         return build_report(report_papers, report_date, [])
     finally:
         conn.close()

@@ -43,6 +43,27 @@ class FeedSubscription(BaseModel):
         return clean
 
 
+class AbstractImage(BaseModel):
+    src: str
+    alt: str | None = None
+
+    @field_validator("src")
+    @classmethod
+    def required_src(cls, value: str) -> str:
+        clean = value.strip()
+        if not clean:
+            raise ValueError("src cannot be blank")
+        return clean
+
+    @field_validator("alt")
+    @classmethod
+    def normalize_alt(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = " ".join(value.split()).strip()
+        return clean or None
+
+
 class Paper(BaseModel):
     source_url: str
     feed_title: str | None = None
@@ -52,6 +73,8 @@ class Paper(BaseModel):
     journal: str | None = None
     authors: list[str] = Field(default_factory=list)
     abstract: str | None = None
+    abstract_html: str | None = None
+    abstract_images: list[AbstractImage] = Field(default_factory=list)
     published_date: date | None = None
     first_seen_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     read_at: datetime | None = None
@@ -64,6 +87,14 @@ class Paper(BaseModel):
         if not value:
             raise ValueError("value cannot be blank")
         return value
+
+    @field_validator("abstract_html")
+    @classmethod
+    def normalize_abstract_html(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = value.strip()
+        return clean or None
 
 
 class Classification(BaseModel):

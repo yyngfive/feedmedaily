@@ -81,6 +81,10 @@ uv sync
 - Do not commit `data/classification_profile.json` or `data/*.sqlite`; they are per-user local state.
 - When changing the profile proposal UI, optimize for reviewability rather than raw JSON visibility.
 - Keep long-running LLM actions as background jobs with visible status in the UI.
+- Keep admin/settings surfaces compact and low-chrome; avoid stacked form cards when a denser table or document layout communicates better.
+- Prefer one primary profile-review document card over multiple small cards when showing the current profile or a pending proposal.
+- Keep paper cards summary-only and move richer context or rendering into the right detail panel.
+- Favor simplified wording and fewer redundant labels or duplicate actions when refining the UI.
 
 ## UI Baseline
 

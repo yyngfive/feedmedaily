@@ -47,7 +47,13 @@ def enrich_with_crossref(paper: Paper, client: httpx.Client) -> Paper:
     message: dict[str, Any] = response.json().get("message", {})
     journal = paper.journal or (message.get("container-title") or [None])[0]
     abstract = paper.abstract or message.get("abstract")
-    return paper.model_copy(update={"doi": doi, "journal": journal, "abstract": abstract})
+    return paper.model_copy(
+        update={
+            "doi": doi,
+            "journal": journal,
+            "abstract": abstract,
+        }
+    )
 
 
 def enrich_with_openalex(paper: Paper, client: httpx.Client) -> Paper:
@@ -74,7 +80,13 @@ def enrich_with_openalex(paper: Paper, client: httpx.Client) -> Paper:
     source = primary_location.get("source") or {}
     if source.get("display_name"):
         journal = journal or source["display_name"]
-    return paper.model_copy(update={"doi": doi_value, "journal": journal, "abstract": abstract})
+    return paper.model_copy(
+        update={
+            "doi": doi_value,
+            "journal": journal,
+            "abstract": abstract,
+        }
+    )
 
 
 def enrich_paper(paper: Paper) -> Paper:

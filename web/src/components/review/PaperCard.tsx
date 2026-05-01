@@ -1,10 +1,10 @@
-import { Card, Chip } from "@heroui/react";
+import {Card, Chip} from "@heroui/react";
 import React from "react";
 
-import { relevanceLabel, relevanceTone } from "../../app/constants";
-import { authorsLine, feedbackLabel, paperDate, sentence } from "../../app/utils";
-import { tagLabel } from "../../reportData";
-import type { ClassificationProfile, Paper } from "../../types";
+import {relevanceLabel, relevanceTone} from "../../app/constants";
+import {authorsLine, feedbackLabel, paperDate} from "../../app/utils";
+import {tagLabel} from "../../reportData";
+import type {ClassificationProfile, Paper} from "../../types";
 
 export function PaperCard({
   isSelected,
@@ -42,11 +42,7 @@ export function PaperCard({
         <Card.Header className="gap-3">
           <div className="flex flex-1 flex-wrap items-center gap-2 my-1">
             {isUnread ? (
-              <span
-                aria-label="Unread"
-                className="size-2 rounded-full bg-(--unread)"
-                title="Unread"
-              ></span>
+              <span aria-label="Unread" className="size-2 rounded-full bg-(--unread)" title="Unread"></span>
             ) : null}
             <span className={`text-sm font-semibold ${tone.text}`}>
               {Math.round(paper.classification.confidence * 100)}%
@@ -76,9 +72,7 @@ export function PaperCard({
               </Card.Description>
             ) : null}
           </div>
-          <p className="text-base text-muted">
-            {paper.journal || "Unknown journal"}
-          </p>
+          <p className="text-base text-muted">{paper.journal || "Unknown journal"}</p>
           <p className="text-sm text-muted">
             {paperDate(paper)} · {authorsLine(paper)}
           </p>

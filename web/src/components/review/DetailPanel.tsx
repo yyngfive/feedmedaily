@@ -30,15 +30,16 @@ export function DetailPanel({
   const tone = relevanceTone[paper.classification.relevance];
   const feedbackText = feedbackLabel(paper);
   const zoteroSaved = paper.zotero_status?.saved ?? false;
+  const hasAbstractHtml = Boolean(paper.abstract_html);
+  const abstractImages = paper.abstract_images ?? [];
+  const hasAbstractImages = abstractImages.length > 0;
 
   return (
     <aside className="sticky top-4 space-y-5 rounded-lg border border-(--line) bg-white p-5">
       <div className="space-y-3">
         <h2 className="text-xl font-semibold leading-7 text-(--ink)">{paper.title}</h2>
-        <p className="text-base leading-6 text-muted)">
-          {paper.journal || "Unknown journal"}
-        </p>
-        <p className="text-sm leading-6 text-muted)">
+        <p className="text-base leading-6 text-muted">{paper.journal || "Unknown journal"}</p>
+        <p className="text-sm leading-6 text-muted">
           {paperDate(paper)} · {authorsLine(paper)}
         </p>
       </div>
@@ -73,9 +74,39 @@ export function DetailPanel({
         <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
           Abstract
         </h3>
-        <p className="max-h-64 overflow-auto pr-1 text-sm leading-6 text-(--body)">
-          {paper.abstract || "No abstract was available in the feed metadata."}
-        </p>
+        {hasAbstractHtml ? (
+          <div
+            className="max-h-64 overflow-auto pr-1 text-sm leading-6 text-(--body) [&_a]:text-(--accent) [&_a]:underline [&_p+*]:mt-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+            dangerouslySetInnerHTML={{__html: paper.abstract_html ?? ""}}
+          />
+        ) : paper.abstract ? (
+          <p className="max-h-64 overflow-auto pr-1 text-sm leading-6 text-(--body)">
+            {paper.abstract}
+          </p>
+        ) : (
+          <p className="text-sm text-muted">No abstract was available in the feed metadata.</p>
+        )}
+        {hasAbstractImages ? (
+          <details className="rounded-md border border-(--line) p-3">
+            <summary className="cursor-pointer text-sm font-medium text-(--ink)">
+              Images in abstract ({abstractImages.length})
+            </summary>
+            <div className="mt-3 space-y-3">
+              {abstractImages.map((image, index) => (
+                <figure key={`${image.src}-${index}`} className="space-y-2">
+                  <img
+                    alt={image.alt ?? `Abstract image ${index + 1}`}
+                    className="max-h-64 rounded-md border border-(--line) object-contain"
+                    src={image.src}
+                  />
+                  {image.alt ? (
+                    <figcaption className="text-xs leading-5 text-muted">{image.alt}</figcaption>
+                  ) : null}
+                </figure>
+              ))}
+            </div>
+          </details>
+        ) : null}
       </section>
 
       {paper.zotero_status?.last_error ? (
@@ -85,7 +116,7 @@ export function DetailPanel({
       ) : null}
 
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="primary"  onPress={() => window.open(doiHref(paper), "_blank")}>
+        <Button size="sm" variant="primary" onPress={() => window.open(doiHref(paper), "_blank")}>
           DOI link
         </Button>
         <Button

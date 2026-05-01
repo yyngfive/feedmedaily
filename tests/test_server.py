@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -36,6 +37,13 @@ def test_report_latest_and_feedback_api(monkeypatch) -> None:
     root = _project_root("server")
     _bootstrap_root(root)
     write_profile(root / "data" / "classification_profile.json", _profile("Server profile"))
+    (root / "data" / "rss_feeds.json").write_text(
+        json.dumps(
+            [{"journal": "Custom Nature", "url": "https://example.com/rss"}],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     conn = connect(root / "data" / "literature.sqlite")
     paper_id, _is_new = upsert_paper(
@@ -44,6 +52,9 @@ def test_report_latest_and_feedback_api(monkeypatch) -> None:
             source_url="https://example.com/rss",
             title="API paper",
             url="https://example.com/api-paper",
+            journal="Original Feed Title",
+            abstract="Plain abstract text.",
+            abstract_html="<p>Plain abstract text.</p>",
         ),
     )
     save_classification(
@@ -68,6 +79,9 @@ def test_report_latest_and_feedback_api(monkeypatch) -> None:
     assert report_response.status_code == 200
     report_payload = report_response.json()
     assert report_payload["papers"][0]["title"] == "API paper"
+    assert report_payload["papers"][0]["journal"] == "Original Feed Title"
+    assert report_payload["papers"][0]["abstract_html"] == "<p>Plain abstract text.</p>"
+    assert report_payload["papers"][0]["abstract_images"] == []
 
     feedback_response = client.post(
         "/api/feedback",

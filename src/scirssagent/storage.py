@@ -8,6 +8,7 @@ from pathlib import Path
 
 from scirssagent.metadata import paper_key
 from scirssagent.models import (
+    AbstractImage,
     Classification,
     ClassificationProfile,
     FeedbackRecord,
@@ -127,6 +128,11 @@ def connect(path: Path | str) -> sqlite3.Connection:
 def upsert_paper(conn: sqlite3.Connection, paper: Paper) -> tuple[int, bool]:
     key = paper_key(paper)
     now = datetime.now(UTC).isoformat()
+    raw_payload = {
+        **paper.raw,
+        "_abstract_html": paper.abstract_html,
+        "_abstract_images": [item.model_dump(mode="json") for item in paper.abstract_images],
+    }
     existing = conn.execute("SELECT id FROM papers WHERE paper_key = ?", (key,)).fetchone()
     if existing:
         conn.execute(
@@ -150,7 +156,7 @@ def upsert_paper(conn: sqlite3.Connection, paper: Paper) -> tuple[int, bool]:
                 paper.abstract,
                 paper.published_date.isoformat() if paper.published_date else None,
                 now,
-                json.dumps(paper.raw, ensure_ascii=False),
+                json.dumps(raw_payload, ensure_ascii=False),
                 existing["id"],
             ),
         )
@@ -176,10 +182,46 @@ def upsert_paper(conn: sqlite3.Connection, paper: Paper) -> tuple[int, bool]:
             paper.published_date.isoformat() if paper.published_date else None,
             paper.first_seen_at.isoformat(),
             now,
-            json.dumps(paper.raw, ensure_ascii=False),
+            json.dumps(raw_payload, ensure_ascii=False),
         ),
     )
     return int(cursor.lastrowid), True
+
+
+def update_paper_abstract_fields(
+    conn: sqlite3.Connection,
+    paper_id: int,
+    *,
+    journal: str | None = None,
+    abstract: str | None,
+    abstract_html: str | None,
+    abstract_images: list[AbstractImage],
+) -> None:
+    row = paper_by_id(conn, paper_id)
+    if row is None:
+        raise ValueError(f"Paper {paper_id} not found.")
+    raw_payload = json.loads(row["raw_json"])
+    raw_payload["_abstract_html"] = abstract_html
+    raw_payload["_abstract_images"] = [
+        item.model_dump(mode="json") for item in abstract_images
+    ]
+    conn.execute(
+        """
+        UPDATE papers
+        SET journal = COALESCE(?, journal),
+            abstract = ?,
+            raw_json = ?,
+            last_checked_at = ?
+        WHERE id = ?
+        """,
+        (
+            journal,
+            abstract,
+            json.dumps(raw_payload, ensure_ascii=False),
+            datetime.now(UTC).isoformat(),
+            paper_id,
+        ),
+    )
 
 
 def latest_classification(conn: sqlite3.Connection, paper_id: int) -> Classification | None:
@@ -567,6 +609,7 @@ def paper_ids_for_feedback_ids(conn: sqlite3.Connection, feedback_ids: Iterable[
 
 
 def paper_from_row(row: sqlite3.Row) -> Paper:
+    raw_payload = json.loads(row["raw_json"])
     return Paper(
         source_url=row["source_url"],
         feed_title=row["feed_title"],
@@ -576,10 +619,18 @@ def paper_from_row(row: sqlite3.Row) -> Paper:
         journal=row["journal"],
         authors=json.loads(row["authors_json"]),
         abstract=row["abstract"],
+        abstract_html=raw_payload.get("_abstract_html"),
+        abstract_images=[
+            AbstractImage.model_validate(item) for item in raw_payload.get("_abstract_images", [])
+        ],
         published_date=date.fromisoformat(row["published_date"]) if row["published_date"] else None,
         first_seen_at=datetime.fromisoformat(row["first_seen_at"]),
         read_at=datetime.fromisoformat(row["read_at"]) if row["read_at"] else None,
-        raw=json.loads(row["raw_json"]),
+        raw={
+            key: value
+            for key, value in raw_payload.items()
+            if key not in {"_abstract_html", "_abstract_images"}
+        },
     )
 
 
@@ -587,6 +638,7 @@ def papers_for_report(
     conn: sqlite3.Connection,
     report_date: date | None = None,
     limit: int | None = None,
+    display_names_by_source: dict[str, str] | None = None,
 ) -> list[ReportPaper]:
     if report_date:
         rows = conn.execute(
@@ -606,9 +658,16 @@ def papers_for_report(
         if not classification:
             continue
         paper = paper_from_row(row)
+        display_journal = (
+            display_names_by_source.get(paper.source_url)
+            if display_names_by_source is not None
+            else None
+        )
         report_papers.append(
             ReportPaper(
-                **paper.model_dump(),
+                **paper.model_copy(
+                    update={"journal": display_journal or paper.journal}
+                ).model_dump(),
                 id=int(row["id"]),
                 classification=classification,
                 seen_date=datetime.fromisoformat(row["first_seen_at"]).date(),

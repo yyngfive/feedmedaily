@@ -4,6 +4,7 @@ import React from "react";
 import {statusMessage} from "../../app/utils";
 import {StatusBanner} from "../common/StatusBanner";
 import {ProfileProposalPreview} from "../profile/ProfileProposalPreview";
+import {ProfileRulesDocument} from "../profile/ProfileRulesDocument";
 import type {JobInfo, ProfileProposal} from "../../types";
 
 export function Onboarding({
@@ -94,6 +95,11 @@ export function Onboarding({
           <Card.Content className="max-h-[78vh] space-y-4 overflow-y-auto pr-1">
             {!pendingProposal ? (
               <p className="text-sm text-[var(--muted)]">No proposal yet.</p>
+            ) : pendingProposal.source_feedback_ids.length === 0 ? (
+              <ProfileRulesDocument
+                profile={pendingProposal.proposed_profile}
+                title="Pending initial profile"
+              />
             ) : (
               <ProfileProposalPreview proposal={pendingProposal} />
             )}

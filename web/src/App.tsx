@@ -151,6 +151,15 @@ export function App() {
     () => jobs.find((job) => job.job_type === "profile-bootstrap") ?? null,
     [jobs],
   );
+  const profileProposalJob = React.useMemo(
+    () =>
+      jobs.find(
+        (job) =>
+          job.job_type === "profile-proposal" &&
+          (job.status === "queued" || job.status === "running"),
+      ) ?? null,
+    [jobs],
+  );
   const onboardingBusy =
     busy ||
     bootstrapJob?.status === "queued" ||
@@ -537,6 +546,7 @@ export function App() {
         feedsSaving={feedsSaving}
         feedback={feedbackRecords}
         jobs={jobs}
+        proposalGenerating={Boolean(profileProposalJob)}
         proposals={profileProposals}
         onClose={() => setAdminOpen(false)}
         onFeedChange={handleFeedChange}
