@@ -35,7 +35,26 @@ ROOT_OPTION = typer.Option(
 )
 HOST_OPTION = typer.Option(None, "--host", help="Server host. Defaults to configured value.")
 PORT_OPTION = typer.Option(None, "--port", help="Server port. Defaults to configured value.")
+VERSION_OPTION = typer.Option(None, "--version", help="Display the version and exit.")
 
+#show version
+def version_callback(value: bool):
+    if value:
+        typer.echo(f"scirssagent {package_version()}")
+        raise typer.Exit()
+    
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-v",
+        callback=version_callback,
+        is_eager=True,
+        help="Show version and exit.",
+    )
+):
+    pass
 
 @app.command()
 def run(
@@ -65,11 +84,6 @@ def latest(root: Path | None = ROOT_OPTION) -> None:
     settings = load_settings(root)
     index = regenerate_latest_report(settings)
     typer.echo(f"Report: {index}")
-
-
-@app.command("version")
-def version() -> None:
-    typer.echo(package_version())
 
 
 @app.command("open")
