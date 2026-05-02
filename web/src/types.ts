@@ -7,6 +7,101 @@ export type FeedSubscription = {
   url: string;
 };
 
+export type SettingsConfigSource =
+  | "dotenv"
+  | "environment"
+  | "default"
+  | "unset"
+  | "settings"
+  | "secret_store";
+
+export type SettingOption = {
+  value: string;
+  label: string;
+};
+
+export type SettingsConfigField = {
+  key: string;
+  label: string;
+  description: string;
+  section: string;
+  input_type: "text" | "password" | "url" | "number" | "select";
+  secret: boolean;
+  configured: boolean;
+  source: SettingsConfigSource;
+  stored_in_dotenv: boolean;
+  storage_label?: string | null;
+  value?: string | null;
+  default_value?: string | null;
+  options: SettingOption[];
+};
+
+export type SettingsConfigResponse = {
+  fields: SettingsConfigField[];
+};
+
+export type AppMeta = {
+  name: string;
+  version: string;
+  mode: string;
+  install_dir: string;
+  data_dir: string;
+  logs_dir: string;
+  reports_dir: string;
+  static_dir: string;
+  server_url?: string | null;
+  scheduler_task_name: string;
+  update_manifest_url?: string | null;
+  process_running: boolean;
+};
+
+export type AppHealth = {
+  status: string;
+  name: string;
+  version: string;
+  mode: string;
+  server_url?: string | null;
+};
+
+export type AppUpdate = {
+  status: string;
+  current_version: string;
+  latest_version?: string | null;
+  has_update: boolean;
+  download_url?: string | null;
+  release_notes_url?: string | null;
+  detail?: string | null;
+  checked_at: string;
+};
+
+export type AppControlTarget =
+  | "data_dir"
+  | "logs_dir"
+  | "reports_dir"
+  | "install_dir"
+  | "server_url"
+  | "download_url"
+  | "release_notes_url";
+
+export type AppControlResponse = {
+  ok: boolean;
+  action: string;
+  target?: string | null;
+  detail?: string | null;
+};
+
+export type SchedulerSettings = {
+  installed: boolean;
+  task_name: string;
+  mode: string;
+  scheduled_time?: string | null;
+  state?: string | null;
+  next_run_time?: string | null;
+  last_run_time?: string | null;
+  last_result?: number | null;
+  command?: string | null;
+};
+
 export type AbstractImage = {
   src: string;
   alt?: string | null;
@@ -170,6 +265,11 @@ export type JobInfo = {
   created_at: string;
   started_at?: string | null;
   finished_at?: string | null;
+};
+
+export type SettingsConfigUpdate = {
+  value?: string | null;
+  clear?: boolean;
 };
 
 export const EMPTY_REPORT: Report = {

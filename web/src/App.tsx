@@ -5,20 +5,29 @@ import {
   bootstrapProfile,
   createFeedback,
   deleteFeedback,
+  deleteSchedulerSettings,
+  exitApp,
+  fetchAppMeta,
+  fetchAppUpdate,
   fetchCurrentProfile,
   fetchFeedSubscriptions,
   fetchFeedback,
   fetchJob,
   fetchLatestReport,
   fetchProfileProposals,
+  fetchSchedulerSettings,
+  fetchSettingsConfig,
   fetchZoteroCollections,
   launchAdminJob,
   launchProfileProposalGeneration,
   launchReclassifyJob,
   loadEmbeddedReport,
   markPaperRead,
+  openAppTarget,
   rejectProfileProposal,
   saveFeedSubscriptions,
+  saveSchedulerSettings,
+  saveSettingsConfig,
   saveToZotero,
   tagLabel,
 } from "./reportData";
@@ -37,7 +46,8 @@ import type {
   RelevanceFilter,
 } from "./app/constants";
 import {EMPTY_REPORT} from "./types";
-import {AdminPanel} from "./components/admin/AdminPanel";
+import {AdminPanel, type AdminTab} from "./components/admin/AdminPanel";
+import {AppStatusBar} from "./components/common/AppStatusBar";
 import {StatusBanner} from "./components/common/StatusBanner";
 import {TopBar} from "./components/common/TopBar";
 import {FeedbackModal} from "./components/modals/FeedbackModal";
@@ -47,6 +57,8 @@ import {DetailPanel} from "./components/review/DetailPanel";
 import {FiltersSidebar} from "./components/review/FiltersSidebar";
 import {PaperListSection} from "./components/review/PaperListSection";
 import type {
+  AppMeta,
+  AppUpdate,
   ClassificationProfile,
   FeedSubscription,
   FeedbackRecord,
@@ -55,6 +67,8 @@ import type {
   ProfileProposal,
   Relevance,
   Report,
+  SchedulerSettings,
+  SettingsConfigField,
   ZoteroCollectionOption,
 } from "./types";
 
@@ -62,7 +76,11 @@ import type {
 export function App() {
   const [report, setReport] = React.useState<Report>(() => loadEmbeddedReport() ?? EMPTY_REPORT);
   const [profile, setProfile] = React.useState<ClassificationProfile | null>(null);
+  const [appMeta, setAppMeta] = React.useState<AppMeta | null>(null);
+  const [appUpdate, setAppUpdate] = React.useState<AppUpdate | null>(null);
   const [feeds, setFeeds] = React.useState<FeedSubscription[]>([]);
+  const [scheduler, setScheduler] = React.useState<SchedulerSettings | null>(null);
+  const [settingsConfig, setSettingsConfig] = React.useState<SettingsConfigField[]>([]);
   const [feedsLoaded, setFeedsLoaded] = React.useState(false);
   const [message, setMessage] = React.useState<UiMessage | null>(null);
   const [query, setQuery] = React.useState("");
@@ -80,6 +98,8 @@ export function App() {
   const [feedbackValue, setFeedbackValue] = React.useState<Relevance>("indirect");
   const [feedbackNote, setFeedbackNote] = React.useState("");
   const [feedsSaving, setFeedsSaving] = React.useState(false);
+  const [schedulerSaving, setSchedulerSaving] = React.useState(false);
+  const [settingsConfigSaving, setSettingsConfigSaving] = React.useState(false);
   const [zoteroPaper, setZoteroPaper] = React.useState<Paper | null>(null);
   const [zoteroCollections, setZoteroCollections] = React.useState<ZoteroCollectionOption[]>([]);
   const [zoteroCollectionKey, setZoteroCollectionKey] = React.useState("");
@@ -87,6 +107,8 @@ export function App() {
   const [zoteroSaving, setZoteroSaving] = React.useState(false);
   const [zoteroError, setZoteroError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [appControlBusy, setAppControlBusy] = React.useState(false);
+  const [adminTab, setAdminTab] = React.useState<AdminTab>("config");
   const [themePreference, setThemePreference] = React.useState<"system" | "light" | "dark">(
     "system",
   );
@@ -163,6 +185,23 @@ export function App() {
     setFeedsLoaded(true);
   }, []);
 
+  const refreshAppMeta = React.useCallback(async () => {
+    setAppMeta(await fetchAppMeta());
+  }, []);
+
+  const refreshAppUpdate = React.useCallback(async () => {
+    setAppUpdate(await fetchAppUpdate());
+  }, []);
+
+  const refreshScheduler = React.useCallback(async () => {
+    setScheduler(await fetchSchedulerSettings());
+  }, []);
+
+  const refreshConfig = React.useCallback(async () => {
+    const nextConfig = await fetchSettingsConfig();
+    setSettingsConfig(nextConfig.fields);
+  }, []);
+
   const refreshProposals = React.useCallback(async () => {
     setProfileProposals(await fetchProfileProposals());
   }, []);
@@ -170,14 +209,33 @@ export function App() {
   const refreshAll = React.useCallback(async () => {
     try {
       const currentProfile = await refreshProfile();
-      await Promise.all([refreshProposals(), refreshFeedback(), refreshFeeds()]);
+      await Promise.all([
+        refreshProposals(),
+        refreshFeedback(),
+        refreshFeeds(),
+        refreshConfig(),
+        refreshAppMeta(),
+        refreshAppUpdate(),
+        refreshScheduler(),
+      ]);
       if (currentProfile) {
         await refreshReport();
       }
     } catch (error) {
       pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     }
-  }, [pushMessage, refreshFeedback, refreshFeeds, refreshProfile, refreshProposals, refreshReport]);
+  }, [
+    pushMessage,
+    refreshAppMeta,
+    refreshAppUpdate,
+    refreshConfig,
+    refreshFeedback,
+    refreshFeeds,
+    refreshProfile,
+    refreshProposals,
+    refreshReport,
+    refreshScheduler,
+  ]);
 
   React.useEffect(() => {
     void refreshAll();
@@ -185,6 +243,7 @@ export function App() {
 
   React.useEffect(() => {
     if (profile && feedsLoaded && feeds.length === 0) {
+      setAdminTab("feeds");
       setAdminOpen(true);
     }
   }, [feeds.length, feedsLoaded, profile]);
@@ -491,6 +550,75 @@ export function App() {
     }
   };
 
+  const handleSaveConfig = React.useCallback(async (
+    fields: Record<string, {value?: string | null; clear?: boolean}>,
+  ) => {
+    try {
+      setSettingsConfigSaving(true);
+      const saved = await saveSettingsConfig(fields);
+      setSettingsConfig(saved.fields);
+      await refreshAll();
+      pushMessage("settings.config.save.succeeded");
+    } catch (error) {
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+    } finally {
+      setSettingsConfigSaving(false);
+    }
+  }, [pushMessage, refreshAll]);
+
+  const handleSaveScheduler = React.useCallback(async (dailyTime: string) => {
+    try {
+      setSchedulerSaving(true);
+      setScheduler(await saveSchedulerSettings(dailyTime));
+      pushMessage("scheduler.save.succeeded");
+    } catch (error) {
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+    } finally {
+      setSchedulerSaving(false);
+    }
+  }, [pushMessage]);
+
+  const handleDeleteScheduler = React.useCallback(async () => {
+    try {
+      setSchedulerSaving(true);
+      setScheduler(await deleteSchedulerSettings());
+      pushMessage("scheduler.delete.succeeded");
+    } catch (error) {
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+    } finally {
+      setSchedulerSaving(false);
+    }
+  }, [pushMessage]);
+
+  const handleOpenAppTarget = React.useCallback(
+    async (target: "data_dir" | "logs_dir" | "install_dir") => {
+      try {
+        setAppControlBusy(true);
+        await openAppTarget(target);
+        pushMessage("app.control.open.succeeded");
+      } catch (error) {
+        pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      } finally {
+        setAppControlBusy(false);
+      }
+    },
+    [pushMessage],
+  );
+
+  const handleExitApp = React.useCallback(async () => {
+    try {
+      setAppControlBusy(true);
+      await exitApp();
+      pushMessage("app.control.exit.succeeded");
+      window.setTimeout(() => {
+        window.location.href = "about:blank";
+      }, 350);
+    } catch (error) {
+      setAppControlBusy(false);
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+    }
+  }, [pushMessage]);
+
   const handleBootstrap = async (interestDescription: string, name: string) => {
     try {
       setBusy(true);
@@ -582,10 +710,22 @@ export function App() {
         ) : null}
         <Onboarding
           busy={onboardingBusy}
+          configFields={settingsConfig}
+          configSaving={settingsConfigSaving}
           jobs={jobs}
           proposals={profileProposals}
           onBootstrap={handleBootstrap}
           onApplyProposal={handleApplyProposal}
+          onSaveConfig={handleSaveConfig}
+        />
+        <AppStatusBar
+          appMeta={appMeta}
+          appUpdate={appUpdate}
+          busy={appControlBusy}
+          onExit={() => void handleExitApp()}
+          onOpenData={() => void handleOpenAppTarget("data_dir")}
+          onOpenInstall={() => void handleOpenAppTarget("install_dir")}
+          onOpenLogs={() => void handleOpenAppTarget("logs_dir")}
         />
       </>
     );
@@ -601,6 +741,11 @@ export function App() {
         usingSystemTheme={themePreference === "system"}
       />
       <AdminPanel
+        activeTab={adminTab}
+        appMeta={appMeta}
+        appUpdate={appUpdate}
+        configFields={settingsConfig}
+        configSaving={settingsConfigSaving}
         open={adminOpen}
         profile={profile}
         hasFeeds={feeds.length > 0}
@@ -614,7 +759,11 @@ export function App() {
         onFeedChange={handleFeedChange}
         onAddFeed={handleAddFeed}
         onRemoveFeed={handleRemoveFeed}
+        onSaveConfig={handleSaveConfig}
+        onSaveScheduler={handleSaveScheduler}
         onSaveFeeds={() => void handleSaveFeeds()}
+        onTabChange={setAdminTab}
+        onDeleteScheduler={handleDeleteScheduler}
         onGenerateProposal={() => void handleGenerateProposal()}
         onApplyProposal={(id) => void handleApplyProposal(id)}
         onRejectProposal={(id) => void handleRejectProposal(id)}
@@ -624,6 +773,8 @@ export function App() {
         onReclassifyAll={() => void handleReclassify("all")}
         onDeleteFeedback={(id) => void handleDeleteFeedback(id)}
         onRefreshReport={() => void handleRunAdminJob("/api/admin/report/latest")}
+        scheduler={scheduler}
+        schedulerSaving={schedulerSaving}
       />
       <FeedbackModal
         paper={feedbackPaper}
@@ -678,6 +829,7 @@ export function App() {
             if (feeds.length === 0) {
               handleAddFeed();
             }
+            setAdminTab("feeds");
             setAdminOpen(true);
           }}
           papers={visibleList}
@@ -701,6 +853,15 @@ export function App() {
           onSave={() => selectedPaper && openZoteroModal(selectedPaper)}
         />
       </div>
+      <AppStatusBar
+        appMeta={appMeta}
+        appUpdate={appUpdate}
+        busy={appControlBusy}
+        onExit={() => void handleExitApp()}
+        onOpenData={() => void handleOpenAppTarget("data_dir")}
+        onOpenInstall={() => void handleOpenAppTarget("install_dir")}
+        onOpenLogs={() => void handleOpenAppTarget("logs_dir")}
+      />
     </main>
   );
 }

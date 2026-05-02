@@ -21,6 +21,11 @@ const catalog = {
   "zotero.save.succeeded": {text: "Saved to Zotero.", tone: "success"},
   "feedback.save.succeeded": {text: "Feedback saved.", tone: "success"},
   "feedback.delete.succeeded": {text: "Feedback deleted.", tone: "success"},
+  "settings.config.save.succeeded": {text: "Local settings saved.", tone: "success"},
+  "scheduler.save.succeeded": {text: "Scheduled task saved.", tone: "success"},
+  "scheduler.delete.succeeded": {text: "Scheduled task removed.", tone: "success"},
+  "app.control.open.succeeded": {text: "Opened local target.", tone: "success"},
+  "app.control.exit.succeeded": {text: "FeedMeDaily is shutting down.", tone: "info"},
   "feeds.validation.failed": {
     text: "Each feed needs both a journal name and an RSS URL.",
     tone: "danger",
