@@ -584,10 +584,11 @@ def fetch_update_status(settings: Settings) -> AppUpdateResponse:
             detail="Update checks are not configured for this build.",
         )
     try:
-        response = httpx.get(settings.update_manifest_url, timeout=5.0)
+        response = httpx.get(settings.update_manifest_url, timeout=5.0, follow_redirects=True)
         response.raise_for_status()
         payload = response.json()
     except Exception as exc:
+        print(f"Error fetching update manifest: {str(exc)}")
         return AppUpdateResponse(
             status="check_failed",
             current_version=package_version(),
