@@ -30,5 +30,7 @@ data/classification_profile.json
 data/rss_feeds.json
 logs/
 reports/
+build/
+dist/
 
 *.log
