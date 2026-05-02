@@ -33,6 +33,12 @@ WizardStyle=modern
 SetupIconFile={#MyIconFile}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
+Type: filesandordirs; Name: "{app}\web"
+Type: files; Name: "{app}\FeedMeDaily.exe"
+Type: files; Name: "{app}\feedmedaily.ico"
+
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 

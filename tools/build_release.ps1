@@ -24,8 +24,7 @@ function Invoke-NativeStep {
 
 function Resolve-PyInstaller {
   $candidates = @(
-    (Join-Path $root ".venv\Scripts\pyinstaller.exe"),
-    (Join-Path $env:USERPROFILE ".local\bin\pyinstaller.exe")
+    (Join-Path $root ".venv\Scripts\pyinstaller.exe")
   )
   foreach ($candidate in $candidates) {
     if (Test-Path $candidate) {
@@ -211,6 +210,10 @@ try {
 
   Write-Host "Building FeedMeDaily version $projectVersion"
 
+  Invoke-NativeStep `
+    -Description "Project metadata refresh" `
+    -Command { uv sync}
+
   $pyinstallerVersionFile = Write-PyInstallerVersionFile -Version $projectVersion
 
   if (Test-Path $buildPython) {
@@ -235,6 +238,7 @@ try {
       --onedir `
       --icon $iconPath `
       --version-file $pyinstallerVersionFile `
+      --copy-metadata scirssagent `
       --paths src `
       src\scirssagent\cli.py
   }
@@ -244,7 +248,7 @@ try {
   Copy-Item -Recurse -Force ".\web\dist\*" $targetWeb
   Copy-Item -Force ".\assets\branding\feedmedaily.ico" (Join-Path $appDist "feedmedaily.ico")
   Write-UpdateManifest -Version $projectVersion
-  
+
   if (-not $SkipInstaller) {
     $iscc = Resolve-Iscc
     if (-not $iscc) {
