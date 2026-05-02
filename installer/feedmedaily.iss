@@ -1,5 +1,9 @@
 #define MyAppName "FeedMeDaily"
-#define MyAppVersion "0.1.0"
+#ifndef AppVersion
+  #define AppVersion "0.0.0"
+#endif
+
+#define MyAppVersion AppVersion
 #define MyAppPublisher "FeedMeDaily"
 #define MyAppURL "https://example.com/feedmedaily"
 #define MyAppExeName "FeedMeDaily.exe"
@@ -10,6 +14,9 @@
 AppId={{2F589BEE-CCAA-4ED0-9EB3-1A3D63FA447C}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}
+VersionInfoTextVersion={#MyAppVersion}
+OutputBaseFilename=FeedMeDaily-v{#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
@@ -20,7 +27,6 @@ DisableDirPage=no
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
 OutputDir=..\dist\installer
-OutputBaseFilename=FeedMeDaily-Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

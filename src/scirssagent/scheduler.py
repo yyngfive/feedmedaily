@@ -62,11 +62,44 @@ if ($action) {{
   state = [string]$task.State
   next_run_time = Format-Time $info.NextRunTime
   last_run_time = Format-Time $info.LastRunTime
-  last_result = [int]$info.LastTaskResult
+  last_result = [int64]$info.LastTaskResult
   command = $taskCommand
 }} | ConvertTo-Json -Compress
 """
     completed = _run_powershell(script)
+    if completed.returncode != 0:
+        print(
+            f"Error checking scheduler status: {completed.stderr.strip() or completed.stdout.strip()}"
+        )
+        return {
+            "installed": False,
+            "task_name": SCHEDULER_TASK_NAME,
+            "mode": settings.mode,
+            "scheduled_time": None,
+            "state": completed.stderr.strip()
+            or completed.stdout.strip()
+            or "PowerShell failed",
+            "command": command["display"],
+            "next_run_time": None,
+            "last_run_time": None,
+            "last_result": None,
+        }
+
+    stdout = completed.stdout.strip()
+    if not stdout:
+        return {
+            "installed": False,
+            "task_name": SCHEDULER_TASK_NAME,
+            "mode": settings.mode,
+            "scheduled_time": None,
+            "command": command["display"],
+            "state": completed.stderr.strip()
+            or completed.stdout.strip()
+            or "PowerShell returned empty output",
+            "next_run_time": None,
+            "last_run_time": None,
+            "last_result": None,
+        }
     return json.loads(completed.stdout)
 
 
@@ -107,8 +140,10 @@ def _run_powershell(script: str) -> subprocess.CompletedProcess[str]:
             "-Command",
             script,
         ],
-        check=True,
+        check=False,
         capture_output=True,
+        encoding="utf-8",
+        errors="replace",
         text=True,
     )
     return completed
