@@ -57,7 +57,7 @@ func ResolveLayout(root string) (Layout, error) {
 		return Layout{}, fmt.Errorf("resolve root: %w", err)
 	}
 
-	mode := detectRuntimeMode()
+	mode := detectRuntimeMode(absRoot)
 	serverHost := strings.TrimSpace(os.Getenv("SCIRSS_SERVER_HOST"))
 	if serverHost == "" {
 		serverHost = defaultHost
@@ -107,16 +107,44 @@ func ResolveLayout(root string) (Layout, error) {
 	return layout, nil
 }
 
-func detectRuntimeMode() string {
+func detectRuntimeMode(root string) string {
 	override := strings.ToLower(strings.TrimSpace(os.Getenv("FEEDMEDAILY_RUNTIME_MODE")))
 	switch override {
 	case runtimeModeRelease:
 		return runtimeModeRelease
 	case runtimeModeSource:
 		return runtimeModeSource
-	default:
+	}
+
+	if looksLikeSourceRoot(root) {
 		return runtimeModeSource
 	}
+	if looksLikeReleaseRoot(root) {
+		return runtimeModeRelease
+	}
+	return runtimeModeRelease
+}
+
+func looksLikeSourceRoot(path string) bool {
+	_, pyprojectErr := os.Stat(filepath.Join(path, "pyproject.toml"))
+	_, srcErr := os.Stat(filepath.Join(path, "src", "scirssagent"))
+	return pyprojectErr == nil && srcErr == nil
+}
+
+func looksLikeReleaseRoot(path string) bool {
+	candidates := []string{
+		filepath.Join(path, "FeedMeDaily.exe"),
+		filepath.Join(path, "FeedMeDailyTray.exe"),
+		filepath.Join(path, "feedmedaily.ico"),
+		filepath.Join(path, "web", "dist", "index.html"),
+	}
+	matched := 0
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			matched++
+		}
+	}
+	return matched >= 2
 }
 
 func defaultUserDataDir() string {
