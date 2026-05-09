@@ -12,7 +12,7 @@ import {
   fetchCurrentProfile,
   fetchFeedSubscriptions,
   fetchFeedback,
-  fetchJob,
+  fetchJobs,
   fetchLatestReport,
   fetchProfileProposals,
   fetchSchedulerSettings,
@@ -113,6 +113,7 @@ export function App() {
     "system",
   );
   const [systemTheme, setSystemTheme] = React.useState<"light" | "dark">("light");
+  const announcedJobRef = React.useRef("");
   const deferredQuery = React.useDeferredValue(query);
   const resolvedTheme = themePreference === "system" ? systemTheme : themePreference;
 
@@ -124,7 +125,7 @@ export function App() {
   }, []);
 
   React.useEffect(() => {
-    if (!message) {
+    if (!message || message.ttlMs <= 0) {
       return;
     }
     const timer = window.setTimeout(() => {
@@ -248,10 +249,6 @@ export function App() {
     }
   }, [feeds.length, feedsLoaded, profile]);
 
-  const runningJobs = React.useMemo(
-    () => jobs.filter((job) => job.status === "queued" || job.status === "running"),
-    [jobs],
-  );
   const bootstrapJob = React.useMemo(
     () => jobs.find((job) => job.job_type === "profile-bootstrap") ?? null,
     [jobs],
@@ -271,40 +268,78 @@ export function App() {
     bootstrapJob?.status === "running";
 
   React.useEffect(() => {
-    if (runningJobs.length === 0) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      Promise.all(runningJobs.map((job) => fetchJob(job.id)))
-        .then((updatedJobs) => {
-          setJobs((current) => {
-            const byId = new Map(current.map((job) => [job.id, job]));
-            updatedJobs.forEach((job) => byId.set(job.id, job));
-            return Array.from(byId.values()).sort((left, right) =>
-              left.created_at < right.created_at ? 1 : -1,
-            );
+    let cancelled = false;
+
+    const pollJobs = async () => {
+      try {
+        const serverJobs = await fetchJobs();
+        if (cancelled) {
+          return;
+        }
+
+        let shouldRefresh = false;
+        setJobs((current) => {
+          const previousStatusById = new Map(current.map((job) => [job.id, job.status]));
+          const byId = new Map(current.map((job) => [job.id, job]));
+          serverJobs.forEach((job) => {
+            const previousStatus = previousStatusById.get(job.id);
+            if (
+              (
+                (previousStatus && previousStatus !== job.status) ||
+                (!previousStatus &&
+                  (job.status === "completed" || job.status === "failed") &&
+                  Boolean(job.finished_at))
+              ) &&
+              (job.status === "completed" || job.status === "failed")
+            ) {
+              shouldRefresh = true;
+            }
+            byId.set(job.id, job);
           });
-          const failedJob = updatedJobs.find((job) => job.status === "failed" && job.error);
-          if (failedJob?.error) {
+          return Array.from(byId.values()).sort((left, right) =>
+            left.created_at < right.created_at ? 1 : -1,
+          );
+        });
+
+        const failedJob = serverJobs.find((job) => job.status === "failed" && job.error);
+        if (failedJob?.error) {
+          const signature = `${failedJob.id}:${failedJob.status}:${failedJob.finished_at ?? ""}:${failedJob.error}`;
+          if (announcedJobRef.current !== signature) {
+            announcedJobRef.current = signature;
             setMessage(messageFromJob(failedJob));
           }
+        } else {
           const statusJob =
-            updatedJobs.find((job) => job.status === "running") ??
-            updatedJobs.find((job) => job.status === "queued") ??
-            updatedJobs.find((job) => job.status === "completed");
+            serverJobs.find((job) => job.status === "running") ??
+            serverJobs.find((job) => job.status === "queued") ??
+            serverJobs.find((job) => job.status === "completed");
           if (statusJob) {
-            setMessage(messageFromJob(statusJob));
+            const signature = `${statusJob.id}:${statusJob.status}:${statusJob.finished_at ?? statusJob.started_at ?? ""}:${statusJob.message_key ?? ""}:${statusJob.message ?? ""}`;
+            if (announcedJobRef.current !== signature) {
+              announcedJobRef.current = signature;
+              setMessage(messageFromJob(statusJob));
+            }
           }
-          if (updatedJobs.some((job) => job.status === "completed")) {
-            void refreshAll();
-          }
-        })
-        .catch((error) =>
-          pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"}),
-        );
+        }
+
+        if (shouldRefresh) {
+          void refreshAll();
+        }
+      } catch (error) {
+        pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      }
+    };
+
+    void pollJobs();
+    const timer = window.setInterval(() => {
+      void pollJobs();
     }, 2500);
-    return () => window.clearInterval(timer);
-  }, [pushMessage, refreshAll, runningJobs]);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [pushMessage, refreshAll]);
 
   const tags = React.useMemo(
     () => profile?.topic_taxonomy.map((item) => item.id).sort() ?? [],

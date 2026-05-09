@@ -314,6 +314,14 @@ export async function fetchJob(id: string): Promise<JobInfo> {
   return (await response.json()) as JobInfo;
 }
 
+export async function fetchJobs(): Promise<JobInfo[]> {
+  const response = await fetch("/api/admin/jobs");
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as JobInfo[];
+}
+
 export function tagLabel(tag: string, profile: ClassificationProfile | null): string {
   const match = profile?.topic_taxonomy.find((item) => item.id === tag);
   return match?.label ?? tag.replaceAll("_", " ");

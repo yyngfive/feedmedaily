@@ -18,7 +18,21 @@ Release characteristics:
 - no source checkout required
 - user data stored under `%LOCALAPPDATA%\FeedMeDaily\`
 
-After installation, the app launcher should run `FeedMeDaily.exe open`, start the local service, and open your browser automatically.
+After installation, the app launcher should run `FeedMeDailyTray.exe --root <install-dir>`, let the tray manage the local service, and open your browser automatically.
+
+### Go tray phase 1
+
+The repository now includes a first-stage Windows tray manager in Go under `cmd/feedmedaily-tray/`.
+
+Current phase-1 scope:
+
+- the tray can start and stop the existing local backend
+- the tray can open the browser UI
+- the tray can trigger `Run Sync Now`
+- the tray owns launch-at-login and a local daily timer
+- the backend command can still be Python in this phase
+
+This means the tray is already the runtime shell, while the full Go backend rewrite remains a later step.
 
 ### User data location
 
@@ -85,6 +99,33 @@ pnpm --dir web build
 uv run scirssagent open
 ```
 
+To build the experimental Windows tray executable after Go is installed:
+
+```powershell
+pwsh -File .\tools\build_go_tray.ps1
+```
+
+The tray stores its local settings in `tray-settings.json` at the app config root. In source mode that file sits at the repository root. You can override the backend launch command there with a tokenized command such as:
+
+```json
+{
+  "backend_command": [
+    ".venv\\Scripts\\python.exe",
+    "-m",
+    "scirssagent.cli",
+    "serve",
+    "--root",
+    "{root}",
+    "--host",
+    "{host}",
+    "--port",
+    "{port}"
+  ]
+}
+```
+
+If `backend_command` is omitted, the tray auto-detects `.venv\\Scripts\\python.exe`, then `python`, then `uv`.
+
 Before the first run, create a local `.env` file:
 
 ```powershell
@@ -134,6 +175,8 @@ Notes:
 6. Use `Save to Zotero`, `Mark as read`, and `Mark wrong` as needed.
 7. Review feedback-driven profile proposals over time.
 
+In the tray-driven phase-1 runtime, users can also leave the tray running in the background and use it to reopen the app, start the backend, stop the backend, or trigger a sync manually.
+
 ## Commands
 
 ```powershell
@@ -149,13 +192,14 @@ uv run scirssagent version
 
 ## Building the Windows release
 
-Release artifacts are built from the existing FastAPI backend plus the already-built web bundle.
+Release artifacts are built from the existing FastAPI backend, the Go tray shell, and the already-built web bundle.
 
 Expected tooling:
 
 - Python 3.12 via `uv`
 - Node/pnpm for build-time web compilation only
 - `pyinstaller`
+- `go` for the tray executable
 - `Inno Setup` (`ISCC.exe`) for the installer
 
 Build flow:
@@ -169,7 +213,9 @@ The build script:
 
 - regenerates brand assets
 - builds `web/dist`
+- builds `FeedMeDailyTray.exe`
 - packages the backend into `dist\FeedMeDaily\`
+- copies the tray executable into `dist\FeedMeDaily\`
 - copies the built web app into `dist\FeedMeDaily\web\dist`
 - optionally compiles `installer\feedmedaily.iss`
 

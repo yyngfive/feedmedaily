@@ -16,6 +16,8 @@ pytest_tmp/
 .env
 .env.*
 !.env.example
+/runtime.json
+/tray-settings.json
 
 node_modules/
 web/dist/

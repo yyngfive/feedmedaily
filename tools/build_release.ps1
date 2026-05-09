@@ -7,6 +7,8 @@ $root = Split-Path -Parent $PSScriptRoot
 $distDir = Join-Path $root "dist"
 $appDist = Join-Path $distDir "FeedMeDaily"
 $iconPath = Join-Path $root "assets\branding\feedmedaily.ico"
+$trayBuildScript = Join-Path $root "tools\build_go_tray.ps1"
+$trayBuildOutput = Join-Path $root "build\feedmedaily-tray.exe"
 
 function Invoke-NativeStep {
   param(
@@ -19,6 +21,18 @@ function Invoke-NativeStep {
   & $Command
   if ($LASTEXITCODE -ne 0) {
     throw "$Description failed with exit code $LASTEXITCODE."
+  }
+}
+
+function Initialize-LocalBuildEnvironment {
+  if (-not $env:UV_CACHE_DIR) {
+    $env:UV_CACHE_DIR = Join-Path $root ".uv-cache"
+  }
+  if (-not $env:UV_PYTHON_INSTALL_DIR) {
+    $env:UV_PYTHON_INSTALL_DIR = Join-Path $root ".uv-python"
+  }
+  if (-not $env:UV_LINK_MODE) {
+    $env:UV_LINK_MODE = "copy"
   }
 }
 
@@ -202,6 +216,7 @@ function Write-UpdateManifest {
 
 Push-Location $root
 try {
+  Initialize-LocalBuildEnvironment
   Stop-ExistingReleaseProcess
   Remove-BuildArtifacts
 
@@ -226,6 +241,12 @@ try {
     -Description "Frontend build" `
     -Command { corepack pnpm --dir web build }
 
+  if (Test-Path $trayBuildScript) {
+    Invoke-NativeStep `
+      -Description "Go tray build" `
+      -Command { & $trayBuildScript }
+  }
+
   $pyinstaller = Resolve-PyInstaller
 
   Invoke-NativeStep `
@@ -247,6 +268,9 @@ try {
   New-Item -ItemType Directory -Force -Path $targetWeb | Out-Null
   Copy-Item -Recurse -Force ".\web\dist\*" $targetWeb
   Copy-Item -Force ".\assets\branding\feedmedaily.ico" (Join-Path $appDist "feedmedaily.ico")
+  if (Test-Path $trayBuildOutput) {
+    Copy-Item -Force $trayBuildOutput (Join-Path $appDist "FeedMeDailyTray.exe")
+  }
   Write-UpdateManifest -Version $projectVersion
 
   if (-not $SkipInstaller) {

@@ -2,11 +2,13 @@
 
 ## Overview
 
-FeedMeDaily is the public Windows release name for this single-user literature triage application. The internal Python package name remains `scirssagent`. The app is built around a local SQLite database, a profile-driven paper classifier, and a FastAPI-served React interface.
+FeedMeDaily is the public Windows release name for this single-user literature triage application. The internal Python package name remains `scirssagent`. The app is built around a local SQLite database, a profile-driven paper classifier, a FastAPI-served React interface, and a new phase-1 Go tray manager for runtime control.
 
 ## Repository Structure
 
 - `src/scirssagent/`: Python backend pipeline, API, storage, and CLI
+- `cmd/feedmedaily-tray/`: first-stage Go tray entrypoint for Windows runtime management
+- `internal/trayapp/`: Go tray runtime, command orchestration, scheduling, and autostart code
 - `tests/`: backend tests
 - `web/`: Vite + React + TypeScript UI
 - `data/rss_feeds.json`: structured RSS feed subscriptions used by the app
@@ -56,6 +58,23 @@ Long-running actions run in background threads and report status through the in-
 - `init-task`
 
 The CLI is intentionally kept smaller than the app surface and should only contain operational commands that are part of the maintained product workflow.
+
+### Go tray manager
+
+`cmd/feedmedaily-tray/` is the phase-1 Windows runtime shell.
+
+It is responsible for:
+
+- single-instance tray lifecycle
+- starting and stopping the local backend service
+- opening the browser UI
+- triggering `Run Sync Now`
+- launch-at-login
+- a tray-owned local daily timer
+
+In phase 1, the tray is intentionally backend-language-agnostic. It can launch the existing Python backend command today, and later switch to a Go backend command without changing tray UX.
+
+The Windows release packaging path now includes this tray executable and points installer shortcuts at it, while the Python backend still provides the application API and pipeline runtime.
 
 ## Core Backend Modules
 

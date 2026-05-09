@@ -10,6 +10,8 @@ export type UiMessage = {
 };
 
 const MESSAGE_TTL_MS = 4200;
+const JOB_FINAL_TTL_MS = 9000;
+const STICKY_TTL_MS = 0;
 
 const catalog = {
   "app.report.embedded_fallback": {
@@ -67,19 +69,22 @@ export function createUiMessage(
 
 export function messageFromJob(job: JobInfo): UiMessage {
   if (job.status === "failed") {
-    return createUiMessage(job.message_key ?? "job.failed", {
+    const message = createUiMessage(job.message_key ?? "job.failed", {
       text: job.error ?? job.message ?? "Job failed.",
       tone: "danger",
     });
+    return {...message, ttlMs: JOB_FINAL_TTL_MS};
   }
   if (job.status === "completed") {
-    return createUiMessage(job.message_key ?? "job.completed", {
+    const message = createUiMessage(job.message_key ?? "job.completed", {
       text: job.message ?? "Completed.",
       tone: "success",
     });
+    return {...message, ttlMs: JOB_FINAL_TTL_MS};
   }
-  return createUiMessage(job.message_key ?? "job.started", {
+  const message = createUiMessage(job.message_key ?? "job.started", {
     text: job.message ?? undefined,
     tone: "info",
   });
+  return {...message, ttlMs: STICKY_TTL_MS};
 }

@@ -7,6 +7,7 @@
 #define MyAppPublisher "FeedMeDaily"
 #define MyAppURL "https://example.com/feedmedaily"
 #define MyAppExeName "FeedMeDaily.exe"
+#define MyTrayExeName "FeedMeDailyTray.exe"
 #define MyBuildDir "..\dist\FeedMeDaily"
 #define MyIconFile "..\assets\branding\feedmedaily.ico"
 
@@ -37,6 +38,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 Type: filesandordirs; Name: "{app}\_internal"
 Type: filesandordirs; Name: "{app}\web"
 Type: files; Name: "{app}\FeedMeDaily.exe"
+Type: files; Name: "{app}\FeedMeDailyTray.exe"
 Type: files; Name: "{app}\feedmedaily.ico"
 
 [Languages]
@@ -49,8 +51,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "{#MyBuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "open"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "open"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyTrayExeName}"; Parameters: "--root ""{app}"""
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyTrayExeName}"; Parameters: "--root ""{app}"""; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Parameters: "open"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyTrayExeName}"; Parameters: "--root ""{app}"""; Description: "Launch {#MyAppName} tray"; Flags: nowait postinstall skipifsilent

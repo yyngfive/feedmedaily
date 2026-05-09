@@ -162,6 +162,7 @@ def process_is_running(pid: int | None) -> bool:
                 check=False,
                 capture_output=True,
                 text=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             return str(pid) in completed.stdout
         os.kill(pid, 0)
@@ -196,10 +197,10 @@ def open_browser(url: str) -> None:
 def launch_background_process(command: list[str], cwd: Path) -> subprocess.Popen:
     creationflags = 0
     if os.name == "nt":
-        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
-            subprocess,
-            "DETACHED_PROCESS",
-            0,
+        creationflags = (
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
         )
     return subprocess.Popen(
         command,

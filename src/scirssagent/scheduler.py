@@ -145,6 +145,7 @@ def _run_powershell(script: str) -> subprocess.CompletedProcess[str]:
         encoding="utf-8",
         errors="replace",
         text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     return completed
 
