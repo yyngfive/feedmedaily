@@ -238,6 +238,8 @@ Relevant Zotero docs:
 
 See `AGENTS.md` for environment notes, secret handling, and repo conventions.
 
+Manual verification steps for the migrated Go runtime, APIs, commands, tray, and UI are documented in [docs/manual-go-test-checklist.md](./docs/manual-go-test-checklist.md).
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).
