@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/yyngfive/scirssagent/internal/config"
+	"github.com/yyngfive/scirssagent/internal/logging"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
@@ -44,11 +45,30 @@ func ListCollections(settings config.Settings) (CollectionsResponse, error) {
 	}
 	request.Header.Set("Zotero-API-Version", "3")
 	request.Header.Set("Zotero-API-Key", settings.ZoteroAPIKey)
+	started := time.Now()
 	response, err := httpClient.Do(request)
 	if err != nil {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "error",
+			Component: "zotero",
+			Action:    "list_collections_failed",
+			Message:   fmt.Sprintf("HTTP Request: GET %s failed", request.URL.String()),
+			Error:     err.Error(),
+			Data:      map[string]any{"duration_ms": time.Since(started).Milliseconds()},
+		})
 		return CollectionsResponse{}, err
 	}
 	defer response.Body.Close()
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "zotero",
+		Action:    "list_collections_request",
+		Message:   fmt.Sprintf("HTTP Request: GET %s %q", request.URL.String(), response.Proto+" "+response.Status),
+		Data: map[string]any{
+			"status_code": response.StatusCode,
+			"duration_ms": time.Since(started).Milliseconds(),
+		},
+	})
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return CollectionsResponse{}, err
@@ -109,6 +129,13 @@ func ListCollections(settings config.Settings) (CollectionsResponse, error) {
 	slices.SortFunc(collections, func(left, right CollectionOption) int {
 		return strings.Compare(strings.ToLower(left.PathLabel), strings.ToLower(right.PathLabel))
 	})
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "zotero",
+		Action:    "list_collections_completed",
+		Message:   fmt.Sprintf("Loaded %d Zotero collection(s)", len(collections)),
+		Data:      map[string]any{"default_collection_key": defaultKey},
+	})
 	return CollectionsResponse{
 		Collections:          collections,
 		DefaultCollectionKey: defaultKey,
@@ -139,11 +166,38 @@ func SavePaper(settings config.Settings, paper store.Paper, classification store
 	request.Header.Set("Zotero-API-Version", "3")
 	request.Header.Set("Zotero-API-Key", settings.ZoteroAPIKey)
 	request.Header.Set("Content-Type", "application/json")
+	started := time.Now()
 	response, err := httpClient.Do(request)
 	if err != nil {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "error",
+			Component: "zotero",
+			Action:    "save_paper_failed",
+			Message:   fmt.Sprintf("HTTP Request: POST %s failed", request.URL.String()),
+			Error:     err.Error(),
+			Data: map[string]any{
+				"paper_title":    paper.Title,
+				"paper_url":      paper.URL,
+				"collection_key": targetCollectionKey,
+				"duration_ms":    time.Since(started).Milliseconds(),
+			},
+		})
 		return nil, err
 	}
 	defer response.Body.Close()
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "zotero",
+		Action:    "save_paper_request",
+		Message:   fmt.Sprintf("HTTP Request: POST %s %q", request.URL.String(), response.Proto+" "+response.Status),
+		Data: map[string]any{
+			"paper_title":    paper.Title,
+			"paper_url":      paper.URL,
+			"collection_key": targetCollectionKey,
+			"status_code":    response.StatusCode,
+			"duration_ms":    time.Since(started).Milliseconds(),
+		},
+	})
 	responseBody, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
@@ -164,6 +218,18 @@ func SavePaper(settings config.Settings, paper store.Paper, classification store
 		}
 		itemKey := optionalString(stringAny(itemInfo["key"]))
 		if itemKey != nil {
+			_, _ = logging.WriteDefault(logging.Event{
+				Level:     "info",
+				Component: "zotero",
+				Action:    "save_paper_completed",
+				Message:   "Saved paper to Zotero",
+				Data: map[string]any{
+					"paper_title":    paper.Title,
+					"paper_url":      paper.URL,
+					"collection_key": targetCollectionKey,
+					"item_key":       itemKey,
+				},
+			})
 			return itemKey, nil
 		}
 	}

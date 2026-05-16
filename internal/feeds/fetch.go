@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yyngfive/scirssagent/internal/logging"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
@@ -94,6 +95,12 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 	if err != nil {
 		return FetchResult{}, err
 	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "feeds",
+		Action:    "fetch_all_started",
+		Message:   fmt.Sprintf("Fetching %d feeds", len(subscriptions)),
+	})
 	result := FetchResult{
 		Papers:   []store.Paper{},
 		Errors:   []string{},
@@ -110,9 +117,25 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 		result.Papers = append(result.Papers, papers...)
 	}
 	if opts.MaxPapers > 0 && len(result.Papers) > opts.MaxPapers {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "info",
+			Component: "feeds",
+			Action:    "fetch_all_limited",
+			Message:   fmt.Sprintf("Limiting run to %d papers", opts.MaxPapers),
+		})
 		result.Papers = result.Papers[:opts.MaxPapers]
 	}
 	result.Fetched = len(result.Papers)
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "feeds",
+		Action:    "fetch_all_completed",
+		Message:   fmt.Sprintf("Fetched %d candidate papers", result.Fetched),
+		Data: map[string]any{
+			"feed_count": len(subscriptions),
+			"errors":     len(result.Errors),
+		},
+	})
 	return result, nil
 }
 
@@ -122,10 +145,35 @@ func fetchFeed(url string) ([]store.Paper, error) {
 		return nil, err
 	}
 	request.Header.Set("User-Agent", "SciRSSAgent/0.1")
+	started := time.Now()
 	response, err := fetchHTTPClient.Do(request)
 	if err != nil {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "error",
+			Component: "feeds",
+			Action:    "http_request_failed",
+			Message:   fmt.Sprintf("HTTP Request: GET %s failed", url),
+			Error:     err.Error(),
+			Data: map[string]any{
+				"url":            url,
+				"duration_ms":    time.Since(started).Milliseconds(),
+				"request_method": http.MethodGet,
+			},
+		})
 		return nil, err
 	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "feeds",
+		Action:    "http_request",
+		Message:   fmt.Sprintf("HTTP Request: GET %s %q", url, response.Proto+" "+response.Status),
+		Data: map[string]any{
+			"url":            url,
+			"status_code":    response.StatusCode,
+			"duration_ms":    time.Since(started).Milliseconds(),
+			"request_method": http.MethodGet,
+		},
+	})
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		defer response.Body.Close()
 		return nil, fmt.Errorf("request failed with %s", response.Status)
@@ -146,14 +194,37 @@ func fetchFeed(url string) ([]store.Paper, error) {
 		if err := xml.Unmarshal(body, &doc); err != nil {
 			return nil, err
 		}
-		return parseRSS(doc, url), nil
+		papers := parseRSS(doc, url)
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "info",
+			Component: "feeds",
+			Action:    "feed_parsed",
+			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), url),
+			Data:      map[string]any{"url": url, "format": "rss"},
+		})
+		return papers, nil
 	case "feed":
 		var doc atomDoc
 		if err := xml.Unmarshal(body, &doc); err != nil {
 			return nil, err
 		}
-		return parseAtom(doc, url), nil
+		papers := parseAtom(doc, url)
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "info",
+			Component: "feeds",
+			Action:    "feed_parsed",
+			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), url),
+			Data:      map[string]any{"url": url, "format": "atom"},
+		})
+		return papers, nil
 	default:
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "warning",
+			Component: "feeds",
+			Action:    "feed_unknown_root",
+			Message:   fmt.Sprintf("Feed returned unsupported XML root %q", root.XMLName.Local),
+			Data:      map[string]any{"url": url},
+		})
 		return []store.Paper{}, nil
 	}
 }

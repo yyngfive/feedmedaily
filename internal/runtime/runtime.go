@@ -1,6 +1,7 @@
 package appruntime
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +40,8 @@ type TraySchedulerSettings struct {
 	LastRunDate     string `json:"last_run_date,omitempty"`
 	LaunchAtLogin   bool   `json:"launch_at_login"`
 }
+
+var buildVersion = ""
 
 func ResolveAppRoot(root string) (string, error) {
 	// 优先使用显式传入的 root；否则退回当前工作目录。
@@ -113,16 +116,65 @@ func ResolveWebDistDir(root string) string {
 }
 
 func PackageVersion(root string) string {
-	// 直接从 pyproject.toml 读取版本，避免在 Go 侧维护第二份版本号。
-	data, err := os.ReadFile(filepath.Join(root, "pyproject.toml"))
+	// 优先使用构建时注入的版本；开发态再回退到 web/package.json。
+	if strings.TrimSpace(buildVersion) != "" {
+		return strings.TrimSpace(buildVersion)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "web", "package.json"))
 	if err != nil {
 		return "0.0.0"
 	}
-	match := regexp.MustCompile(`(?m)^version\s*=\s*"([^"]+)"`).FindSubmatch(data)
+	match := regexp.MustCompile(`(?m)"version"\s*:\s*"([^"]+)"`).FindSubmatch(data)
 	if len(match) != 2 {
 		return "0.0.0"
 	}
 	return string(match[1])
+}
+
+func SourceBinaryPath(root string, name string) string {
+	return filepath.Join(root, ".tmp", "runtime-bin", name)
+}
+
+func EnsureSourceBinary(root string, packagePath string, outputName string) (string, error) {
+	goPath, err := exec.LookPath("go")
+	if err != nil {
+		return "", fmt.Errorf("go command not found; install Go to build %s from source", outputName)
+	}
+	outputPath := SourceBinaryPath(root, outputName)
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return "", fmt.Errorf("create runtime build directory: %w", err)
+	}
+	args := []string{
+		"build",
+		"-ldflags",
+		sourceBinaryLdflags(root, outputName),
+		"-o",
+		outputPath,
+		packagePath,
+	}
+	cmd := exec.Command(goPath, args...)
+	cmd.Dir = root
+	cmd.SysProcAttr = hiddenBuildSysProcAttr()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return "", fmt.Errorf("build %s: %s", outputName, detail)
+	}
+	return outputPath, nil
+}
+
+func sourceBinaryLdflags(root string, outputName string) string {
+	parts := []string{
+		fmt.Sprintf("-X github.com/yyngfive/scirssagent/internal/runtime.buildVersion=%s", PackageVersion(root)),
+	}
+	if goruntime.GOOS == "windows" && strings.EqualFold(filepath.Ext(outputName), ".exe") {
+		parts = append([]string{"-H=windowsgui"}, parts...)
+	}
+	return strings.Join(parts, " ")
 }
 
 func ParseVersionParts(version string) []int {

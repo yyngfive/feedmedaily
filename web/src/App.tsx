@@ -21,7 +21,6 @@ import {
   launchAdminJob,
   launchProfileProposalGeneration,
   launchReclassifyJob,
-  loadEmbeddedReport,
   markPaperRead,
   openAppTarget,
   rejectProfileProposal,
@@ -74,7 +73,7 @@ import type {
 
 // 应用根组件负责衔接数据加载、筛选状态、后台任务和三栏式阅读界面。
 export function App() {
-  const [report, setReport] = React.useState<Report>(() => loadEmbeddedReport() ?? EMPTY_REPORT);
+  const [report, setReport] = React.useState<Report>(EMPTY_REPORT);
   const [profile, setProfile] = React.useState<ClassificationProfile | null>(null);
   const [appMeta, setAppMeta] = React.useState<AppMeta | null>(null);
   const [appUpdate, setAppUpdate] = React.useState<AppUpdate | null>(null);
@@ -113,9 +112,20 @@ export function App() {
     "system",
   );
   const [systemTheme, setSystemTheme] = React.useState<"light" | "dark">("light");
-  const announcedJobRef = React.useRef("");
+  const knownJobStateRef = React.useRef(new Map<string, string>());
+  const jobsHydratedRef = React.useRef(false);
   const deferredQuery = React.useDeferredValue(query);
   const resolvedTheme = themePreference === "system" ? systemTheme : themePreference;
+
+  const hydrateEditableFeeds = React.useCallback((items: FeedSubscription[]) =>
+    items.map((item) => ({
+      ...item,
+      client_id:
+        item.client_id ??
+        (typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random()}`),
+    })), []);
 
   const pushMessage = React.useCallback((
     name: string,
@@ -162,18 +172,8 @@ export function App() {
   }, []);
 
   const refreshReport = React.useCallback(async () => {
-    try {
-      const next = await fetchLatestReport();
-      React.startTransition(() => setReport(next));
-    } catch (error) {
-      const embedded = loadEmbeddedReport();
-      if (embedded) {
-        React.startTransition(() => setReport(embedded));
-        pushMessage("app.report.embedded_fallback");
-        return;
-      }
-      throw error;
-    }
+    const next = await fetchLatestReport();
+    React.startTransition(() => setReport(next));
   }, [pushMessage]);
 
   const refreshFeedback = React.useCallback(async () => {
@@ -182,9 +182,9 @@ export function App() {
 
   const refreshFeeds = React.useCallback(async () => {
     const nextFeeds = await fetchFeedSubscriptions();
-    setFeeds(nextFeeds);
+    setFeeds(hydrateEditableFeeds(nextFeeds));
     setFeedsLoaded(true);
-  }, []);
+  }, [hydrateEditableFeeds]);
 
   const refreshAppMeta = React.useCallback(async () => {
     setAppMeta(await fetchAppMeta());
@@ -278,6 +278,30 @@ export function App() {
         }
 
         let shouldRefresh = false;
+        let announcement: JobInfo | null = null;
+        const nextJobState = new Map<string, string>();
+        for (const job of serverJobs) {
+          const signature = `${job.status}:${job.finished_at ?? job.started_at ?? ""}:${job.message_key ?? ""}:${job.message ?? ""}:${job.error ?? ""}`;
+          const previousSignature = knownJobStateRef.current.get(job.id);
+          nextJobState.set(job.id, signature);
+          if (!jobsHydratedRef.current || previousSignature === signature) {
+            continue;
+          }
+          if (!profile && job.job_type === "profile-bootstrap") {
+            continue;
+          }
+          if (job.status === "failed") {
+            announcement = job;
+            break;
+          }
+          if (job.status === "completed") {
+            announcement = job;
+            continue;
+          }
+          if (announcement == null) {
+            announcement = job;
+          }
+        }
         setJobs((current) => {
           const previousStatusById = new Map(current.map((job) => [job.id, job.status]));
           const byId = new Map(current.map((job) => [job.id, job]));
@@ -300,27 +324,11 @@ export function App() {
             left.created_at < right.created_at ? 1 : -1,
           );
         });
-
-        const failedJob = serverJobs.find((job) => job.status === "failed" && job.error);
-        if (failedJob?.error) {
-          const signature = `${failedJob.id}:${failedJob.status}:${failedJob.finished_at ?? ""}:${failedJob.error}`;
-          if (announcedJobRef.current !== signature) {
-            announcedJobRef.current = signature;
-            setMessage(messageFromJob(failedJob));
-          }
-        } else {
-          const statusJob =
-            serverJobs.find((job) => job.status === "running") ??
-            serverJobs.find((job) => job.status === "queued") ??
-            serverJobs.find((job) => job.status === "completed");
-          if (statusJob) {
-            const signature = `${statusJob.id}:${statusJob.status}:${statusJob.finished_at ?? statusJob.started_at ?? ""}:${statusJob.message_key ?? ""}:${statusJob.message ?? ""}`;
-            if (announcedJobRef.current !== signature) {
-              announcedJobRef.current = signature;
-              setMessage(messageFromJob(statusJob));
-            }
-          }
+        knownJobStateRef.current = nextJobState;
+        if (jobsHydratedRef.current && announcement) {
+          setMessage(messageFromJob(announcement));
         }
+        jobsHydratedRef.current = true;
 
         if (shouldRefresh) {
           void refreshAll();
@@ -339,7 +347,7 @@ export function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [pushMessage, refreshAll]);
+  }, [profile, pushMessage, refreshAll]);
 
   const tags = React.useMemo(
     () => profile?.topic_taxonomy.map((item) => item.id).sort() ?? [],
@@ -557,7 +565,17 @@ export function App() {
   };
 
   const handleAddFeed = () => {
-    setFeeds((current) => [...current, {journal: "", url: ""}]);
+    setFeeds((current) => [
+      ...current,
+      {
+        client_id:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random()}`,
+        journal: "",
+        url: "",
+      },
+    ]);
   };
 
   const handleRemoveFeed = (index: number) => {
@@ -575,7 +593,7 @@ export function App() {
     try {
       setFeedsSaving(true);
       const saved = await saveFeedSubscriptions(cleaned);
-      setFeeds(saved);
+      setFeeds(hydrateEditableFeeds(saved));
       setFeedsLoaded(true);
       pushMessage("feeds.save.succeeded");
     } catch (error) {
@@ -661,7 +679,6 @@ export function App() {
         await bootstrapProfile({interest_description: interestDescription, name}),
         false,
       );
-      pushMessage("profile.bootstrap.started");
     } catch (error) {
       pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     } finally {

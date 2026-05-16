@@ -1,6 +1,7 @@
 param(
   [string]$TrayOutput = ".\\build\\feedmedaily-tray.exe",
-  [string]$DaemonOutput = ".\\build\\feedmedailyd.exe"
+  [string]$DaemonOutput = ".\\build\\feedmedailyd.exe",
+  [string]$Version = ""
 )
 
 $go = Get-Command "go" -ErrorAction SilentlyContinue
@@ -32,13 +33,17 @@ foreach ($dir in @($goCacheDir, $goModCacheDir)) {
 
 Push-Location $root
 try {
+  if (-not $Version) {
+    $packageJson = Get-Content (Join-Path $root "web\\package.json") -Raw | ConvertFrom-Json
+    $Version = "$($packageJson.version)".Trim()
+  }
   $env:GOCACHE = $goCacheDir
   $env:GOMODCACHE = $goModCacheDir
-  & go build -ldflags "-H=windowsgui" -o $trayOutputPath .\cmd\feedmedaily-tray
+  & go build -ldflags "-H=windowsgui -X github.com/yyngfive/scirssagent/internal/runtime.buildVersion=$Version" -o $trayOutputPath .\cmd\feedmedaily-tray
   if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
   }
-  & go build -ldflags "-H=windowsgui" -o $daemonOutputPath .\cmd\feedmedailyd
+  & go build -ldflags "-H=windowsgui -X github.com/yyngfive/scirssagent/internal/runtime.buildVersion=$Version" -o $daemonOutputPath .\cmd\feedmedailyd
 }
 finally {
   Pop-Location

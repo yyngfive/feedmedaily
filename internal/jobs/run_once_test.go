@@ -5,14 +5,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/yyngfive/scirssagent/internal/feeds"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
-func TestRunOnceWritesReportAndSummary(t *testing.T) {
+func TestRunOnceBuildsSummaryWithoutDiskReportArtifacts(t *testing.T) {
 	root := t.TempDir()
 	settings := testJobSettings(root)
 	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {
@@ -76,23 +75,11 @@ func TestRunOnceWritesReportAndSummary(t *testing.T) {
 	if summary.Fetched != 1 || summary.Inserted != 1 || summary.Classified != 1 {
 		t.Fatalf("unexpected summary: %#v", summary)
 	}
-	if !strings.HasSuffix(summary.ReportPath, filepath.Join("reports", "latest", "index.html")) {
-		t.Fatalf("unexpected report path: %s", summary.ReportPath)
+	if _, err := os.Stat(filepath.Join(settings.ReportsDir, "data", "latest.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected no latest.json artifact, got err=%v", err)
 	}
-
-	latestJSON, err := os.ReadFile(filepath.Join(settings.ReportsDir, "data", "latest.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(latestJSON), `"title": "Go migrated paper"`) {
-		t.Fatalf("latest json = %s", latestJSON)
-	}
-	publishedIndex, err := os.ReadFile(filepath.Join(settings.ReportsDir, "latest", "index.html"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(publishedIndex), "window.__SCIRSS_REPORT__") {
-		t.Fatalf("published index = %s", publishedIndex)
+	if _, err := os.Stat(filepath.Join(settings.ReportsDir, "latest", "index.html")); !os.IsNotExist(err) {
+		t.Fatalf("expected no static report artifact, got err=%v", err)
 	}
 }
 

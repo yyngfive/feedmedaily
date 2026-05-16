@@ -3,11 +3,12 @@ package trayapp
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/yyngfive/scirssagent/internal/logging"
 )
 
 type App struct {
@@ -69,8 +70,20 @@ func (a *App) MenuState() trayMenuState {
 
 func (a *App) OpenApp() error {
 	// 确保后台服务可用后，用默认浏览器打开本地 UI。
+	_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+		Level:     "info",
+		Component: "tray",
+		Action:    "open_app",
+		Message:   "Opening FeedMeDaily from tray.",
+	})
 	baseURL, err := ensureService(a.layout)
 	if err != nil {
+		_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+			Level:     "error",
+			Component: "tray",
+			Action:    "open_app_failed",
+			Error:     err.Error(),
+		})
 		return err
 	}
 	return OpenBrowser(baseURL)
@@ -78,22 +91,69 @@ func (a *App) OpenApp() error {
 
 func (a *App) StartService() error {
 	// 仅保证后台服务启动，不额外打开浏览器。
+	_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+		Level:     "info",
+		Component: "tray",
+		Action:    "start_service",
+		Message:   "Starting background service from tray.",
+	})
 	_, err := ensureService(a.layout)
+	if err != nil {
+		_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+			Level:     "error",
+			Component: "tray",
+			Action:    "start_service_failed",
+			Error:     err.Error(),
+		})
+	}
 	return err
 }
 
 func (a *App) StopService() error {
 	// 停止本地后台服务，并清理 runtime 状态。
-	return stopService(a.layout)
+	_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+		Level:     "info",
+		Component: "tray",
+		Action:    "stop_service",
+		Message:   "Stopping background service from tray.",
+	})
+	err := stopService(a.layout)
+	if err != nil {
+		_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+			Level:     "error",
+			Component: "tray",
+			Action:    "stop_service_failed",
+			Error:     err.Error(),
+		})
+	}
+	return err
 }
 
 func (a *App) RunSyncNow() error {
 	// 确保服务在运行，然后触发一次“立即同步”。
+	_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+		Level:     "info",
+		Component: "tray",
+		Action:    "run_sync_now",
+		Message:   "Triggering one sync job from tray.",
+	})
 	baseURL, err := ensureService(a.layout)
 	if err != nil {
+		_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+			Level:     "error",
+			Component: "tray",
+			Action:    "run_sync_now_failed",
+			Error:     err.Error(),
+		})
 		return err
 	}
 	if err := triggerSync(baseURL); err != nil {
+		_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+			Level:     "error",
+			Component: "tray",
+			Action:    "run_sync_now_failed",
+			Error:     err.Error(),
+		})
 		return err
 	}
 	return nil
@@ -107,6 +167,16 @@ func (a *App) ToggleScheduleEnabled() (trayMenuState, error) {
 	if err := a.persistSettingsLocked(); err != nil {
 		return trayMenuState{}, err
 	}
+	_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+		Level:     "info",
+		Component: "tray",
+		Action:    "toggle_schedule",
+		Message:   "Updated tray-local daily sync setting.",
+		Data: map[string]any{
+			"enabled":    a.settings.ScheduleEnabled,
+			"daily_time": a.settings.DailyTime,
+		},
+	})
 	return a.currentMenuStateLocked(), nil
 }
 
@@ -122,19 +192,33 @@ func (a *App) ToggleLaunchAtLogin() (trayMenuState, error) {
 	if err := a.persistSettingsLocked(); err != nil {
 		return trayMenuState{}, err
 	}
+	_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+		Level:     "info",
+		Component: "tray",
+		Action:    "toggle_launch_at_login",
+		Message:   "Updated launch-at-login setting.",
+		Data: map[string]any{
+			"enabled": a.settings.LaunchAtLogin,
+		},
+	})
 	return a.currentMenuStateLocked(), nil
 }
 
 func (a *App) OpenTraySettings() error {
-	// 用记事本打开 tray-settings.json，方便手动查看和调试。
+	// 用系统默认处理器打开 tray-settings.json，方便手动查看和调试。
 	if _, err := os.Stat(a.layout.TraySettingsPath); err != nil && os.IsNotExist(err) {
 		if err := a.snapshotSettings().Save(a.layout.TraySettingsPath); err != nil {
 			return err
 		}
 	}
-	cmd := exec.Command("notepad.exe", a.layout.TraySettingsPath)
-	cmd.SysProcAttr = hiddenSysProcAttr()
-	return cmd.Start()
+	_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+		Level:     "info",
+		Component: "tray",
+		Action:    "open_tray_settings",
+		Message:   "Opening tray settings file.",
+		Data:      map[string]any{"path": a.layout.TraySettingsPath},
+	})
+	return OpenPath(a.layout.TraySettingsPath)
 }
 
 func (a *App) OpenDataDir() error {

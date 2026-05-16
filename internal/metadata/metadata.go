@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yyngfive/scirssagent/internal/logging"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
@@ -73,11 +74,13 @@ func AbstractFromOpenAlexInvertedIndex(index map[string][]int) string {
 func EnrichPaper(paper store.Paper) store.Paper {
 	// 只迁 reclassify 所需的 metadata enrich，失败时走本地内容回退。
 	normalizedDOI := NormalizeDOI(stringValue(paper.DOI))
+	externalErrors := []string{}
 	if (paper.AbstractSource == "openalex" || paper.AbstractSource == "crossref") && paper.Abstract != nil && paper.Journal != nil {
 		result := paper
 		if normalizedDOI != "" {
 			result.DOI = stringPtr(normalizedDOI)
 		}
+		logEnrichmentResult(result, normalizedDOI, externalErrors)
 		return result
 	}
 
@@ -86,23 +89,36 @@ func EnrichPaper(paper store.Paper) store.Paper {
 		enriched.DOI = stringPtr(normalizedDOI)
 	}
 
-	if openAlexPaper, ok := enrichWithOpenAlex(enriched); ok && strings.TrimSpace(stringValue(openAlexPaper.Abstract)) != "" {
-		return finalizeEnrichedPaper(paper, openAlexPaper, "openalex")
+	if openAlexPaper, ok, errText := enrichWithOpenAlex(enriched); ok && strings.TrimSpace(stringValue(openAlexPaper.Abstract)) != "" {
+		result := finalizeEnrichedPaper(paper, openAlexPaper, "openalex")
+		logEnrichmentResult(result, normalizedDOI, externalErrors)
+		return result
+	} else if errText != "" {
+		externalErrors = append(externalErrors, "openalex:"+errText)
 	}
-	if crossrefPaper, ok := enrichWithCrossref(enriched); ok && strings.TrimSpace(stringValue(crossrefPaper.Abstract)) != "" {
-		return finalizeEnrichedPaper(paper, crossrefPaper, "crossref")
+	if crossrefPaper, ok, errText := enrichWithCrossref(enriched); ok && strings.TrimSpace(stringValue(crossrefPaper.Abstract)) != "" {
+		result := finalizeEnrichedPaper(paper, crossrefPaper, "crossref")
+		logEnrichmentResult(result, normalizedDOI, externalErrors)
+		return result
+	} else if errText != "" {
+		externalErrors = append(externalErrors, "crossref:"+errText)
 	}
 	if (paper.AbstractSource == "openalex" || paper.AbstractSource == "crossref") && paper.Abstract != nil {
 		result := paper
 		if normalizedDOI != "" {
 			result.DOI = stringPtr(normalizedDOI)
 		}
+		logEnrichmentResult(result, normalizedDOI, externalErrors)
 		return result
 	}
 	if hasAbstractContent(paper) {
-		return finalizeEnrichedPaper(paper, enriched, "rss")
+		result := finalizeEnrichedPaper(paper, enriched, "rss")
+		logEnrichmentResult(result, normalizedDOI, externalErrors)
+		return result
 	}
-	return finalizeEnrichedPaper(paper, enriched, "none")
+	result := finalizeEnrichedPaper(paper, enriched, "none")
+	logEnrichmentResult(result, normalizedDOI, externalErrors)
+	return result
 }
 
 func finalizeEnrichedPaper(original store.Paper, candidate store.Paper, source string) store.Paper {
@@ -139,20 +155,20 @@ func finalizeEnrichedPaper(original store.Paper, candidate store.Paper, source s
 	return result
 }
 
-func enrichWithOpenAlex(paper store.Paper) (store.Paper, bool) {
+func enrichWithOpenAlex(paper store.Paper) (store.Paper, bool, string) {
 	var url string
 	if doi := NormalizeDOI(stringValue(paper.DOI)); doi != "" {
 		url = strings.TrimRight(openAlexBaseURL, "/") + "/works/https://doi.org/" + doi
 	} else {
 		url = strings.TrimRight(openAlexBaseURL, "/") + "/works?search=" + queryEscape(paper.Title) + "&per-page=1"
 	}
-	responseBody, ok := httpGet(url)
+	responseBody, ok, errText := httpGet(url)
 	if !ok {
-		return paper, false
+		return paper, false, errText
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(responseBody, &payload); err != nil {
-		return paper, false
+		return paper, false, err.Error()
 	}
 	work := payload
 	if results, ok := payload["results"].([]any); ok && len(results) > 0 {
@@ -197,25 +213,25 @@ func enrichWithOpenAlex(paper store.Paper) (store.Paper, bool) {
 		result.Abstract = nil
 		result.AbstractSource = "none"
 	}
-	return result, true
+	return result, true, ""
 }
 
-func enrichWithCrossref(paper store.Paper) (store.Paper, bool) {
+func enrichWithCrossref(paper store.Paper) (store.Paper, bool, string) {
 	doi := NormalizeDOI(stringValue(paper.DOI))
 	if doi == "" {
-		return paper, false
+		return paper, false, ""
 	}
-	responseBody, ok := httpGet(strings.TrimRight(crossrefBaseURL, "/") + "/works/" + doi)
+	responseBody, ok, errText := httpGet(strings.TrimRight(crossrefBaseURL, "/") + "/works/" + doi)
 	if !ok {
-		return paper, false
+		return paper, false, errText
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(responseBody, &payload); err != nil {
-		return paper, false
+		return paper, false, err.Error()
 	}
 	message, ok := payload["message"].(map[string]any)
 	if !ok {
-		return paper, false
+		return paper, false, "crossref response missing message object"
 	}
 	journal := stringValue(paper.Journal)
 	if titles, ok := message["container-title"].([]any); ok && len(titles) > 0 {
@@ -234,32 +250,55 @@ func enrichWithCrossref(paper store.Paper) (store.Paper, bool) {
 		result.Abstract = nil
 		result.AbstractSource = "none"
 	}
-	return result, true
+	return result, true, ""
 }
 
 func hasAbstractContent(paper store.Paper) bool {
 	return paper.Abstract != nil || paper.AbstractHTML != nil || len(paper.AbstractImages) > 0
 }
 
-func httpGet(url string) ([]byte, bool) {
+func httpGet(url string) ([]byte, bool, string) {
 	request, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return nil, false
+		return nil, false, err.Error()
 	}
 	request.Header.Set("User-Agent", "SciRSSAgent/0.1")
+	started := time.Now()
 	response, err := metadataHTTPClient.Do(request)
 	if err != nil {
-		return nil, false
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "error",
+			Component: "metadata",
+			Action:    "http_request_failed",
+			Message:   fmt.Sprintf("HTTP Request: GET %s failed", url),
+			Error:     err.Error(),
+			Data: map[string]any{
+				"url":         url,
+				"duration_ms": time.Since(started).Milliseconds(),
+			},
+		})
+		return nil, false, err.Error()
 	}
 	defer response.Body.Close()
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "metadata",
+		Action:    "http_request",
+		Message:   fmt.Sprintf("HTTP Request: GET %s %q", url, response.Proto+" "+response.Status),
+		Data: map[string]any{
+			"url":         url,
+			"status_code": response.StatusCode,
+			"duration_ms": time.Since(started).Milliseconds(),
+		},
+	})
 	if response.StatusCode != http.StatusOK {
-		return nil, false
+		return nil, false, response.Status
 	}
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, false
+		return nil, false, err.Error()
 	}
-	return body, true
+	return body, true, ""
 }
 
 func queryEscape(value string) string {
@@ -297,4 +336,21 @@ func normalizedString(raw any) string {
 		return ""
 	}
 	return value
+}
+
+func logEnrichmentResult(paper store.Paper, normalizedDOI string, externalErrors []string) {
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "metadata",
+		Action:    "abstract_enrichment",
+		Message:   "abstract_enrichment",
+		Data: map[string]any{
+			"paper_key":        PaperKey(paper),
+			"doi_found":        normalizedDOI != "",
+			"abstract_source":  paper.AbstractSource,
+			"abstract_empty":   !hasAbstractContent(paper),
+			"external_errors":  externalErrors,
+			"journal_resolved": strings.TrimSpace(stringValue(paper.Journal)) != "",
+		},
+	})
 }

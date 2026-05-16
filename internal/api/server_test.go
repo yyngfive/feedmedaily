@@ -21,7 +21,7 @@ import (
 
 func TestAppHealthAndMeta(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "pyproject.toml"), "[project]\nversion = \"1.2.3\"\n")
+	writeFile(t, filepath.Join(root, "web", "package.json"), `{"version":"1.2.3"}`)
 
 	settings := testSettings(root)
 	handler := NewServer(settings, nil).Handler()
@@ -84,7 +84,8 @@ func TestStaticFallbackAndAPINotFound(t *testing.T) {
 
 func TestSettingsConfigAPI(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "pyproject.toml"), "[project]\nversion = \"1.2.3\"\n")
+	writeFile(t, filepath.Join(root, "web", "package.json"), `{"version":"1.2.3"}`)
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
 	writeFile(t, filepath.Join(root, "src", "scirssagent", "__init__.py"), "")
 	writeFile(t, filepath.Join(root, ".env"), "SCIRSS_CLASSIFIER_API_KEY=super-secret\n")
 	handler := NewServer(testSettings(root), nil).Handler()
@@ -246,7 +247,7 @@ func TestAdminRunAndReportJobs(t *testing.T) {
 			progress("pipeline.feeds.fetching", "Fetching RSS feeds.")
 			progress("pipeline.metadata.enriching", "Getting metadata for 1 paper(s).")
 			progress("pipeline.classifier.classifying", "Classifying 1 paper(s).")
-			progress("pipeline.report.writing", "Publishing the latest report.")
+			progress("pipeline.report.refreshing", "Refreshing the latest report from SQLite.")
 		}
 		return jobruntime.RunSummary{
 			Fetched:    2,
@@ -254,12 +255,11 @@ func TestAdminRunAndReportJobs(t *testing.T) {
 			Updated:    1,
 			Classified: 1,
 			Errors:     []string{"https://bad.feed/: timeout"},
-			ReportPath: filepath.Join(root, "reports", "latest", "index.html"),
 		}, nil
 	}
 	rebuildLatestReportFunc = func(_ config.Settings, progress jobruntime.ProgressFunc) (int, error) {
 		if progress != nil {
-			progress("pipeline.report.writing", "Publishing the latest report.")
+			progress("pipeline.report.refreshing", "Refreshing the latest report from SQLite.")
 		}
 		return 3, nil
 	}
@@ -451,7 +451,7 @@ func TestProfileProposalApplyRejectAndReclassifyAPI(t *testing.T) {
 	}
 	rebuildLatestReportFunc = func(_ config.Settings, progress jobruntime.ProgressFunc) (int, error) {
 		if progress != nil {
-			progress("pipeline.report.writing", "Publishing the latest report.")
+			progress("pipeline.report.refreshing", "Refreshing the latest report from SQLite.")
 		}
 		return 1, nil
 	}

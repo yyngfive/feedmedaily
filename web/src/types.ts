@@ -3,6 +3,7 @@ export type FeedbackState = "open" | "used";
 export type ProfileProposalState = "pending" | "applied" | "rejected";
 export type ZoteroSaveState = "pending" | "saved" | "error";
 export type FeedSubscription = {
+  client_id?: string;
   journal: string;
   url: string;
 };
@@ -45,10 +46,12 @@ export type AppMeta = {
   version: string;
   mode: string;
   install_dir: string;
+  config_dir?: string;
   data_dir: string;
   logs_dir: string;
   reports_dir: string;
   static_dir: string;
+  tray_settings_path?: string | null;
   server_url?: string | null;
   scheduler_task_name: string;
   update_manifest_url?: string | null;
@@ -94,7 +97,9 @@ export type SchedulerSettings = {
   installed: boolean;
   task_name: string;
   mode: string;
+  scheduler_backend?: string | null;
   scheduled_time?: string | null;
+  settings_path?: string | null;
   state?: string | null;
   next_run_time?: string | null;
   last_run_time?: string | null;
@@ -261,6 +266,8 @@ export type JobInfo = {
   message_key?: string | null;
   message?: string | null;
   error?: string | null;
+  log_path?: string | null;
+  warning_count?: number;
   result?: Record<string, unknown> | null;
   created_at: string;
   started_at?: string | null;

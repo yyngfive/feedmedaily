@@ -226,7 +226,7 @@ export function AdminPanel({
                       Logs: <code>{appMeta.logs_dir}</code>
                     </p>
                     <p className="mt-1 break-all text-sm text-muted">
-                      Reports: <code>{appMeta.reports_dir}</code>
+                      Config: <code>{appMeta.config_dir ?? "Unavailable"}</code>
                     </p>
                   </div>
                 </div>
@@ -288,8 +288,8 @@ export function AdminPanel({
                 <div>
                   <h3 className="text-sm font-semibold text-(--ink)">Scheduled sync</h3>
                   <p className="mt-1 text-sm leading-6 text-muted">
-                    FeedMeDaily can use Windows Task Scheduler to run the daily fetch and classify
-                    cycle even when the app is closed.
+                    FeedMeDaily currently uses the tray app's local daily sync settings to run the
+                    fetch and classify cycle when the tray is available.
                   </p>
                 </div>
               </div>
@@ -307,7 +307,7 @@ export function AdminPanel({
                   {scheduler?.installed ? (
                     <>
                       <p className="text-(--ink)">
-                        Installed as <span className="font-semibold">{scheduler.task_name}</span>
+                        Enabled as <span className="font-semibold">{scheduler.task_name}</span>
                       </p>
                       <p className="mt-1 text-muted">State: {scheduler.state ?? "Unknown"}</p>
                       <p className="mt-1 text-muted">
@@ -325,7 +325,7 @@ export function AdminPanel({
                     </>
                   ) : (
                     <p className="text-muted">
-                      No Windows scheduler task is installed yet.
+                      Daily sync is currently disabled.
                     </p>
                   )}
                 </div>
@@ -336,7 +336,7 @@ export function AdminPanel({
                   size="sm"
                   onPress={() => void onSaveScheduler(schedulerTime)}
                 >
-                  {schedulerSaving ? "Saving..." : scheduler?.installed ? "Update task" : "Create task"}
+                  {schedulerSaving ? "Saving..." : scheduler?.installed ? "Update daily sync" : "Enable daily sync"}
                 </Button>
                 <Button
                   isDisabled={schedulerSaving || !scheduler?.installed}
@@ -387,7 +387,7 @@ export function AdminPanel({
                     </tr>
                   ) : (
                     feeds.map((item, index) => (
-                      <tr key={`${item.url}-${index}`} className="border-t border-(--line)">
+                      <tr key={item.client_id ?? String(index)} className="border-t border-(--line)">
                         <td className="px-3 py-2 align-top">
                           <Input
                             aria-label={`Feed name ${index + 1}`}

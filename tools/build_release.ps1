@@ -82,12 +82,12 @@ function Remove-BuildArtifacts {
 }
 
 function Get-ProjectVersion {
-  $content = Get-Content (Join-Path $root "pyproject.toml") -Raw
-  $match = [regex]::Match($content, '(?m)^version\s*=\s*"([^"]+)"')
-  if (-not $match.Success) {
-    throw "Failed to read version from pyproject.toml."
+  $packageJsonPath = Join-Path $root "web\\package.json"
+  $packageJson = Get-Content $packageJsonPath -Raw | ConvertFrom-Json
+  if (-not $packageJson.version) {
+    throw "Failed to read version from web/package.json."
   }
-  return $match.Groups[1].Value.Trim()
+  return "$($packageJson.version)".Trim()
 }
 
 function Write-UpdateManifest {
@@ -122,7 +122,7 @@ try {
   if (Test-Path $trayBuildScript) {
     Invoke-NativeStep `
       -Description "Go tray build" `
-      -Command { & $trayBuildScript }
+      -Command { & $trayBuildScript -Version $projectVersion }
   }
 
   New-Item -ItemType Directory -Force -Path $appDist | Out-Null

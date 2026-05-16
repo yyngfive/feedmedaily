@@ -54,14 +54,11 @@ const (
 const (
 	menuOpenApp uint16 = 1001 + iota
 	menuRunSync
-	menuStartService
-	menuStopService
 	menuToggleSchedule
 	menuLaunchAtLogin
 	menuOpenTraySettings
 	menuOpenDataDir
 	menuOpenLogsDir
-	menuQuitAndStopService
 	menuQuit
 )
 
@@ -320,10 +317,6 @@ func (t *windowsTray) handleCommand(commandID uint16) {
 		t.runAction(func() error { return t.app.OpenApp() }, "Opened FeedMeDaily.", "Open FeedMeDaily failed")
 	case menuRunSync:
 		t.runAction(func() error { return t.app.RunSyncNow() }, "Sync job started.", "Run sync failed")
-	case menuStartService:
-		t.runAction(func() error { return t.app.StartService() }, "Background service started.", "Start service failed")
-	case menuStopService:
-		t.runAction(func() error { return t.app.StopService() }, "Background service stopped.", "Stop service failed")
 	case menuToggleSchedule:
 		go func() {
 			state, err := t.app.ToggleScheduleEnabled()
@@ -356,16 +349,8 @@ func (t *windowsTray) handleCommand(commandID uint16) {
 		t.runAction(func() error { return t.app.OpenDataDir() }, "Opened data directory.", "Open data directory failed")
 	case menuOpenLogsDir:
 		t.runAction(func() error { return t.app.OpenLogsDir() }, "Opened logs directory.", "Open logs directory failed")
-	case menuQuitAndStopService:
-		go func() {
-			if err := t.app.StopService(); err != nil {
-				t.ShowError("FeedMeDaily Tray", "Stop service failed: "+err.Error())
-				return
-			}
-			t.requestQuit()
-		}()
 	case menuQuit:
-		t.requestQuit()
+		t.requestQuitAndStopService()
 	}
 }
 
@@ -393,9 +378,6 @@ func (t *windowsTray) showContextMenu() {
 	state := t.app.MenuState()
 	_ = appendMenu(menu, mfString, uintptr(menuOpenApp), "Open FeedMeDaily")
 	_ = appendMenu(menu, mfString, uintptr(menuRunSync), "Run Sync Now")
-	_ = appendMenu(menu, mfSeparator, 0, "")
-	_ = appendMenu(menu, mfString, uintptr(menuStartService), "Start Background Service")
-	_ = appendMenu(menu, mfString, uintptr(menuStopService), "Stop Background Service")
 
 	scheduleFlags := uint32(mfString)
 	if state.ScheduleEnabled {
@@ -413,8 +395,7 @@ func (t *windowsTray) showContextMenu() {
 	_ = appendMenu(menu, mfString, uintptr(menuOpenDataDir), "Open Data Folder")
 	_ = appendMenu(menu, mfString, uintptr(menuOpenLogsDir), "Open Logs Folder")
 	_ = appendMenu(menu, mfSeparator, 0, "")
-	_ = appendMenu(menu, mfString, uintptr(menuQuitAndStopService), "Quit Tray And Stop Service")
-	_ = appendMenu(menu, mfString, uintptr(menuQuit), "Quit Tray")
+	_ = appendMenu(menu, mfString, uintptr(menuQuit), "Quit Tray And Stop Service")
 
 	var cursor point
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
@@ -509,6 +490,16 @@ func registerWindowMessage(name string) uint32 {
 func (t *windowsTray) requestQuit() {
 	// 通过给隐藏窗口发关闭消息来结束托盘循环。
 	procPostMessageW.Call(t.hwnd, wmClose, 0, 0)
+}
+
+func (t *windowsTray) requestQuitAndStopService() {
+	// 关闭托盘时统一收掉后台服务，避免留下孤儿进程。
+	go func() {
+		if err := t.app.StopService(); err != nil {
+			t.ShowError("FeedMeDaily Tray", "Stop service failed: "+err.Error())
+		}
+		t.requestQuit()
+	}()
 }
 
 func appendMenu(menu uintptr, flags uint32, itemID uintptr, label string) error {

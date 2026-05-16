@@ -188,7 +188,7 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 - `runtime.json` 被写入
 - `/api/app/meta` 返回 `process_running = true`
 
-### 6.1.2 只重建最新报告
+### 6.1.2 重新组装最新报告摘要
 
 ```powershell
 go run .\cmd\feedmedailyd --root . --report-latest
@@ -202,10 +202,6 @@ go run .\cmd\feedmedailyd --root . --report-latest
 ```json
 {"report_papers": 0}
 ```
-
-同时检查：
-
-- [reports/data/latest.json](D:/Codes/Projects/SciRSSAgent/reports/data/latest.json) 已刷新
 
 ### 6.1.3 跑一次完整同步
 
@@ -234,7 +230,7 @@ go run .\cmd\feedmedailyd --root . --run-once --max-papers 10 --reclassify
   - `updated`
   - `classified`
   - `errors`
-  - `report_path`
+  - 不再包含任何 report 磁盘路径
 
 ### 6.1.4 Zotero collections
 
@@ -348,7 +344,7 @@ go run .\cmd\feedmedaily-tray --root .
 
 说明：
 
-当前迁移分支的 scheduler 实际落在本地 tray 设置，而不是最终产品级调度服务。UI 某些文案仍可能写着 Task Scheduler，这属于已知过渡现象。
+当前迁移分支的 scheduler 实际落在本地 tray 设置，而不是 Windows Task Scheduler。UI 和测试都应以 tray-local daily sync 为准。
 
 ## 7. HTTP API 手工测试
 
@@ -383,7 +379,7 @@ Invoke-RestMethod "$base/api/app/meta"
 - `install_dir`
 - `data_dir`
 - `logs_dir`
-- `reports_dir`
+- `config_dir`
 - `process_running = true`
 
 ### 7.1.3 `GET /api/app/update`
@@ -408,7 +404,6 @@ Invoke-RestMethod "$base/api/app/open" -Method Post -ContentType "application/js
 也可以测试这些 target：
 
 - `logs_dir`
-- `reports_dir`
 - `install_dir`
 - `server_url`
 - `download_url`
@@ -810,7 +805,7 @@ Invoke-RestMethod "$base/api/admin/jobs/$($job.id)"
   - fetching
   - metadata
   - classifying
-  - report writing
+  - report refreshing
 - 完成后主列表出现论文
 
 ## 8.6 论文阅读动作
@@ -885,7 +880,7 @@ Invoke-RestMethod "$base/api/admin/jobs/$($job.id)"
 - proposal 状态变 `applied`
 - 当前 profile 文档刷新
 - 关联 paper 被重新分类
-- report 刷新
+- report 摘要刷新
 
 ## 8.11 Reject proposal
 
@@ -912,7 +907,7 @@ Invoke-RestMethod "$base/api/admin/jobs/$($job.id)"
 预期结果：
 
 - 每次都会产生新的 reclassify job
-- job 完成后 report 刷新
+- job 完成后 report 摘要刷新
 
 ## 8.13 Save to Zotero
 
@@ -939,7 +934,6 @@ Invoke-RestMethod "$base/api/admin/jobs/$($job.id)"
 
 - 打开 data folder
 - 打开 logs folder
-- 打开 reports folder
 - 打开 install dir
 - 检查 update 状态
 
@@ -949,20 +943,17 @@ Invoke-RestMethod "$base/api/admin/jobs/$($job.id)"
 
 ## 9. 输出文件和状态文件检查
 
-这些检查非常适合确认“动作确实落盘了”：
+这些检查主要用于确认本地状态确实落盘了：
 
 - [data/literature.sqlite](D:/Codes/Projects/SciRSSAgent/data/literature.sqlite)
 - [data/rss_feeds.json](D:/Codes/Projects/SciRSSAgent/data/rss_feeds.json)
 - [data/classification_profile.json](D:/Codes/Projects/SciRSSAgent/data/classification_profile.json)
-- [reports/data/latest.json](D:/Codes/Projects/SciRSSAgent/reports/data/latest.json)
-- [reports/latest/index.html](D:/Codes/Projects/SciRSSAgent/reports/latest/index.html)
 - [tray-settings.json](D:/Codes/Projects/SciRSSAgent/tray-settings.json)
 
 典型对应关系：
 
 - 保存 feeds 后看 `rss_feeds.json`
 - apply proposal 后看 `classification_profile.json`
-- run/reclassify/report latest 后看 `reports/data/latest.json`
 - scheduler 改动后看 `tray-settings.json`
 
 ## 10. 常见失败现象与判断
@@ -1092,7 +1083,7 @@ Get-Content .\dist\update.json
 - `FeedMeDailyTray.exe` 存在
 - `feedmedailyd.exe` 存在
 - `web/dist` 已复制进去
-- `update.json` 的 `version` 与 `pyproject.toml` 一致
+- `update.json` 的 `version` 与 `web/package.json` 一致
 
 ## 12.3 构建完整安装包
 
@@ -1113,7 +1104,7 @@ Get-ChildItem .\dist\installer
 
 预期至少有一个类似文件：
 
-- `FeedMeDaily-v0.1.0.exe`
+- `FeedMeDaily-v0.2.0.exe`
 
 如果没有安装器但前面 release 目录有了，常见原因是：
 
@@ -1147,7 +1138,7 @@ Get-Item .\dist\installer\FeedMeDaily-*.exe | Select-Object Name,Length,LastWrit
 或者 PowerShell：
 
 ```powershell
-Start-Process .\dist\installer\FeedMeDaily-v0.1.0.exe
+Start-Process .\dist\installer\FeedMeDaily-v0.2.0.exe
 ```
 
 预期结果：

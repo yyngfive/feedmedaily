@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 )
 
 const (
@@ -23,9 +25,10 @@ const (
 )
 
 var (
-	shell32Runtime    = syscall.NewLazyDLL("shell32.dll")
-	procShellExecuteW = shell32Runtime.NewProc("ShellExecuteW")
-	lookPath          = exec.LookPath
+	shell32Runtime     = syscall.NewLazyDLL("shell32.dll")
+	procShellExecuteW  = shell32Runtime.NewProc("ShellExecuteW")
+	lookPath           = exec.LookPath
+	ensureSourceBinary = appruntime.EnsureSourceBinary
 )
 
 type RuntimeState struct {
@@ -208,6 +211,7 @@ func launchDetached(command []string, cwd string) (int, error) {
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stdoutFile
 	cmd.Stdin = stdinFile
+	cmd.Env = append(os.Environ(), "FEEDMEDAILY_LAUNCHED_BY_TRAY=1")
 	cmd.SysProcAttr = hiddenSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		return 0, err
@@ -268,11 +272,13 @@ func backendCommand(layout Layout, port int) ([]string, error) {
 		return nil, errors.New("go backend executable not found: expected feedmedailyd.exe in the app directory")
 	}
 
-	if goPath, err := lookPath("go"); err == nil {
+	if _, err := lookPath("go"); err == nil {
+		binaryPath, err := ensureSourceBinary(layout.RootDir, "./cmd/feedmedailyd", "feedmedailyd.exe")
+		if err != nil {
+			return nil, err
+		}
 		return []string{
-			goPath,
-			"run",
-			"./cmd/feedmedailyd",
+			binaryPath,
 			"--root",
 			layout.RootDir,
 			"--host",

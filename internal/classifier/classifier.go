@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yyngfive/scirssagent/internal/logging"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
@@ -58,6 +59,16 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return nil, fmt.Errorf("SCIRSS_CLASSIFIER_API_KEY is required for classification.")
 	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "classifier",
+		Action:    "batch_started",
+		Message:   fmt.Sprintf("Classifying batch of %d paper(s)", len(papers)),
+		Data: map[string]any{
+			"model": cfg.Model,
+			"items": len(papers),
+		},
+	})
 	indexed := make([]promptPaper, 0, len(papers))
 	for index, paper := range papers {
 		indexed = append(indexed, promptPaper{
@@ -84,7 +95,7 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 	var decoded map[string]any
 	lastContent := ""
 	for range 2 {
-		content, err := requestJSONContent(cfg, payload)
+		content, err := requestJSONContent(cfg, payload, "classification")
 		if err != nil {
 			return nil, err
 		}
@@ -130,6 +141,16 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 		}
 	}
 	if len(missingTitles) > 0 {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "info",
+			Component: "classifier",
+			Action:    "translation_fallback_started",
+			Message:   fmt.Sprintf("Translating %d missing title(s)", len(missingTitles)),
+			Data: map[string]any{
+				"model": cfg.Model,
+				"items": len(missingTitles),
+			},
+		})
 		translations, err := TranslateTitlesBatch(missingTitles, cfg)
 		if err != nil {
 			return nil, err
@@ -158,6 +179,18 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 	if len(missingIDs) > 0 {
 		return nil, fmt.Errorf("batch response missing papers: %s", strings.Join(missingIDs, ", "))
 	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "classifier",
+		Action:    "batch_completed",
+		Message:   fmt.Sprintf("Classified %d paper(s)", len(results)),
+		Data: map[string]any{
+			"model":          cfg.Model,
+			"items":          len(results),
+			"translated":     len(missingTitles),
+			"missing_titles": len(missingTitles),
+		},
+	})
 	return results, nil
 }
 
@@ -174,7 +207,7 @@ func TranslateTitlesBatch(papers []promptPaper, cfg LLMConfig) (map[string]strin
 		"response_format": map[string]string{"type": "json_object"},
 		"thinking":        map[string]string{"type": "disabled"},
 	}
-	content, err := requestJSONContent(cfg, payload)
+	content, err := requestJSONContent(cfg, payload, "title_translation")
 	if err != nil {
 		return nil, err
 	}
@@ -202,22 +235,48 @@ func TranslateTitlesBatch(papers []promptPaper, cfg LLMConfig) (map[string]strin
 	return translations, nil
 }
 
-func requestJSONContent(cfg LLMConfig, payload map[string]any) (string, error) {
+func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string) (string, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("encode classifier request: %w", err)
 	}
-	request, err := http.NewRequest(http.MethodPost, strings.TrimRight(cfg.BaseURL, "/")+"/chat/completions", bytes.NewReader(body))
+	endpoint := strings.TrimRight(cfg.BaseURL, "/") + "/chat/completions"
+	request, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("build classifier request: %w", err)
 	}
 	request.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	request.Header.Set("Content-Type", "application/json")
+	started := time.Now()
 	response, err := classifierHTTPClient.Do(request)
 	if err != nil {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "error",
+			Component: "classifier",
+			Action:    operation + "_request_failed",
+			Message:   fmt.Sprintf("LLM Request: POST %s failed", endpoint),
+			Error:     err.Error(),
+			Data: map[string]any{
+				"model":       cfg.Model,
+				"operation":   operation,
+				"duration_ms": time.Since(started).Milliseconds(),
+			},
+		})
 		return "", fmt.Errorf("request classifier: %w", err)
 	}
 	defer response.Body.Close()
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "classifier",
+		Action:    operation + "_request",
+		Message:   fmt.Sprintf("LLM Request: POST %s %q", endpoint, response.Proto+" "+response.Status),
+		Data: map[string]any{
+			"model":       cfg.Model,
+			"operation":   operation,
+			"status_code": response.StatusCode,
+			"duration_ms": time.Since(started).Milliseconds(),
+		},
+	})
 	responseBody, err := io.ReadAll(response.Body)
 	if err != nil {
 		return "", fmt.Errorf("read classifier response: %w", err)

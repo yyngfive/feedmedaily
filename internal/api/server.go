@@ -15,6 +15,7 @@ import (
 	"github.com/yyngfive/scirssagent/internal/config"
 	"github.com/yyngfive/scirssagent/internal/feeds"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
+	"github.com/yyngfive/scirssagent/internal/logging"
 	"github.com/yyngfive/scirssagent/internal/profile"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
@@ -42,6 +43,7 @@ var (
 
 func NewServer(settings config.Settings, shutdown func()) *Server {
 	// 用当前解析好的 settings 创建一个可挂到 net/http 上的 API 服务器。
+	logging.SetDefaultDir(settings.LogsDir)
 	return &Server{
 		settings: settings,
 		version:  appruntime.PackageVersion(settings.RootDir),
@@ -136,10 +138,12 @@ func (s *Server) handleAppMeta(w http.ResponseWriter, r *http.Request) {
 		"version":             s.version,
 		"mode":                s.settings.Mode,
 		"install_dir":         s.settings.AppDir,
+		"config_dir":          s.settings.ConfigDir,
 		"data_dir":            s.settings.DataDir,
 		"logs_dir":            s.settings.LogsDir,
 		"reports_dir":         s.settings.ReportsDir,
 		"static_dir":          s.settings.WebDistDir,
+		"tray_settings_path":  filepath.Join(s.settings.ConfigDir, "tray-settings.json"),
 		"server_url":          requestBaseURL(r),
 		"scheduler_task_name": appruntime.SchedulerTaskName,
 		"update_manifest_url": updateManifestURL,
@@ -278,7 +282,7 @@ func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, schedulerResponse(settings, s.settings.Mode, strings.Join(command, " ")))
+		writeJSON(w, http.StatusOK, schedulerResponse(settings, s.settings.Mode, path, strings.Join(command, " ")))
 	case http.MethodPut:
 		var payload struct {
 			DailyTime string `json:"daily_time"`
@@ -308,7 +312,7 @@ func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, schedulerResponse(settings, s.settings.Mode, strings.Join(command, " ")))
+		writeJSON(w, http.StatusOK, schedulerResponse(settings, s.settings.Mode, path, strings.Join(command, " ")))
 	case http.MethodDelete:
 		settings, err := appruntime.LoadTraySchedulerSettings(path)
 		if err != nil {
@@ -325,7 +329,7 @@ func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, schedulerResponse(settings, s.settings.Mode, strings.Join(command, " ")))
+		writeJSON(w, http.StatusOK, schedulerResponse(settings, s.settings.Mode, path, strings.Join(command, " ")))
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed.")
@@ -372,6 +376,7 @@ func (s *Server) handleProfileBootstrap(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	job := launchLocalJob(
+		s.settings.LogsDir,
 		"profile-bootstrap",
 		"profile.bootstrap.queued",
 		"Queued initial profile generation.",
@@ -484,6 +489,7 @@ func (s *Server) handleProfileProposalGenerate(w http.ResponseWriter, r *http.Re
 		return
 	}
 	job := launchLocalJob(
+		s.settings.LogsDir,
 		"profile-proposal",
 		"",
 		"",
@@ -857,6 +863,7 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	job := launchLocalJob(
+		s.settings.LogsDir,
 		"run",
 		"job.started",
 		"Job queued.",
@@ -868,12 +875,11 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 				return nil, err
 			}
 			return map[string]any{
-				"fetched":     summary.Fetched,
-				"inserted":    summary.Inserted,
-				"updated":     summary.Updated,
-				"classified":  summary.Classified,
-				"errors":      summary.Errors,
-				"report_path": summary.ReportPath,
+				"fetched":    summary.Fetched,
+				"inserted":   summary.Inserted,
+				"updated":    summary.Updated,
+				"classified": summary.Classified,
+				"errors":     summary.Errors,
 			}, nil
 		},
 	)
@@ -908,6 +914,7 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	job := launchLocalJob(
+		s.settings.LogsDir,
 		"reclassify",
 		"job.started",
 		"Job queued.",
@@ -938,16 +945,17 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminReportLatest(w http.ResponseWriter, r *http.Request) {
-	// 用 Go 本地 report rebuild 重新写 latest.json 和静态报告目录。
+	// 从 SQLite 重新组装 latest report 摘要，不再写磁盘 report 产物。
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	job := launchLocalJob(
+		s.settings.LogsDir,
 		"report",
 		"job.started",
 		"Job queued.",
-		"pipeline.report.writing",
-		"Publishing the latest report.",
+		"pipeline.report.refreshing",
+		"Refreshing the latest report from SQLite.",
 		func(progress func(string, string)) (map[string]any, error) {
 			reportCount, err := rebuildLatestReportFunc(s.settings, progress)
 			if err != nil {
@@ -1227,18 +1235,20 @@ func resolveAppOpenTarget(settings config.Settings, target string, serverURL str
 	return resolved, nil
 }
 
-func schedulerResponse(settings appruntime.TraySchedulerSettings, mode string, command string) map[string]any {
+func schedulerResponse(settings appruntime.TraySchedulerSettings, mode string, settingsPath string, command string) map[string]any {
 	// 把托盘本地调度设置转成前端现有 scheduler API 的响应格式。
 	response := map[string]any{
-		"installed":      settings.ScheduleEnabled,
-		"task_name":      appruntime.SchedulerTaskName,
-		"mode":           mode,
-		"scheduled_time": settings.DailyTime,
-		"command":        command,
-		"state":          nil,
-		"next_run_time":  nil,
-		"last_run_time":  nil,
-		"last_result":    nil,
+		"installed":         settings.ScheduleEnabled,
+		"task_name":         appruntime.SchedulerTaskName,
+		"mode":              mode,
+		"scheduler_backend": "tray_local",
+		"scheduled_time":    settings.DailyTime,
+		"settings_path":     settingsPath,
+		"command":           command,
+		"state":             nil,
+		"next_run_time":     nil,
+		"last_run_time":     nil,
+		"last_result":       nil,
 	}
 	if settings.ScheduleEnabled {
 		response["state"] = "Enabled"

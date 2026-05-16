@@ -29,15 +29,11 @@ func TestTrayLaunchCommandReleaseUsesPackagedTray(t *testing.T) {
 	}
 }
 
-func TestTrayLaunchCommandSourceFallsBackToGoRun(t *testing.T) {
-	restore := replaceTrayLookPath(func(name string) (string, error) {
-		if name == "go" {
-			return `C:\Go\bin\go.exe`, nil
-		}
-		return "", errors.New("not found")
+func TestTrayLaunchCommandSourceUsesBuiltBinary(t *testing.T) {
+	restore := replaceEnsureTrayBinary(func(root string, packagePath string, outputName string) (string, error) {
+		return filepath.Join(root, ".tmp", "runtime-bin", outputName), nil
 	})
 	defer restore()
-
 	root := t.TempDir()
 	writeRuntimeTestFile(t, filepath.Join(root, "pyproject.toml"))
 	writeRuntimeTestFile(t, filepath.Join(root, "src", "scirssagent", "__init__.py"))
@@ -47,9 +43,7 @@ func TestTrayLaunchCommandSourceFallsBackToGoRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		`C:\Go\bin\go.exe`,
-		"run",
-		"./cmd/feedmedaily-tray",
+		filepath.Join(root, ".tmp", "runtime-bin", "feedmedaily-tray.exe"),
 		"--root",
 		root,
 	}
@@ -59,12 +53,13 @@ func TestTrayLaunchCommandSourceFallsBackToGoRun(t *testing.T) {
 }
 
 func TestTrayLaunchCommandErrorsWhenNothingCanLaunch(t *testing.T) {
-	restore := replaceTrayLookPath(func(string) (string, error) {
+	restore := replaceEnsureTrayBinary(func(string, string, string) (string, error) {
 		return "", errors.New("not found")
 	})
 	defer restore()
 
 	root := t.TempDir()
+	writeRuntimeTestFile(t, filepath.Join(root, "pyproject.toml"))
 	_, _, err := trayLaunchCommand(root)
 	if err == nil || !strings.Contains(err.Error(), "tray launcher not found") {
 		t.Fatalf("err = %v", err)
@@ -81,10 +76,10 @@ func writeRuntimeTestFile(t *testing.T, path string) {
 	}
 }
 
-func replaceTrayLookPath(next func(string) (string, error)) func() {
-	previous := trayLookPath
-	trayLookPath = next
+func replaceEnsureTrayBinary(next func(string, string, string) (string, error)) func() {
+	previous := ensureTrayBinary
+	ensureTrayBinary = next
 	return func() {
-		trayLookPath = previous
+		ensureTrayBinary = previous
 	}
 }

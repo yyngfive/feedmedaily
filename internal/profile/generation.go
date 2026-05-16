@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/yyngfive/scirssagent/internal/config"
+	"github.com/yyngfive/scirssagent/internal/logging"
 )
 
 type FeedbackProposalContext struct {
@@ -35,6 +36,16 @@ var requestProfileModelJSONFunc = requestProfileModelJSON
 
 func GenerateInitialProfileProposal(settings config.Settings, interestDescription string, name *string) (ProposalDraft, error) {
 	// 生成初始 classification profile proposal，并返回待落库的数据草稿。
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "profile",
+		Action:    "bootstrap_started",
+		Message:   "Generating initial classification profile proposal.",
+		Data: map[string]any{
+			"has_name":                 name != nil && strings.TrimSpace(*name) != "",
+			"interest_description_len": len(strings.TrimSpace(interestDescription)),
+		},
+	})
 	prompt := strings.TrimSpace(fmt.Sprintf(`
 Build a complete scientific-literature classification profile from the user's
 research interests.
@@ -91,7 +102,7 @@ Required JSON shape:
 		ProposedProfile: proposedProfile,
 		RuleDelta:       ruleDeltaMap,
 		Model:           settings.ProfileModel,
-	}, nil
+	}, logInitialProposalCompleted(summary, proposedDocument, settings.ProfileModel)
 }
 
 func GenerateProfileProposal(settings config.Settings, current map[string]any, feedbackItems []FeedbackProposalContext) (ProposalDraft, error) {
@@ -99,6 +110,13 @@ func GenerateProfileProposal(settings config.Settings, current map[string]any, f
 	if len(feedbackItems) == 0 {
 		return ProposalDraft{}, fmt.Errorf("no feedback is available for profile proposal generation")
 	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "profile",
+		Action:    "proposal_started",
+		Message:   fmt.Sprintf("Generating profile proposal from %d feedback item(s)", len(feedbackItems)),
+		Data:      map[string]any{"feedback_items": len(feedbackItems)},
+	})
 	currentDocument, err := parseDocumentMap(current)
 	if err != nil {
 		return ProposalDraft{}, err
@@ -177,13 +195,25 @@ Required JSON shape:
 	for _, item := range feedbackItems {
 		sourceFeedbackIDs = append(sourceFeedbackIDs, item.FeedbackID)
 	}
-	return ProposalDraft{
+	draft := ProposalDraft{
 		Summary:           ruleDelta.Summary,
 		ProposedProfile:   proposedProfile,
 		RuleDelta:         ruleDeltaMap,
 		Model:             settings.ProfileModel,
 		SourceFeedbackIDs: sourceFeedbackIDs,
-	}, nil
+	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "profile",
+		Action:    "proposal_completed",
+		Message:   "Generated profile proposal.",
+		Data: map[string]any{
+			"feedback_items": len(feedbackItems),
+			"model":          settings.ProfileModel,
+			"summary":        ruleDelta.Summary,
+		},
+	})
+	return draft, nil
 }
 
 func requestProfileModelJSON(settings config.Settings, systemPrompt string, userPrompt string, maxTokens int) (string, error) {
@@ -215,11 +245,34 @@ func requestProfileModelJSON(settings config.Settings, systemPrompt string, user
 	}
 	request.Header.Set("Authorization", "Bearer "+settings.ProfileAPIKey)
 	request.Header.Set("Content-Type", "application/json")
+	started := time.Now()
 	response, err := (&http.Client{Timeout: 60 * time.Second}).Do(request)
 	if err != nil {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "error",
+			Component: "profile",
+			Action:    "request_failed",
+			Message:   fmt.Sprintf("LLM Request: POST %s failed", endpoint),
+			Error:     err.Error(),
+			Data: map[string]any{
+				"model":       settings.ProfileModel,
+				"duration_ms": time.Since(started).Milliseconds(),
+			},
+		})
 		return "", fmt.Errorf("request profile generation: %w", err)
 	}
 	defer response.Body.Close()
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "profile",
+		Action:    "request",
+		Message:   fmt.Sprintf("LLM Request: POST %s %q", endpoint, response.Proto+" "+response.Status),
+		Data: map[string]any{
+			"model":       settings.ProfileModel,
+			"status_code": response.StatusCode,
+			"duration_ms": time.Since(started).Milliseconds(),
+		},
+	})
 	responseBody, err := io.ReadAll(response.Body)
 	if err != nil {
 		return "", fmt.Errorf("read profile generation response: %w", err)
@@ -329,6 +382,23 @@ Malformed draft:
 	return ValidateModelProposalDeltaText(content, "Generated profile proposal.")
 }
 
+func logInitialProposalCompleted(summary string, document profileDocument, model string) error {
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "profile",
+		Action:    "bootstrap_completed",
+		Message:   "Generated initial classification profile proposal.",
+		Data: map[string]any{
+			"model":        model,
+			"summary":      summary,
+			"topic_tags":   len(document.TopicTaxonomy),
+			"few_shots":    len(document.FewShots),
+			"profile_name": document.Meta.Name,
+		},
+	})
+	return nil
+}
+
 func compactProfileContract() string {
 	return `{
   "meta": {
@@ -384,14 +454,14 @@ func feedbackPromptPayload(items []FeedbackProposalContext) []map[string]any {
 	payload := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		payload = append(payload, map[string]any{
-			"feedback_id":          item.FeedbackID,
-			"paper_id":             item.PaperID,
-			"paper_title":          item.PaperTitle,
-			"journal":              item.Journal,
-			"abstract":             item.Abstract,
-			"original_relevance":   item.OriginalRelevance,
-			"corrected_relevance":  item.CorrectedRelevance,
-			"note":                 item.Note,
+			"feedback_id":         item.FeedbackID,
+			"paper_id":            item.PaperID,
+			"paper_title":         item.PaperTitle,
+			"journal":             item.Journal,
+			"abstract":            item.Abstract,
+			"original_relevance":  item.OriginalRelevance,
+			"corrected_relevance": item.CorrectedRelevance,
+			"note":                item.Note,
 		})
 	}
 	return payload
@@ -569,4 +639,3 @@ func stringPointer(value string) *string {
 	clean := value
 	return &clean
 }
-

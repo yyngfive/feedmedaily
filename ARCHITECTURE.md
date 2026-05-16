@@ -23,9 +23,7 @@ FeedMeDaily is the public Windows release name for this single-user literature t
 - `data/rss_feeds.json`: structured RSS feed subscriptions used by the app
 - `data/literature.sqlite`: local paper database
 - `data/classification_profile.json`: active user classification profile (local only, Git-ignored)
-- `reports/data/latest.json`: latest published report snapshot
-- `reports/latest/index.html`: static report entrypoint
-- `logs/YYYY-MM-DD.log`: daily run logs
+- `logs/YYYY-MM-DD.log`: daily run logs in the legacy readable text format
 
 The production path is:
 
@@ -35,9 +33,9 @@ The production path is:
 4. Papers that need classification are enriched with metadata.
 5. The classifier model scores papers against the active `data/classification_profile.json`.
 6. Classifications, feedback, profile proposals, and Zotero save state are persisted in SQLite.
-7. Report payloads are written to `reports/data/latest.json`.
-8. `feedmedailyd` serves the built React app from `web/dist` and exposes JSON APIs for the UI.
-9. On the Go migration path, read-only report/profile/feedback/proposal APIs can now be rebuilt directly from SQLite and the profile JSON instead of only replaying report snapshots.
+7. `feedmedailyd` serves the built React app from `web/dist` and exposes JSON APIs for the UI.
+8. The latest report is assembled from SQLite through `/api/report/latest`.
+9. On the Go migration path, read-only report/profile/feedback/proposal APIs can now be rebuilt directly from SQLite and the profile JSON instead of replaying disk report snapshots.
 10. On the current Go migration branch, report/profile/feedback/proposal reads, local-state writes, feed fetching/parsing, full `run --once`, reclassify/classifier execution, profile bootstrap/proposal generation, and Zotero collection/save flows all run inside Go.
 
 ## Runtime Surfaces
@@ -81,13 +79,13 @@ It currently owns the compatibility boundary, local-state write paths, and the f
 - `/api/profile/proposals/{id}/reject` via Go-side SQLite write
 - `/api/zotero/collections` via Go-side Zotero Web API integration
 - `/api/zotero/save/{paper_id}` via Go-side Zotero Web API integration plus SQLite status writes
-- `/api/admin/run` via Go-side fetch -> ingest -> metadata -> classifier -> report pipeline
-- `/api/admin/reclassify` via Go-side metadata enrich + classifier + report rebuild
+- `/api/admin/run` via Go-side fetch -> ingest -> metadata -> classifier -> report refresh pipeline
+- `/api/admin/reclassify` via Go-side metadata enrich + classifier + report refresh
 - `/api/admin/report/latest`
 - `/api/admin/jobs`
 - React static asset serving and SPA fallback from `web/dist`
 
-The Go service now owns `Run Sync Now` end-to-end, including feed fetching/parsing, SQLite ingest, metadata enrich, classifier execution, static report publishing, and Zotero collection/save integration. Python remains as a reference implementation and compatibility shell for regression comparison.
+The Go service now owns `Run Sync Now` end-to-end, including feed fetching/parsing, SQLite ingest, metadata enrich, classifier execution, report refresh, and Zotero collection/save integration. Python remains as a reference implementation and compatibility shell for regression comparison.
 
 ### CLI
 
@@ -110,13 +108,13 @@ The CLI is intentionally kept smaller than the app surface and should only conta
 It is responsible for:
 
 - single-instance tray lifecycle
-- starting and stopping the local backend service
+- ensuring the local backend service is available while the tray is active
 - opening the browser UI
 - triggering `Run Sync Now`
 - launch-at-login
 - a tray-owned local daily timer
 
-On the Go migration branch, the tray is wired directly to the Go backend path. It expects `feedmedailyd.exe` in release builds and uses `go run ./cmd/feedmedailyd` in source mode.
+On the Go migration branch, the tray is wired directly to the Go backend path. It expects `feedmedailyd.exe` in release builds and builds a local cached backend binary in source mode.
 
 The Windows release packaging path includes the tray executable and points installer shortcuts at it. The Go service is the supported backend runtime for release and source-mode product use.
 
@@ -137,7 +135,7 @@ The Windows release packaging path includes the tray executable and points insta
 - `src/scirssagent/storage.py`
   Owns SQLite persistence for papers, classifications, feedback, proposals, and Zotero status.
 - `src/scirssagent/pipeline.py`
-  Legacy reference implementation for the old Python pipeline. The production `run --once` path is now owned by Go-side jobs and report publishing.
+  Legacy reference implementation for the old Python pipeline. The production `run --once` path is now owned by Go-side jobs and report refresh.
 - `src/scirssagent/reporting.py`
   Builds report payloads, writes JSON outputs, and publishes the static report bundle.
 - `src/scirssagent/models.py`
@@ -210,12 +208,9 @@ Supported admin reclassification scopes:
 
 ## Reporting
 
-Two report outputs are maintained:
+The supported report read path is the live `/api/report/latest` API backed by SQLite.
 
-- structured JSON in `reports/data/`
-- a published static bundle in `reports/latest/`
-
-Static publishing copies `web/dist`, injects the latest report payload for embedded viewing, and inlines built assets so the exported report remains self-contained.
+Legacy disk report artifacts under `reports/` are now compatibility/export leftovers from the Python era and are no longer the primary source of truth for the app UI or runtime verification.
 
 ## Maintenance Rule
 

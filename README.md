@@ -1,6 +1,6 @@
 # FeedMeDaily
 
-![FeedMeDaily banner](./docs/feedmedaily-banner.svg)
+![FeedMeDaily banner](./assets/branding/feedmedaily-icon.svg)
 
 FeedMeDaily is a local-first paper triage app for journal RSS feeds. It stores paper metadata in SQLite, classifies relevance with profile-driven LLM prompts, serves a local review UI, and lets you send selected papers to Zotero.
 
@@ -31,7 +31,7 @@ Current phase-1 scope:
 - the tray can trigger `Run Sync Now`
 - the tray owns launch-at-login and a local daily timer
 - `feedmedailyd` now serves the primary local app APIs, background jobs, pipeline execution, and static web UI
-- the tray now launches only the Go backend command on this migration branch
+- the tray now owns the background service lifecycle on this migration branch
 
 This means the tray is already the runtime shell and `feedmedailyd` is the only supported production backend on this branch. The Python package remains in the repo as a reference implementation and regression baseline.
 
@@ -51,7 +51,6 @@ Typical files:
 - `data/rss_feeds.json`
 - `data/classification_profile.json`
 - `logs\`
-- `reports\`
 
 If you already have data from a source checkout, you can copy it manually into the release data directory:
 
@@ -64,8 +63,8 @@ FeedMeDaily does not migrate these files automatically in v1.
 ### Updates and scheduling
 
 - Updates are check-only in the app UI. The release can show a newer installer if `FEEDMEDAILY_UPDATE_MANIFEST_URL` is configured.
-- Daily fetch/classify jobs use Windows Task Scheduler.
-- The UI can create, update, and remove the scheduled task.
+- Daily fetch/classify jobs use the tray app's local daily sync settings.
+- The UI can enable, update, and disable that daily sync schedule.
 
 ### Update manifest
 
@@ -73,9 +72,9 @@ FeedMeDaily does not migrate these files automatically in v1.
 
 ```json
 {
-  "version": "0.1.0",
-  "download_url": "https://github.com/yyngfive/feedmedaily/releases/download/v0.1.0/FeedMeDaily-Setup.exe",
-  "release_notes_url": "https://github.com/yyngfive/feedmedaily/releases/tag/v0.1.0"
+  "version": "0.2.0",
+  "download_url": "https://github.com/yyngfive/feedmedaily/releases/download/v0.2.0/FeedMeDaily-Setup.exe",
+  "release_notes_url": "https://github.com/yyngfive/feedmedaily/releases/tag/v0.2.0"
 }
 ```
 
@@ -111,7 +110,7 @@ To run the Go backend service directly:
 go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 ```
 
-The tray stores its local settings in `tray-settings.json` at the app config root. In source mode that file sits at the repository root. Backend command overrides are no longer part of the migration branch: the tray expects `feedmedailyd.exe` in release builds and uses `go run ./cmd/feedmedailyd` in source mode.
+The tray stores its local settings in `tray-settings.json` at the app config root. In source mode that file sits at the repository root. Backend command overrides are no longer part of the migration branch: the tray expects `feedmedailyd.exe` in release builds and builds a local cached backend binary in source mode.
 
 Before the first run, create a local `.env` file:
 
@@ -157,12 +156,12 @@ Notes:
 1. Open FeedMeDaily.
 2. Create or review your classification profile.
 3. Add RSS feeds from Settings.
-4. Run `Run fetch + classify`, or let the Windows scheduled task do it.
+4. Run `Run fetch + classify`, or let the tray-local daily sync do it.
 5. Review papers from the main list and detail panel.
 6. Use `Save to Zotero`, `Mark as read`, and `Mark wrong` as needed.
 7. Review feedback-driven profile proposals over time.
 
-In the tray-driven phase-1 runtime, users can also leave the tray running in the background and use it to reopen the app, start the backend, stop the backend, or trigger a sync manually.
+In the tray-driven phase-1 runtime, users can leave the tray running in the background and use it to reopen the app, trigger a sync manually, adjust daily sync, or quit the tray together with the backend.
 
 ## Commands
 
@@ -211,7 +210,6 @@ Primary assets included in the repo:
 
 - app icon source: [assets/branding/feedmedaily-icon.svg](./assets/branding/feedmedaily-icon.svg)
 - Windows icon: [assets/branding/feedmedaily.ico](./assets/branding/feedmedaily.ico)
-- README banner: [docs/feedmedaily-banner.svg](./docs/feedmedaily-banner.svg)
 - browser favicon: [web/public/favicon.svg](./web/public/favicon.svg)
 
 ## Zotero setup

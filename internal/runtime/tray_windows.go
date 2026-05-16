@@ -23,7 +23,7 @@ var (
 	kernel32Tray        = syscall.NewLazyDLL("kernel32.dll")
 	procOpenMutexW      = kernel32Tray.NewProc("OpenMutexW")
 	procCloseHandleTray = kernel32Tray.NewProc("CloseHandle")
-	trayLookPath        = exec.LookPath
+	ensureTrayBinary    = EnsureSourceBinary
 )
 
 func IsTrayRunning() bool {
@@ -53,7 +53,7 @@ func EnsureTrayRunning(root string) error {
 }
 
 func trayLaunchCommand(root string) ([]string, string, error) {
-	// 发布模式优先找打包好的托盘 exe；源码模式则允许退回 go run。
+	// 发布模式优先找打包好的托盘 exe；源码模式则复用本地缓存二进制。
 	candidates := []string{
 		filepath.Join(root, "FeedMeDailyTray.exe"),
 		filepath.Join(root, "build", "feedmedaily-tray.exe"),
@@ -65,9 +65,9 @@ func trayLaunchCommand(root string) ([]string, string, error) {
 	}
 
 	if LooksLikeSourceRoot(root) {
-		goPath, err := trayLookPath("go")
+		binaryPath, err := ensureTrayBinary(root, "./cmd/feedmedaily-tray", "feedmedaily-tray.exe")
 		if err == nil {
-			return []string{goPath, "run", "./cmd/feedmedaily-tray", "--root", root}, root, nil
+			return []string{binaryPath, "--root", root}, root, nil
 		}
 	}
 

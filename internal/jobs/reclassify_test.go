@@ -30,6 +30,12 @@ func TestSelectPaperIDsForScopeAndRebuildReport(t *testing.T) {
 	if reportCount != 1 {
 		t.Fatalf("unexpected report count: %d", reportCount)
 	}
+	if _, err := os.Stat(filepath.Join(settings.ReportsDir, "data", "latest.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected no latest.json artifact, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(settings.ReportsDir, "latest", "index.html")); !os.IsNotExist(err) {
+		t.Fatalf("expected no static report artifact, got err=%v", err)
+	}
 }
 
 func testJobSettings(root string) config.Settings {

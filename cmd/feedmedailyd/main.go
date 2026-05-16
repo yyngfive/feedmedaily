@@ -16,6 +16,7 @@ import (
 	"github.com/yyngfive/scirssagent/internal/api"
 	"github.com/yyngfive/scirssagent/internal/config"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
+	"github.com/yyngfive/scirssagent/internal/logging"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 	zoterosvc "github.com/yyngfive/scirssagent/internal/zotero"
@@ -42,15 +43,29 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	logging.SetDefaultDir(settings.LogsDir)
 	if *runOnce {
+		logCommandEvent(settings.LogsDir, "info", "cli", "run_once_started", "Starting one fetch/classify/report cycle.", map[string]any{
+			"max_papers": *maxPapers,
+			"reclassify": *reclassify,
+			"command":    "run-once",
+		})
 		summary, err := jobruntime.RunOnce(settings, jobruntime.RunOptions{
 			MaxPapers:  *maxPapers,
 			Reclassify: *reclassify,
-		}, nil)
+		}, progressReporter(settings.LogsDir, "cli.run_once"))
 		if err != nil {
+			logCommandEvent(settings.LogsDir, "error", "cli", "run_once_failed", "", map[string]any{"error": err.Error()})
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		logCommandEvent(settings.LogsDir, "info", "cli", "run_once_completed", "Run completed.", map[string]any{
+			"fetched":    summary.Fetched,
+			"inserted":   summary.Inserted,
+			"updated":    summary.Updated,
+			"classified": summary.Classified,
+			"errors":     summary.Errors,
+		})
 		if err := json.NewEncoder(os.Stdout).Encode(summary); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -58,11 +73,14 @@ func main() {
 		return
 	}
 	if *reportLatest {
-		reportCount, err := jobruntime.RebuildLatestReport(settings, nil)
+		logCommandEvent(settings.LogsDir, "info", "cli", "report_latest_started", "Rebuilding the latest report payload.", nil)
+		reportCount, err := jobruntime.RebuildLatestReport(settings, progressReporter(settings.LogsDir, "cli.report_latest"))
 		if err != nil {
+			logCommandEvent(settings.LogsDir, "error", "cli", "report_latest_failed", "", map[string]any{"error": err.Error()})
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		logCommandEvent(settings.LogsDir, "info", "cli", "report_latest_completed", "Report rebuild completed.", map[string]any{"report_papers": reportCount})
 		if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"report_papers": reportCount}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -70,11 +88,14 @@ func main() {
 		return
 	}
 	if *zoteroCollections {
+		logCommandEvent(settings.LogsDir, "info", "cli", "zotero_collections_started", "Listing Zotero collections.", nil)
 		payload, err := zoterosvc.ListCollections(settings)
 		if err != nil {
+			logCommandEvent(settings.LogsDir, "error", "cli", "zotero_collections_failed", "", map[string]any{"error": err.Error()})
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		logCommandEvent(settings.LogsDir, "info", "cli", "zotero_collections_completed", "Zotero collections listed.", map[string]any{"collections": len(payload.Collections)})
 		if err := json.NewEncoder(os.Stdout).Encode(payload); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -86,6 +107,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "--paper-id is required with --zotero-save")
 			os.Exit(1)
 		}
+		logCommandEvent(settings.LogsDir, "info", "cli", "zotero_save_started", "Saving one paper to Zotero.", map[string]any{"paper_id": *paperID})
 		sqliteStore, err := store.Open(settings.DatabasePath)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -128,6 +150,7 @@ func main() {
 		}
 		itemKey, saveErr := zoterosvc.SavePaper(settings, *paper, *classification, selectedCollectionKey)
 		if saveErr != nil {
+			logCommandEvent(settings.LogsDir, "error", "cli", "zotero_save_failed", "", map[string]any{"paper_id": *paperID, "error": saveErr.Error()})
 			status, err := sqliteStore.UpsertZoteroStatus(*paperID, "error", nil, stringPtr(saveErr.Error()), time.Now().UTC())
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -144,15 +167,17 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		logCommandEvent(settings.LogsDir, "info", "cli", "zotero_save_completed", "Paper saved to Zotero.", map[string]any{"paper_id": *paperID, "item_key": itemKey})
 		if err := json.NewEncoder(os.Stdout).Encode(status); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return
 	}
-	// 如果服务是被单独拉起的，尽量把托盘也一起补起来。
-	if err := appruntime.EnsureTrayRunning(settings.RootDir); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: ensure tray running:", err)
+	if settings.Mode == appruntime.ModeRelease && os.Getenv("FEEDMEDAILY_LAUNCHED_BY_TRAY") != "1" {
+		if err := appruntime.EnsureTrayRunning(settings.RootDir); err != nil {
+			fmt.Fprintln(os.Stderr, "warning: ensure tray running:", err)
+		}
 	}
 	// 显式传参优先于配置文件中的默认值。
 	if *host != "" {
@@ -205,4 +230,42 @@ func main() {
 func stringPtr(value string) *string {
 	clean := value
 	return &clean
+}
+
+func progressReporter(logsDir string, component string) jobruntime.ProgressFunc {
+	return func(messageKey string, message string) {
+		fmt.Fprintf(os.Stderr, "[%s] %s\n", time.Now().Format("15:04:05"), message)
+		_, _ = logging.Write(logsDir, logging.Event{
+			Level:      "info",
+			Component:  component,
+			Action:     "progress",
+			MessageKey: messageKey,
+			Message:    message,
+		})
+	}
+}
+
+func logCommandEvent(logsDir string, level string, component string, action string, message string, data map[string]any) {
+	eventData := data
+	if eventData == nil {
+		eventData = map[string]any{}
+	}
+	if rawError, ok := eventData["error"].(string); ok && rawError != "" {
+		_, _ = logging.Write(logsDir, logging.Event{
+			Level:     level,
+			Component: component,
+			Action:    action,
+			Message:   message,
+			Error:     rawError,
+			Data:      eventData,
+		})
+		return
+	}
+	_, _ = logging.Write(logsDir, logging.Event{
+		Level:     level,
+		Component: component,
+		Action:    action,
+		Message:   message,
+		Data:      eventData,
+	})
 }

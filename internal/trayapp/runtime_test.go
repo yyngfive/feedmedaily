@@ -48,7 +48,7 @@ func TestBackendCommandReleaseDoesNotFallBackToPythonBundle(t *testing.T) {
 	}
 }
 
-func TestBackendCommandSourceUsesGoRun(t *testing.T) {
+func TestBackendCommandSourceUsesBuiltBinary(t *testing.T) {
 	restore := replaceLookPath(func(name string) (string, error) {
 		if name == "go" {
 			return `C:\Go\bin\go.exe`, nil
@@ -56,6 +56,10 @@ func TestBackendCommandSourceUsesGoRun(t *testing.T) {
 		return "", errors.New("not found")
 	})
 	defer restore()
+	restoreBuild := replaceEnsureSourceBinary(func(root string, packagePath string, outputName string) (string, error) {
+		return filepath.Join(root, ".tmp", "runtime-bin", outputName), nil
+	})
+	defer restoreBuild()
 
 	root := t.TempDir()
 	layout := testLayout(root, runtimeModeSource)
@@ -65,9 +69,7 @@ func TestBackendCommandSourceUsesGoRun(t *testing.T) {
 	}
 
 	want := []string{
-		`C:\Go\bin\go.exe`,
-		"run",
-		"./cmd/feedmedailyd",
+		filepath.Join(root, ".tmp", "runtime-bin", "feedmedailyd.exe"),
 		"--root",
 		root,
 		"--host",
@@ -121,5 +123,13 @@ func replaceLookPath(next func(string) (string, error)) func() {
 	lookPath = next
 	return func() {
 		lookPath = previous
+	}
+}
+
+func replaceEnsureSourceBinary(next func(string, string, string) (string, error)) func() {
+	previous := ensureSourceBinary
+	ensureSourceBinary = next
+	return func() {
+		ensureSourceBinary = previous
 	}
 }

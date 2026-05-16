@@ -37,9 +37,15 @@ UninstallDisplayIcon={app}\{#MyTrayExeName}
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\_internal"
 Type: filesandordirs; Name: "{app}\web"
+Type: files; Name: "{app}\FeedMeDaily.exe"
 Type: files; Name: "{app}\FeedMeDailyTray.exe"
 Type: files; Name: "{app}\feedmedailyd.exe"
 Type: files; Name: "{app}\feedmedaily.ico"
+Type: files; Name: "{app}\tray-settings.json"
+
+[UninstallDelete]
+Type: files; Name: "{app}\FeedMeDaily.exe"
+Type: files; Name: "{app}\tray-settings.json"
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
