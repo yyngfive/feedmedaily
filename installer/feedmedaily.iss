@@ -6,8 +6,8 @@
 #define MyAppVersion AppVersion
 #define MyAppPublisher "FeedMeDaily"
 #define MyAppURL "https://example.com/feedmedaily"
-#define MyAppExeName "FeedMeDaily.exe"
 #define MyTrayExeName "FeedMeDailyTray.exe"
+#define MyDaemonExeName "feedmedailyd.exe"
 #define MyBuildDir "..\dist\FeedMeDaily"
 #define MyIconFile "..\assets\branding\feedmedaily.ico"
 
@@ -32,13 +32,13 @@ Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 SetupIconFile={#MyIconFile}
-UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayIcon={app}\{#MyTrayExeName}
 
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\_internal"
 Type: filesandordirs; Name: "{app}\web"
-Type: files; Name: "{app}\FeedMeDaily.exe"
 Type: files; Name: "{app}\FeedMeDailyTray.exe"
+Type: files; Name: "{app}\feedmedailyd.exe"
 Type: files; Name: "{app}\feedmedaily.ico"
 
 [Languages]

@@ -1,8 +1,8 @@
 # Go 后端迁移第一阶段执行计划
 
-Status: Draft  
+Status: In Progress
 Owner: TBD  
-Last Updated: 2026-05-08  
+Last Updated: 2026-05-13
 Scope: Windows first / mac compatible / Linux source-first  
 Related Docs: `go-backend-migration-master-plan.md`, `python-go-coexistence-transition.md`
 
@@ -17,7 +17,7 @@ Related Docs: `go-backend-migration-master-plan.md`, `python-go-coexistence-tran
 
 - Go 托盘程序可启动并管理后台服务
 - 托盘程序的服务管理、自启动、定时和浏览器打开能力可先独立验收
-- 托盘触发的具体后台命令可以暂时是 Python，也可以是后续的 Go
+- 托盘触发的后台命令在迁移分支中直接指向 Go 后端
 - 前端继续通过浏览器访问本地服务
 - 调度和自启动能力先迁移到托盘程序
 
@@ -53,7 +53,7 @@ Related Docs: `go-backend-migration-master-plan.md`, `python-go-coexistence-tran
 1. 建立 Go 项目骨架与目录结构
 2. 实现托盘程序最小可用菜单
 3. 实现托盘驱动的启动/停止服务、打开浏览器、打开目录
-4. 为托盘建立统一的后台命令封装，先接入现有 Python 命令
+4. 为托盘建立统一的 Go 后端命令封装
 5. 实现托盘定时器与自启动设置持久化
 6. 验证托盘可稳定触发“运行全流程任务”
 7. 收尾前端中的 scheduler 区域兼容处理
@@ -61,6 +61,15 @@ Related Docs: `go-backend-migration-master-plan.md`, `python-go-coexistence-tran
 9. 再逐步迁移 `AppMeta`、healthcheck、静态资源托管
 10. 再迁移 config + keyring + 路径解析、SQLite schema + 读写层、job registry 与 admin job 接口
 11. 最后进入 metadata / classifier / zotero / profile / pipeline / `feeds.py` 的完整 Go 重写
+
+Current progress:
+
+- Steps 1-7 are represented by the Go tray manager and its unified backend command path.
+- Step 8 has started with `cmd/feedmedailyd`.
+- Step 9 has started with Go implementations of `/api/app/health`, `/api/app/meta`, `/api/app/update`, `/api/app/open`, `/api/app/exit`, `/api/settings/scheduler`, read-only `/api/report/latest`, read-only `/api/profile/current`, and static UI serving.
+- Step 10 has started with Go implementations of settings/config path resolution, feed subscription read/write APIs, RSS/Atom fetch parsing, in-memory admin job polling, a SQLite/profile read layer for `/api/report/latest`, `/api/profile/current`, `/api/feedback`, and `/api/profile/proposals`, local-state write support for feedback create/delete, mark-read, and proposal apply/reject, native Go metadata/classifier/reclassify execution for `/api/admin/reclassify` and proposal-apply follow-up reclassification, native Go profile bootstrap/proposal-generate jobs that persist proposals directly into SQLite, and a native Go `admin/run` / `run --once` pipeline that publishes latest report artifacts.
+- The tray no longer falls back to Python on this migration branch; it expects the future Go backend command path.
+- Go now fronts the full UI-facing production surface, including feed fetching/parsing, the `run --once` pipeline, the classifier/reclassify core, the profile-generation core, and Zotero collection/save integration.
 
 ## Expected Deliverables
 
@@ -78,7 +87,7 @@ Related Docs: `go-backend-migration-master-plan.md`, `python-go-coexistence-tran
 ### Transition deliverables
 
 - 现有后台命令已被托盘统一接管
-- 未来将 Python 命令替换为 Go 命令时，不需要重做托盘交互模型
+- 托盘交互模型直接面向未来 Go 后端命令
 - `feedmedailyd` 可作为后续阶段入口预留，但不是第一阶段交付前提
 
 ### UI compatibility deliverables

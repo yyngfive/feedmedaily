@@ -193,7 +193,7 @@ CONFIG_OPTIONS: tuple[ConfigOption, ...] = (
     ConfigOption(
         key="SCIRSS_SERVER_HOST",
         label="Server host",
-        description="Host interface for the local FastAPI server.",
+        description="Host interface for the local backend service.",
         section="Local app",
         input_type="text",
         default="127.0.0.1",
@@ -201,7 +201,7 @@ CONFIG_OPTIONS: tuple[ConfigOption, ...] = (
     ConfigOption(
         key="SCIRSS_SERVER_PORT",
         label="Server port",
-        description="Preferred port for the local FastAPI server.",
+        description="Preferred port for the local backend service.",
         section="Local app",
         input_type="number",
         default="8000",

@@ -2,7 +2,7 @@
 
 ![FeedMeDaily banner](./docs/feedmedaily-banner.svg)
 
-FeedMeDaily is a local-first paper triage app for journal RSS feeds. It stores paper metadata in SQLite, classifies relevance with profile-driven LLM prompts, serves a local review UI over FastAPI, and lets you send selected papers to Zotero.
+FeedMeDaily is a local-first paper triage app for journal RSS feeds. It stores paper metadata in SQLite, classifies relevance with profile-driven LLM prompts, serves a local review UI, and lets you send selected papers to Zotero.
 
 Current system architecture is documented in [ARCHITECTURE.md](./ARCHITECTURE.md).
 
@@ -20,19 +20,20 @@ Release characteristics:
 
 After installation, the app launcher should run `FeedMeDailyTray.exe --root <install-dir>`, let the tray manage the local service, and open your browser automatically.
 
-### Go tray phase 1
+### Go migration phase
 
-The repository now includes a first-stage Windows tray manager in Go under `cmd/feedmedaily-tray/`.
+The repository now includes a Windows tray manager in Go under `cmd/feedmedaily-tray/` and a Go backend service under `cmd/feedmedailyd/`.
 
 Current phase-1 scope:
 
-- the tray can start and stop the existing local backend
+- the tray can start and stop the local Go backend
 - the tray can open the browser UI
 - the tray can trigger `Run Sync Now`
 - the tray owns launch-at-login and a local daily timer
-- the backend command can still be Python in this phase
+- `feedmedailyd` now serves the primary local app APIs, background jobs, pipeline execution, and static web UI
+- the tray now launches only the Go backend command on this migration branch
 
-This means the tray is already the runtime shell, while the full Go backend rewrite remains a later step.
+This means the tray is already the runtime shell and `feedmedailyd` is the only supported production backend on this branch. The Python package remains in the repo as a reference implementation and regression baseline.
 
 ### User data location
 
@@ -93,38 +94,24 @@ If every release uploads an asset named `update.json`, installed apps can always
 If you want to run FeedMeDaily from source:
 
 ```powershell
-uv sync
 pnpm --dir web install
 pnpm --dir web build
-uv run scirssagent open
+go run .\cmd\feedmedaily-tray --root .
 ```
 
-To build the experimental Windows tray executable after Go is installed:
+To build the experimental Windows tray and Go backend executables after Go is installed:
 
 ```powershell
 pwsh -File .\tools\build_go_tray.ps1
 ```
 
-The tray stores its local settings in `tray-settings.json` at the app config root. In source mode that file sits at the repository root. You can override the backend launch command there with a tokenized command such as:
+To run the Go backend service directly:
 
-```json
-{
-  "backend_command": [
-    ".venv\\Scripts\\python.exe",
-    "-m",
-    "scirssagent.cli",
-    "serve",
-    "--root",
-    "{root}",
-    "--host",
-    "{host}",
-    "--port",
-    "{port}"
-  ]
-}
+```powershell
+go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 ```
 
-If `backend_command` is omitted, the tray auto-detects `.venv\\Scripts\\python.exe`, then `python`, then `uv`.
+The tray stores its local settings in `tray-settings.json` at the app config root. In source mode that file sits at the repository root. Backend command overrides are no longer part of the migration branch: the tray expects `feedmedailyd.exe` in release builds and uses `go run ./cmd/feedmedailyd` in source mode.
 
 Before the first run, create a local `.env` file:
 
@@ -180,25 +167,23 @@ In the tray-driven phase-1 runtime, users can also leave the tray running in the
 ## Commands
 
 ```powershell
-uv run scirssagent open
-uv run scirssagent serve
-uv run scirssagent run --once
-uv run scirssagent report latest
-uv run scirssagent scheduler show
-uv run scirssagent scheduler install --time 10:00
-uv run scirssagent scheduler remove
-uv run scirssagent version
+go run .\cmd\feedmedaily-tray --root .
+go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
+go run .\cmd\feedmedailyd --root . --run-once
+go run .\cmd\feedmedailyd --root . --report-latest
+go run .\cmd\feedmedailyd --root . --zotero-collections
+go run .\cmd\feedmedailyd --root . --zotero-save --paper-id 1
 ```
+
+The historical Python reference server can still be inspected under `src/scirssagent`, but day-to-day backend work should use `go run .\cmd\feedmedailyd ...` or the tray.
 
 ## Building the Windows release
 
-Release artifacts are built from the existing FastAPI backend, the Go tray shell, and the already-built web bundle.
+Release artifacts are built around the Go tray shell, the Go backend daemon, and the already-built web bundle.
 
 Expected tooling:
 
-- Python 3.12 via `uv`
 - Node/pnpm for build-time web compilation only
-- `pyinstaller`
 - `go` for the tray executable
 - `Inno Setup` (`ISCC.exe`) for the installer
 
@@ -214,6 +199,7 @@ The build script:
 - regenerates brand assets
 - builds `web/dist`
 - builds `FeedMeDailyTray.exe`
+- builds `feedmedailyd.exe`
 - packages the backend into `dist\FeedMeDaily\`
 - copies the tray executable into `dist\FeedMeDaily\`
 - copies the built web app into `dist\FeedMeDaily\web\dist`

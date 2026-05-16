@@ -40,14 +40,14 @@ type Layout struct {
 }
 
 type TraySettings struct {
-	BackendCommand  []string `json:"backend_command,omitempty"`
-	ScheduleEnabled bool     `json:"schedule_enabled"`
-	DailyTime       string   `json:"daily_time"`
-	LastRunDate     string   `json:"last_run_date,omitempty"`
-	LaunchAtLogin   bool     `json:"launch_at_login"`
+	ScheduleEnabled bool   `json:"schedule_enabled"`
+	DailyTime       string `json:"daily_time"`
+	LastRunDate     string `json:"last_run_date,omitempty"`
+	LaunchAtLogin   bool   `json:"launch_at_login"`
 }
 
 func ResolveLayout(root string) (Layout, error) {
+	// 根据 root 和运行模式，推导托盘、数据目录、图标和服务默认地址。
 	if root == "" {
 		return Layout{}, errors.New("root directory is required")
 	}
@@ -108,6 +108,7 @@ func ResolveLayout(root string) (Layout, error) {
 }
 
 func detectRuntimeMode(root string) string {
+	// 优先读环境变量覆盖；否则根据目录结构猜测 source/release。
 	override := strings.ToLower(strings.TrimSpace(os.Getenv("FEEDMEDAILY_RUNTIME_MODE")))
 	switch override {
 	case runtimeModeRelease:
@@ -126,14 +127,16 @@ func detectRuntimeMode(root string) string {
 }
 
 func looksLikeSourceRoot(path string) bool {
+	// 用仓库根目录标志判定 source 模式，不要求 Python 源码目录仍然存在。
 	_, pyprojectErr := os.Stat(filepath.Join(path, "pyproject.toml"))
-	_, srcErr := os.Stat(filepath.Join(path, "src", "scirssagent"))
-	return pyprojectErr == nil && srcErr == nil
+	_, gomodErr := os.Stat(filepath.Join(path, "go.mod"))
+	return pyprojectErr == nil || gomodErr == nil
 }
 
 func looksLikeReleaseRoot(path string) bool {
+	// 用安装产物的典型文件组合判定 release 模式。
 	candidates := []string{
-		filepath.Join(path, "FeedMeDaily.exe"),
+		filepath.Join(path, "feedmedailyd.exe"),
 		filepath.Join(path, "FeedMeDailyTray.exe"),
 		filepath.Join(path, "feedmedaily.ico"),
 		filepath.Join(path, "web", "dist", "index.html"),
@@ -148,6 +151,7 @@ func looksLikeReleaseRoot(path string) bool {
 }
 
 func defaultUserDataDir() string {
+	// 托盘在 release 模式下使用用户本地目录保存状态和数据。
 	if override := strings.TrimSpace(os.Getenv("FEEDMEDAILY_DATA_ROOT")); override != "" {
 		return override
 	}
@@ -162,6 +166,7 @@ func defaultUserDataDir() string {
 }
 
 func LoadTraySettings(path string) (TraySettings, error) {
+	// 读取托盘自己的本地配置文件；缺失时返回默认设置。
 	settings := defaultTraySettings()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -182,6 +187,7 @@ func LoadTraySettings(path string) (TraySettings, error) {
 }
 
 func defaultTraySettings() TraySettings {
+	// 托盘配置默认值：不自动调度，默认时间 10:00，不开机自启。
 	return TraySettings{
 		ScheduleEnabled: false,
 		DailyTime:       defaultDailyTime,
@@ -190,6 +196,7 @@ func defaultTraySettings() TraySettings {
 }
 
 func (s *TraySettings) Normalize() error {
+	// 把托盘配置中的时间字段规范成稳定格式。
 	if strings.TrimSpace(s.DailyTime) == "" {
 		s.DailyTime = defaultDailyTime
 	}
@@ -201,6 +208,7 @@ func (s *TraySettings) Normalize() error {
 }
 
 func (s TraySettings) Save(path string) error {
+	// 用临时文件替换的方式保存 tray-settings.json。
 	if err := s.Normalize(); err != nil {
 		return err
 	}
@@ -219,6 +227,7 @@ func (s TraySettings) Save(path string) error {
 }
 
 func normalizeDailyTime(value string) string {
+	// 把时间输入规范化为 HH:MM，非法时返回空字符串。
 	clean := strings.TrimSpace(value)
 	parts := strings.Split(clean, ":")
 	if len(parts) != 2 {

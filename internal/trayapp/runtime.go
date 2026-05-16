@@ -25,6 +25,7 @@ const (
 var (
 	shell32Runtime    = syscall.NewLazyDLL("shell32.dll")
 	procShellExecuteW = shell32Runtime.NewProc("ShellExecuteW")
+	lookPath          = exec.LookPath
 )
 
 type RuntimeState struct {
@@ -34,6 +35,7 @@ type RuntimeState struct {
 }
 
 func ReadRuntimeState(path string) (*RuntimeState, error) {
+	// 读取托盘视角下的 runtime.json；缺失时返回 nil。
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -53,6 +55,7 @@ func ReadRuntimeState(path string) (*RuntimeState, error) {
 }
 
 func WriteRuntimeState(path string, state RuntimeState) error {
+	// 把当前后台服务进程信息写入 runtime.json。
 	payload, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode runtime state: %w", err)
@@ -68,6 +71,7 @@ func WriteRuntimeState(path string, state RuntimeState) error {
 }
 
 func ClearRuntimeState(path string) error {
+	// 删除 runtime.json；文件本来不存在时也算成功。
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -75,6 +79,7 @@ func ClearRuntimeState(path string) error {
 }
 
 func ProcessRunning(pid int) bool {
+	// 用 tasklist 判断指定 PID 是否仍存在。
 	if pid <= 0 {
 		return false
 	}
@@ -88,6 +93,7 @@ func ProcessRunning(pid int) bool {
 }
 
 func FindAvailablePort(host string, preferred int) (int, error) {
+	// 优先尝试默认端口，再向后探测一小段范围。
 	candidates := []int{preferred}
 	for port := preferred + 1; port < preferred+20; port++ {
 		candidates = append(candidates, port)
@@ -114,6 +120,7 @@ func FindAvailablePort(host string, preferred int) (int, error) {
 }
 
 func WaitForHealthcheck(url string, timeout time.Duration) bool {
+	// 轮询 /api/app/health，直到服务可用或超时。
 	client := &http.Client{Timeout: time.Second}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -133,14 +140,17 @@ func WaitForHealthcheck(url string, timeout time.Duration) bool {
 }
 
 func OpenBrowser(url string) error {
+	// 调用 Windows Shell 打开默认浏览器。
 	return shellExecute("open", url)
 }
 
 func OpenPath(path string) error {
+	// 调用 Windows Shell 打开目录或文件。
 	return shellExecute("open", filepath.Clean(path))
 }
 
 func hiddenSysProcAttr() *syscall.SysProcAttr {
+	// 创建后台无窗口子进程时统一复用的启动属性。
 	return &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: detachedProcess | createNewProcessGroup,
@@ -148,10 +158,12 @@ func hiddenSysProcAttr() *syscall.SysProcAttr {
 }
 
 func shellOpenSysProcAttr() *syscall.SysProcAttr {
+	// 为 shell 打开动作保留的轻量属性，目前主要用于兼容扩展。
 	return &syscall.SysProcAttr{HideWindow: true}
 }
 
 func shellExecute(verb string, target string) error {
+	// 直接调用 ShellExecuteW 打开链接、文件或目录。
 	verbPtr, err := syscall.UTF16PtrFromString(verb)
 	if err != nil {
 		return err
@@ -175,6 +187,7 @@ func shellExecute(verb string, target string) error {
 }
 
 func launchDetached(command []string, cwd string) (int, error) {
+	// 以完全后台化的方式启动 Go 后端，不弹出终端窗口。
 	if len(command) == 0 {
 		return 0, errors.New("backend command is empty")
 	}
@@ -203,6 +216,7 @@ func launchDetached(command []string, cwd string) (int, error) {
 }
 
 func httpPostJSON(url string, payload any) error {
+	// 发送一个简单的 JSON POST 请求，用于调用本地控制接口。
 	var body *bytes.Reader
 	if payload == nil {
 		body = bytes.NewReader(nil)
@@ -231,95 +245,34 @@ func httpPostJSON(url string, payload any) error {
 	return nil
 }
 
-func backendCommand(layout Layout, settings TraySettings, port int) ([]string, error) {
-	if len(settings.BackendCommand) > 0 {
-		return expandCommandTemplate(settings.BackendCommand, layout, port), nil
-	}
-
+func backendCommand(layout Layout, port int) ([]string, error) {
+	// 根据当前模式组装启动 feedmedailyd 的命令行。
 	if layout.Mode == runtimeModeRelease {
-		executable := filepath.Join(layout.RootDir, "FeedMeDaily.exe")
-		if _, err := os.Stat(executable); err == nil {
-			return []string{
-				executable,
-				"serve",
-				"--host",
-				layout.ServerHost,
-				"--port",
-				strconv.Itoa(port),
-			}, nil
+		goServiceCandidates := []string{
+			filepath.Join(layout.RootDir, "feedmedailyd.exe"),
+			filepath.Join(layout.RootDir, "FeedMeDailyD.exe"),
 		}
+		for _, executable := range goServiceCandidates {
+			if _, err := os.Stat(executable); err == nil {
+				return []string{
+					executable,
+					"--root",
+					layout.RootDir,
+					"--host",
+					layout.ServerHost,
+					"--port",
+					strconv.Itoa(port),
+				}, nil
+			}
+		}
+		return nil, errors.New("go backend executable not found: expected feedmedailyd.exe in the app directory")
 	}
 
-	venvPythonw := filepath.Join(layout.RootDir, ".venv", "Scripts", "pythonw.exe")
-	if _, err := os.Stat(venvPythonw); err == nil {
+	if goPath, err := lookPath("go"); err == nil {
 		return []string{
-			venvPythonw,
-			"-m",
-			"scirssagent.cli",
-			"serve",
-			"--root",
-			layout.RootDir,
-			"--host",
-			layout.ServerHost,
-			"--port",
-			strconv.Itoa(port),
-		}, nil
-	}
-
-	venvPython := filepath.Join(layout.RootDir, ".venv", "Scripts", "python.exe")
-	if _, err := os.Stat(venvPython); err == nil {
-		return []string{
-			venvPython,
-			"-m",
-			"scirssagent.cli",
-			"serve",
-			"--root",
-			layout.RootDir,
-			"--host",
-			layout.ServerHost,
-			"--port",
-			strconv.Itoa(port),
-		}, nil
-	}
-
-	if pythonwPath, err := exec.LookPath("pythonw"); err == nil {
-		return []string{
-			pythonwPath,
-			"-m",
-			"scirssagent.cli",
-			"serve",
-			"--root",
-			layout.RootDir,
-			"--host",
-			layout.ServerHost,
-			"--port",
-			strconv.Itoa(port),
-		}, nil
-	}
-
-	if pythonPath, err := exec.LookPath("python"); err == nil {
-		return []string{
-			pythonPath,
-			"-m",
-			"scirssagent.cli",
-			"serve",
-			"--root",
-			layout.RootDir,
-			"--host",
-			layout.ServerHost,
-			"--port",
-			strconv.Itoa(port),
-		}, nil
-	}
-
-	if uvPath, err := exec.LookPath("uv"); err == nil {
-		return []string{
-			uvPath,
+			goPath,
 			"run",
-			"--project",
-			layout.RootDir,
-			"scirssagent",
-			"serve",
+			"./cmd/feedmedailyd",
 			"--root",
 			layout.RootDir,
 			"--host",
@@ -329,27 +282,11 @@ func backendCommand(layout Layout, settings TraySettings, port int) ([]string, e
 		}, nil
 	}
 
-	return nil, errors.New("no backend command found; configure tray-settings.json backend_command or install Python/uv")
+	return nil, errors.New("go command not found; install Go to run feedmedailyd from source")
 }
 
-func expandCommandTemplate(command []string, layout Layout, port int) []string {
-	replacements := map[string]string{
-		"{root}": layout.RootDir,
-		"{host}": layout.ServerHost,
-		"{port}": strconv.Itoa(port),
-	}
-	expanded := make([]string, 0, len(command))
-	for _, item := range command {
-		value := item
-		for needle, replacement := range replacements {
-			value = strings.ReplaceAll(value, needle, replacement)
-		}
-		expanded = append(expanded, value)
-	}
-	return expanded
-}
-
-func ensureService(layout Layout, settings TraySettings) (string, error) {
+func ensureService(layout Layout) (string, error) {
+	// 复用现有服务；若服务不存在或失活，则拉起新的后台服务。
 	state, err := ReadRuntimeState(layout.RuntimeStatePath)
 	if err != nil {
 		return "", err
@@ -370,7 +307,7 @@ func ensureService(layout Layout, settings TraySettings) (string, error) {
 		return "", fmt.Errorf("find available port: %w", err)
 	}
 
-	command, err := backendCommand(layout, settings, port)
+	command, err := backendCommand(layout, port)
 	if err != nil {
 		return "", err
 	}
@@ -396,6 +333,7 @@ func ensureService(layout Layout, settings TraySettings) (string, error) {
 }
 
 func stopService(layout Layout) error {
+	// 优先请求 API 正常退出；失败时再强制 taskkill。
 	state, err := ReadRuntimeState(layout.RuntimeStatePath)
 	if err != nil {
 		return err
@@ -427,5 +365,6 @@ func stopService(layout Layout) error {
 }
 
 func triggerSync(baseURL string) error {
+	// 通过 Go backend 的 admin/run 接口触发一次同步任务。
 	return httpPostJSON(baseURL+"/api/admin/run", nil)
 }
