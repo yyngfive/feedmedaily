@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"syscall"
 	"unsafe"
+
+	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 )
 
 const (
@@ -42,6 +44,8 @@ const (
 	wmContextMenu      = 0x007B
 	wmDestroy          = 0x0002
 	wmLButtonDblClk    = 0x0203
+	wmNull             = 0x0000
+	wmPowerBroadcast   = 0x0218
 	wmRButtonUp        = 0x0205
 	wmUser             = 0x0400
 	wsOverlappedWindow = 0x00CF0000
@@ -50,51 +54,57 @@ const (
 const (
 	menuOpenApp uint16 = 1001 + iota
 	menuRunSync
-	menuStartService
-	menuStopService
 	menuToggleSchedule
 	menuLaunchAtLogin
 	menuOpenTraySettings
 	menuOpenDataDir
 	menuOpenLogsDir
-	menuQuitAndStopService
 	menuQuit
+)
+
+const (
+	pbtApmResumeAutomatic = 0x0012
+	pbtApmResumeSuspend   = 0x0007
 )
 
 const trayCallbackMessage = wmApp + 1
 
 var (
-	user32               = syscall.NewLazyDLL("user32.dll")
-	shell32              = syscall.NewLazyDLL("shell32.dll")
-	kernel32             = syscall.NewLazyDLL("kernel32.dll")
-	procAppendMenuW      = user32.NewProc("AppendMenuW")
-	procCreateMutexW     = kernel32.NewProc("CreateMutexW")
-	procCloseHandle      = kernel32.NewProc("CloseHandle")
-	procCreatePopupMenu  = user32.NewProc("CreatePopupMenu")
-	procCreateWindowExW  = user32.NewProc("CreateWindowExW")
-	procDefWindowProcW   = user32.NewProc("DefWindowProcW")
-	procDestroyMenu      = user32.NewProc("DestroyMenu")
-	procDestroyWindow    = user32.NewProc("DestroyWindow")
-	procDispatchMessageW = user32.NewProc("DispatchMessageW")
-	procGetCursorPos     = user32.NewProc("GetCursorPos")
-	procGetMessageW      = user32.NewProc("GetMessageW")
-	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
-	procGetSystemMetrics = user32.NewProc("GetSystemMetrics")
-	procLoadCursorW      = user32.NewProc("LoadCursorW")
-	procLoadIconW        = user32.NewProc("LoadIconW")
-	procLoadImageW       = user32.NewProc("LoadImageW")
-	procMessageBoxW      = user32.NewProc("MessageBoxW")
-	procPostQuitMessage  = user32.NewProc("PostQuitMessage")
-	procPostMessageW     = user32.NewProc("PostMessageW")
-	procRegisterClassExW = user32.NewProc("RegisterClassExW")
-	procSetForegroundWnd = user32.NewProc("SetForegroundWindow")
-	procShellNotifyIconW = shell32.NewProc("Shell_NotifyIconW")
-	procTrackPopupMenu   = user32.NewProc("TrackPopupMenu")
-	procTranslateMessage = user32.NewProc("TranslateMessage")
-	procUpdateWindow     = user32.NewProc("UpdateWindow")
+	user32                = syscall.NewLazyDLL("user32.dll")
+	shell32               = syscall.NewLazyDLL("shell32.dll")
+	kernel32              = syscall.NewLazyDLL("kernel32.dll")
+	procAppendMenuW       = user32.NewProc("AppendMenuW")
+	procCreateMutexW      = kernel32.NewProc("CreateMutexW")
+	procCloseHandle       = kernel32.NewProc("CloseHandle")
+	procCreatePopupMenu   = user32.NewProc("CreatePopupMenu")
+	procCreateWindowExW   = user32.NewProc("CreateWindowExW")
+	procDefWindowProcW    = user32.NewProc("DefWindowProcW")
+	procDestroyMenu       = user32.NewProc("DestroyMenu")
+	procDestroyWindow     = user32.NewProc("DestroyWindow")
+	procDispatchMessageW  = user32.NewProc("DispatchMessageW")
+	procGetCursorPos      = user32.NewProc("GetCursorPos")
+	procGetMessageW       = user32.NewProc("GetMessageW")
+	procGetModuleHandleW  = kernel32.NewProc("GetModuleHandleW")
+	procGetSystemMetrics  = user32.NewProc("GetSystemMetrics")
+	procLoadCursorW       = user32.NewProc("LoadCursorW")
+	procLoadIconW         = user32.NewProc("LoadIconW")
+	procLoadImageW        = user32.NewProc("LoadImageW")
+	procMessageBoxW       = user32.NewProc("MessageBoxW")
+	procPostQuitMessage   = user32.NewProc("PostQuitMessage")
+	procPostMessageW      = user32.NewProc("PostMessageW")
+	procRegisterClassExW  = user32.NewProc("RegisterClassExW")
+	procRegisterWindowMsg = user32.NewProc("RegisterWindowMessageW")
+	procSetForegroundWnd  = user32.NewProc("SetForegroundWindow")
+	procShellNotifyIconW  = shell32.NewProc("Shell_NotifyIconW")
+	procTrackPopupMenu    = user32.NewProc("TrackPopupMenu")
+	procTranslateMessage  = user32.NewProc("TranslateMessage")
+	procUpdateWindow      = user32.NewProc("UpdateWindow")
 )
 
-var globalTray *windowsTray
+var (
+	globalTray            *windowsTray
+	taskbarCreatedMessage uint32
+)
 
 type trayMenuState struct {
 	ScheduleEnabled bool
@@ -158,7 +168,8 @@ type windowsTray struct {
 }
 
 func newWindowsTray(app *App) (*windowsTray, error) {
-	mutexName, err := syscall.UTF16PtrFromString("FeedMeDailyTrayMutex")
+	// 创建托盘实例，并通过命名互斥锁保证单实例运行。
+	mutexName, err := syscall.UTF16PtrFromString(appruntime.TrayMutexName)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +188,9 @@ func newWindowsTray(app *App) (*windowsTray, error) {
 }
 
 func (t *windowsTray) Run() error {
+	// 注册隐藏窗口、托盘图标和消息循环，进入真正的 Windows 托盘生命周期。
 	globalTray = t
+	taskbarCreatedMessage = registerWindowMessage("TaskbarCreated")
 	className, _ := syscall.UTF16PtrFromString("FeedMeDailyTrayWindow")
 	instance, _, _ := procGetModuleHandleW.Call(0)
 	icon, err := t.loadIcon()
@@ -245,6 +258,7 @@ func (t *windowsTray) Run() error {
 }
 
 func (t *windowsTray) addTrayIcon() error {
+	// 把图标注册到系统托盘区。
 	t.nid = notifyIconData{
 		Size:        uint32(unsafe.Sizeof(notifyIconData{})),
 		HWnd:        t.hwnd,
@@ -260,21 +274,34 @@ func (t *windowsTray) addTrayIcon() error {
 	return nil
 }
 
+func (t *windowsTray) refreshTrayIcon() error {
+	// 在任务栏重建或系统恢复后，重新注册托盘图标和回调消息。
+	if t.hwnd == 0 {
+		return nil
+	}
+	procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&t.nid)))
+	return t.addTrayIcon()
+}
+
 func (t *windowsTray) removeTrayIcon() {
+	// 退出时从系统托盘移除图标。
 	if t.hwnd != 0 {
 		procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&t.nid)))
 	}
 }
 
 func (t *windowsTray) ShowInfo(title string, body string) {
+	// 弹出普通信息气泡提示。
 	t.showBalloon(title, body, niifInfo)
 }
 
 func (t *windowsTray) ShowError(title string, body string) {
+	// 弹出错误气泡提示。
 	t.showBalloon(title, body, niifError)
 }
 
 func (t *windowsTray) showBalloon(title string, body string, infoFlags uint32) {
+	// 用托盘气泡向用户反馈后台操作结果。
 	t.nid.Flags = nifInfo
 	copyUTF16ToFixedArray(t.nid.InfoTitle[:], title)
 	copyUTF16ToFixedArray(t.nid.Info[:], body)
@@ -284,61 +311,47 @@ func (t *windowsTray) showBalloon(title string, body string, infoFlags uint32) {
 }
 
 func (t *windowsTray) handleCommand(commandID uint16) {
+	// 把菜单点击映射到 App 层动作。
 	switch commandID {
 	case menuOpenApp:
 		t.runAction(func() error { return t.app.OpenApp() }, "Opened FeedMeDaily.", "Open FeedMeDaily failed")
 	case menuRunSync:
 		t.runAction(func() error { return t.app.RunSyncNow() }, "Sync job started.", "Run sync failed")
-	case menuStartService:
-		t.runAction(func() error { return t.app.StartService() }, "Background service started.", "Start service failed")
-	case menuStopService:
-		t.runAction(func() error { return t.app.StopService() }, "Background service stopped.", "Stop service failed")
 	case menuToggleSchedule:
-		go func() {
-			state, err := t.app.ToggleScheduleEnabled()
-			if err != nil {
-				t.ShowError("FeedMeDaily Tray", "Update schedule failed: "+err.Error())
-				return
-			}
-			if state.ScheduleEnabled {
-				t.ShowInfo("FeedMeDaily Tray", fmt.Sprintf("Daily sync enabled at %s.", state.DailyTime))
-			} else {
-				t.ShowInfo("FeedMeDaily Tray", "Daily sync disabled.")
-			}
-		}()
+		state, err := t.app.ToggleScheduleEnabled()
+		if err != nil {
+			t.ShowError("FeedMeDaily Tray", "Update schedule failed: "+err.Error())
+			return
+		}
+		if state.ScheduleEnabled {
+			t.ShowInfo("FeedMeDaily Tray", fmt.Sprintf("Daily sync enabled at %s.", state.DailyTime))
+		} else {
+			t.ShowInfo("FeedMeDaily Tray", "Daily sync disabled.")
+		}
 	case menuLaunchAtLogin:
-		go func() {
-			state, err := t.app.ToggleLaunchAtLogin()
-			if err != nil {
-				t.ShowError("FeedMeDaily Tray", "Update launch at login failed: "+err.Error())
-				return
-			}
-			if state.LaunchAtLogin {
-				t.ShowInfo("FeedMeDaily Tray", "Launch at login enabled.")
-			} else {
-				t.ShowInfo("FeedMeDaily Tray", "Launch at login disabled.")
-			}
-		}()
+		state, err := t.app.ToggleLaunchAtLogin()
+		if err != nil {
+			t.ShowError("FeedMeDaily Tray", "Update launch at login failed: "+err.Error())
+			return
+		}
+		if state.LaunchAtLogin {
+			t.ShowInfo("FeedMeDaily Tray", "Launch at login enabled.")
+		} else {
+			t.ShowInfo("FeedMeDaily Tray", "Launch at login disabled.")
+		}
 	case menuOpenTraySettings:
 		t.runAction(func() error { return t.app.OpenTraySettings() }, "Opened tray settings.", "Open tray settings failed")
 	case menuOpenDataDir:
 		t.runAction(func() error { return t.app.OpenDataDir() }, "Opened data directory.", "Open data directory failed")
 	case menuOpenLogsDir:
 		t.runAction(func() error { return t.app.OpenLogsDir() }, "Opened logs directory.", "Open logs directory failed")
-	case menuQuitAndStopService:
-		go func() {
-			if err := t.app.StopService(); err != nil {
-				t.ShowError("FeedMeDaily Tray", "Stop service failed: "+err.Error())
-				return
-			}
-			t.requestQuit()
-		}()
 	case menuQuit:
-		t.requestQuit()
+		t.requestQuitAndStopService()
 	}
 }
 
 func (t *windowsTray) runAction(action func() error, success string, failure string) {
+	// 异步执行一个菜单动作，并统一处理成功/失败提示。
 	go func() {
 		if err := action(); err != nil {
 			t.ShowError("FeedMeDaily Tray", failure+": "+err.Error())
@@ -351,6 +364,7 @@ func (t *windowsTray) runAction(action func() error, success string, failure str
 }
 
 func (t *windowsTray) showContextMenu() {
+	// 动态构建右键菜单，并在鼠标位置弹出。
 	menu, _, _ := procCreatePopupMenu.Call()
 	if menu == 0 {
 		return
@@ -360,9 +374,6 @@ func (t *windowsTray) showContextMenu() {
 	state := t.app.MenuState()
 	_ = appendMenu(menu, mfString, uintptr(menuOpenApp), "Open FeedMeDaily")
 	_ = appendMenu(menu, mfString, uintptr(menuRunSync), "Run Sync Now")
-	_ = appendMenu(menu, mfSeparator, 0, "")
-	_ = appendMenu(menu, mfString, uintptr(menuStartService), "Start Background Service")
-	_ = appendMenu(menu, mfString, uintptr(menuStopService), "Stop Background Service")
 
 	scheduleFlags := uint32(mfString)
 	if state.ScheduleEnabled {
@@ -380,8 +391,7 @@ func (t *windowsTray) showContextMenu() {
 	_ = appendMenu(menu, mfString, uintptr(menuOpenDataDir), "Open Data Folder")
 	_ = appendMenu(menu, mfString, uintptr(menuOpenLogsDir), "Open Logs Folder")
 	_ = appendMenu(menu, mfSeparator, 0, "")
-	_ = appendMenu(menu, mfString, uintptr(menuQuitAndStopService), "Quit Tray And Stop Service")
-	_ = appendMenu(menu, mfString, uintptr(menuQuit), "Quit Tray")
+	_ = appendMenu(menu, mfString, uintptr(menuQuit), "Quit Tray And Stop Service")
 
 	var cursor point
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
@@ -395,9 +405,12 @@ func (t *windowsTray) showContextMenu() {
 		t.hwnd,
 		0,
 	)
+	// 这是 Windows 托盘右键菜单的经典收尾动作，否则菜单状态有时会卡住。
+	procPostMessageW.Call(t.hwnd, wmNull, 0, 0)
 }
 
 func (t *windowsTray) loadIcon() (uintptr, error) {
+	// 优先加载项目自带图标，失败时退回系统默认应用图标。
 	if t.app.layout.IconPath != "" {
 		path, err := syscall.UTF16PtrFromString(t.app.layout.IconPath)
 		if err == nil {
@@ -416,12 +429,18 @@ func (t *windowsTray) loadIcon() (uintptr, error) {
 }
 
 func windowProc(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) uintptr {
+	// 统一处理托盘回调、菜单命令和窗口销毁事件。
 	if globalTray == nil {
 		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(message), wParam, lParam)
 		return ret
 	}
 
 	switch message {
+	case taskbarCreatedMessage:
+		if err := globalTray.refreshTrayIcon(); err != nil {
+			globalTray.ShowError("FeedMeDaily Tray", "Tray icon recovery failed: "+err.Error())
+		}
+		return 0
 	case trayCallbackMessage:
 		switch uint32(lParam) {
 		case wmLButtonDblClk:
@@ -430,6 +449,14 @@ func windowProc(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) ui
 			globalTray.showContextMenu()
 		}
 		return 0
+	case wmPowerBroadcast:
+		switch uint32(wParam) {
+		case pbtApmResumeAutomatic, pbtApmResumeSuspend:
+			if err := globalTray.refreshTrayIcon(); err != nil {
+				globalTray.ShowError("FeedMeDaily Tray", "Tray resume recovery failed: "+err.Error())
+			}
+		}
+		return 1
 	case wmCommand:
 		globalTray.handleCommand(uint16(wParam & 0xffff))
 		return 0
@@ -446,11 +473,33 @@ func windowProc(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) ui
 	}
 }
 
+func registerWindowMessage(name string) uint32 {
+	// 注册系统广播消息名，例如 TaskbarCreated，用来处理 shell 重建。
+	namePtr, err := syscall.UTF16PtrFromString(name)
+	if err != nil {
+		return 0
+	}
+	value, _, _ := procRegisterWindowMsg.Call(uintptr(unsafe.Pointer(namePtr)))
+	return uint32(value)
+}
+
 func (t *windowsTray) requestQuit() {
+	// 通过给隐藏窗口发关闭消息来结束托盘循环。
 	procPostMessageW.Call(t.hwnd, wmClose, 0, 0)
 }
 
+func (t *windowsTray) requestQuitAndStopService() {
+	// 关闭托盘时统一收掉后台服务，避免留下孤儿进程。
+	go func() {
+		if err := t.app.StopService(); err != nil {
+			t.ShowError("FeedMeDaily Tray", "Stop service failed: "+err.Error())
+		}
+		t.requestQuit()
+	}()
+}
+
 func appendMenu(menu uintptr, flags uint32, itemID uintptr, label string) error {
+	// 往 Windows 弹出菜单里追加一个菜单项。
 	var labelPtr *uint16
 	if label != "" {
 		ptr, err := syscall.UTF16PtrFromString(label)
@@ -467,6 +516,7 @@ func appendMenu(menu uintptr, flags uint32, itemID uintptr, label string) error 
 }
 
 func copyUTF16ToFixedArray(target []uint16, value string) {
+	// 把 Go 字符串复制到 Windows 固定长度 UTF-16 缓冲区。
 	encoded, _ := syscall.UTF16FromString(value)
 	if len(encoded) > len(target) {
 		encoded = encoded[:len(target)]

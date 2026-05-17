@@ -9,6 +9,7 @@ $appDist = Join-Path $distDir "FeedMeDaily"
 $iconPath = Join-Path $root "assets\branding\feedmedaily.ico"
 $trayBuildScript = Join-Path $root "tools\build_go_tray.ps1"
 $trayBuildOutput = Join-Path $root "build\feedmedaily-tray.exe"
+$daemonBuildOutput = Join-Path $root "build\feedmedailyd.exe"
 
 function Invoke-NativeStep {
   param(
@@ -22,35 +23,6 @@ function Invoke-NativeStep {
   if ($LASTEXITCODE -ne 0) {
     throw "$Description failed with exit code $LASTEXITCODE."
   }
-}
-
-function Initialize-LocalBuildEnvironment {
-  if (-not $env:UV_CACHE_DIR) {
-    $env:UV_CACHE_DIR = Join-Path $root ".uv-cache"
-  }
-  if (-not $env:UV_PYTHON_INSTALL_DIR) {
-    $env:UV_PYTHON_INSTALL_DIR = Join-Path $root ".uv-python"
-  }
-  if (-not $env:UV_LINK_MODE) {
-    $env:UV_LINK_MODE = "copy"
-  }
-}
-
-function Resolve-PyInstaller {
-  $candidates = @(
-    (Join-Path $root ".venv\Scripts\pyinstaller.exe")
-  )
-  foreach ($candidate in $candidates) {
-    if (Test-Path $candidate) {
-      return $candidate
-    }
-  }
-
-  $command = Get-Command "pyinstaller" -ErrorAction SilentlyContinue
-  if ($command) {
-    return $command.Source
-  }
-  throw "PyInstaller was not found. Install it in .venv or as a user tool first."
 }
 
 function Resolve-Iscc {
@@ -109,93 +81,13 @@ function Remove-BuildArtifacts {
   }
 }
 
-function Resolve-BuildPython {
-  $candidates = @(
-    (Join-Path $root ".venv\Scripts\python.exe")
-  )
-
-  foreach ($candidate in $candidates) {
-    if ($candidate -and (Test-Path $candidate)) {
-      return $candidate
-    }
-  }
-
-  $command = Get-Command "python" -ErrorAction SilentlyContinue
-  if ($command) {
-    return $command.Source
-  }
-
-  throw "Python was not found."
-}
-
 function Get-ProjectVersion {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$PythonExe
-  )
-
-  $version = & $PythonExe -c "import pathlib, tomllib; data = tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8')); print(data['project']['version'])"
-
-  if ($LASTEXITCODE -ne 0 -or -not $version) {
-    throw "Failed to read version from pyproject.toml."
+  $packageJsonPath = Join-Path $root "web\\package.json"
+  $packageJson = Get-Content $packageJsonPath -Raw | ConvertFrom-Json
+  if (-not $packageJson.version) {
+    throw "Failed to read version from web/package.json."
   }
-
-  return $version.Trim()
-}
-
-function Write-PyInstallerVersionFile {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$Version
-  )
-
-  if ($Version -notmatch "^(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?") {
-    throw "Version '$Version' must start with MAJOR.MINOR.PATCH, for example 0.1.1."
-  }
-
-  $major = [int]$Matches[1]
-  $minor = [int]$Matches[2]
-  $patch = [int]$Matches[3]
-  $build = if ($Matches[4]) { [int]$Matches[4] } else { 0 }
-
-  $versionTuple = "$major, $minor, $patch, $build"
-  $versionFile = Join-Path $root "build\version_info.txt"
-
-  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $versionFile) | Out-Null
-
-  @"
-VSVersionInfo(
-  ffi=FixedFileInfo(
-    filevers=($versionTuple),
-    prodvers=($versionTuple),
-    mask=0x3f,
-    flags=0x0,
-    OS=0x40004,
-    fileType=0x1,
-    subtype=0x0,
-    date=(0, 0)
-  ),
-  kids=[
-    StringFileInfo([
-      StringTable(
-        '040904B0',
-        [
-          StringStruct('CompanyName', 'FeedMeDaily'),
-          StringStruct('FileDescription', 'FeedMeDaily'),
-          StringStruct('FileVersion', '$Version'),
-          StringStruct('InternalName', 'FeedMeDaily'),
-          StringStruct('OriginalFilename', 'FeedMeDaily.exe'),
-          StringStruct('ProductName', 'FeedMeDaily'),
-          StringStruct('ProductVersion', '$Version')
-        ]
-      )
-    ]),
-    VarFileInfo([VarStruct('Translation', [1033, 1200])])
-  ]
-)
-"@ | Set-Content -Encoding UTF8 $versionFile
-
-  return $versionFile
+  return "$($packageJson.version)".Trim()
 }
 
 function Write-UpdateManifest {
@@ -216,26 +108,12 @@ function Write-UpdateManifest {
 
 Push-Location $root
 try {
-  Initialize-LocalBuildEnvironment
   Stop-ExistingReleaseProcess
   Remove-BuildArtifacts
 
-  $buildPython = Resolve-BuildPython
-  $projectVersion = Get-ProjectVersion -PythonExe $buildPython
+  $projectVersion = Get-ProjectVersion
 
   Write-Host "Building FeedMeDaily version $projectVersion"
-
-  Invoke-NativeStep `
-    -Description "Project metadata refresh" `
-    -Command { uv sync}
-
-  $pyinstallerVersionFile = Write-PyInstallerVersionFile -Version $projectVersion
-
-  if (Test-Path $buildPython) {
-    Invoke-NativeStep `
-      -Description "Brand asset generation" `
-      -Command { & $buildPython ".\tools\generate_brand_assets.py" }
-  }
 
   Invoke-NativeStep `
     -Description "Frontend build" `
@@ -244,32 +122,19 @@ try {
   if (Test-Path $trayBuildScript) {
     Invoke-NativeStep `
       -Description "Go tray build" `
-      -Command { & $trayBuildScript }
+      -Command { & $trayBuildScript -Version $projectVersion }
   }
 
-  $pyinstaller = Resolve-PyInstaller
-
-  Invoke-NativeStep `
-    -Description "PyInstaller packaging" `
-    -Command {
-    & $pyinstaller `
-      --noconfirm `
-      --clean `
-      --name FeedMeDaily `
-      --onedir `
-      --icon $iconPath `
-      --version-file $pyinstallerVersionFile `
-      --copy-metadata scirssagent `
-      --paths src `
-      src\scirssagent\cli.py
-  }
-
+  New-Item -ItemType Directory -Force -Path $appDist | Out-Null
   $targetWeb = Join-Path $appDist "web\dist"
   New-Item -ItemType Directory -Force -Path $targetWeb | Out-Null
   Copy-Item -Recurse -Force ".\web\dist\*" $targetWeb
   Copy-Item -Force ".\assets\branding\feedmedaily.ico" (Join-Path $appDist "feedmedaily.ico")
   if (Test-Path $trayBuildOutput) {
     Copy-Item -Force $trayBuildOutput (Join-Path $appDist "FeedMeDailyTray.exe")
+  }
+  if (Test-Path $daemonBuildOutput) {
+    Copy-Item -Force $daemonBuildOutput (Join-Path $appDist "feedmedailyd.exe")
   }
   Write-UpdateManifest -Version $projectVersion
 

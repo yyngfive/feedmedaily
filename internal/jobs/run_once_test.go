@@ -1,0 +1,88 @@
+package jobs
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/yyngfive/scirssagent/internal/feeds"
+	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
+)
+
+func TestRunOnceBuildsSummaryWithoutDiskReportArtifacts(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(settings.WebDistDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings.ProfilePath, []byte(`{"meta":{"name":"Test","version":1,"created_at":"2026-05-16T00:00:00Z","updated_at":"2026-05-16T00:00:00Z","source_description":"test"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(settings.WebDistDir, "index.html"), []byte(`<html><head><link rel="stylesheet" href="./assets/app.css"></head><body><script type="module" src="./assets/app.js"></script></body></html>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(settings.WebDistDir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(settings.WebDistDir, "assets", "app.css"), []byte(`body{color:black;}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(settings.WebDistDir, "assets", "app.js"), []byte(`console.log("ok")`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	previousFetch := fetchAllFeedsFunc
+	defer func() { fetchAllFeedsFunc = previousFetch }()
+	fetchAllFeedsFunc = func(_ string, _ feeds.FetchOptions) (feeds.FetchResult, error) {
+		return feeds.FetchResult{
+			Papers: []store.Paper{
+				{
+					SourceURL:      "https://example.com/rss",
+					Title:          "Go migrated paper",
+					URL:            "https://example.com/paper-1",
+					DOI:            testStringPtr("10.1000/run-once"),
+					Journal:        testStringPtr("Nature"),
+					Abstract:       testStringPtr("Ready for classification."),
+					AbstractSource: "openalex",
+					Raw:            map[string]any{"guid": "abc"},
+				},
+			},
+			Fetched: 1,
+			Errors:  []string{},
+		}, nil
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.95,\"topic_tags\":[],\"reason\":\"Matches scope.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"迁移论文\"}]}"}}]}`))
+	}))
+	defer server.Close()
+	settings.ClassifierBaseURL = server.URL
+
+	summary, err := RunOnce(settings, RunOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Fetched != 1 || summary.Inserted != 1 || summary.Classified != 1 {
+		t.Fatalf("unexpected summary: %#v", summary)
+	}
+	if _, err := os.Stat(filepath.Join(settings.ReportsDir, "data", "latest.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected no latest.json artifact, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(settings.ReportsDir, "latest", "index.html")); !os.IsNotExist(err) {
+		t.Fatalf("expected no static report artifact, got err=%v", err)
+	}
+}
+
+func testStringPtr(value string) *string {
+	return &value
+}

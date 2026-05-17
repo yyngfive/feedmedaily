@@ -1,8 +1,8 @@
 # Go 后端迁移总方案
 
-Status: Draft  
+Status: In Progress
 Owner: TBD  
-Last Updated: 2026-05-08  
+Last Updated: 2026-05-13
 Scope: Windows first / mac compatible / Linux source-first  
 Related Docs: `go-backend-phase-1-plan.md`, `python-go-coexistence-transition.md`
 
@@ -23,6 +23,12 @@ Related Docs: `go-backend-phase-1-plan.md`, `python-go-coexistence-transition.md
 - 第二阶段再逐步完成 `Go 后端重写`，把当前 Python 服务替换为 Go 服务
 
 第一阶段的验收重点是“托盘程序是否能稳定管理后台任务与启动体验”，而不是“托盘触发的具体命令是 Go 还是 Python”。
+
+Current implementation note:
+
+- The Go tray manager is now wired directly to the Go backend command on this migration branch.
+- `cmd/feedmedailyd` now exists as the production Go backend for health, metadata, update/open controls, tray-backed scheduler settings, full app APIs, background jobs, pipeline execution, and static UI serving.
+- Python now remains primarily as a reference implementation and regression baseline; the tray no longer falls back to Python for production runtime behavior.
 
 本文件不写过细的每日实施步骤，不包含具体待办序列号。所有阶段文档必须以本文档为上位依据。
 

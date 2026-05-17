@@ -1,5 +1,7 @@
 param(
-  [string]$Output = ".\\build\\feedmedaily-tray.exe"
+  [string]$TrayOutput = ".\\build\\feedmedaily-tray.exe",
+  [string]$DaemonOutput = ".\\build\\feedmedailyd.exe",
+  [string]$Version = ""
 )
 
 $go = Get-Command "go" -ErrorAction SilentlyContinue
@@ -8,13 +10,19 @@ if (-not $go) {
 }
 
 $root = Split-Path -Parent $PSScriptRoot
-$outputPath = Join-Path $root $Output
-$outputDir = Split-Path -Parent $outputPath
+$trayOutputPath = Join-Path $root $TrayOutput
+$daemonOutputPath = Join-Path $root $DaemonOutput
+$outputDirs = @(
+  (Split-Path -Parent $trayOutputPath),
+  (Split-Path -Parent $daemonOutputPath)
+)
 $goCacheDir = Join-Path $root ".tmp\\go-build-cache"
 $goModCacheDir = Join-Path $root ".tmp\\go-mod-cache"
 
-if (-not (Test-Path $outputDir)) {
-  New-Item -ItemType Directory -Path $outputDir | Out-Null
+foreach ($dir in $outputDirs) {
+  if (-not (Test-Path $dir)) {
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+  }
 }
 
 foreach ($dir in @($goCacheDir, $goModCacheDir)) {
@@ -25,9 +33,17 @@ foreach ($dir in @($goCacheDir, $goModCacheDir)) {
 
 Push-Location $root
 try {
+  if (-not $Version) {
+    $packageJson = Get-Content (Join-Path $root "web\\package.json") -Raw | ConvertFrom-Json
+    $Version = "$($packageJson.version)".Trim()
+  }
   $env:GOCACHE = $goCacheDir
   $env:GOMODCACHE = $goModCacheDir
-  & go build -ldflags "-H=windowsgui" -o $outputPath .\cmd\feedmedaily-tray
+  & go build -ldflags "-H=windowsgui -X github.com/yyngfive/scirssagent/internal/runtime.buildVersion=$Version" -o $trayOutputPath .\cmd\feedmedaily-tray
+  if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+  }
+  & go build -ldflags "-H=windowsgui -X github.com/yyngfive/scirssagent/internal/runtime.buildVersion=$Version" -o $daemonOutputPath .\cmd\feedmedailyd
 }
 finally {
   Pop-Location

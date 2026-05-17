@@ -38,10 +38,6 @@ async function responseErrorMessage(response: Response): Promise<string> {
   return text || `Request failed (${response.status})`;
 }
 
-export function loadEmbeddedReport(): Report | null {
-  return window.__SCIRSS_REPORT__ ?? null;
-}
-
 export async function fetchLatestReport(): Promise<Report> {
   const response = await fetch("/api/report/latest");
   if (!response.ok) {

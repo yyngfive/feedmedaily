@@ -14,18 +14,14 @@ const JOB_FINAL_TTL_MS = 9000;
 const STICKY_TTL_MS = 0;
 
 const catalog = {
-  "app.report.embedded_fallback": {
-    text: "Using embedded report data because the API is unavailable.",
-    tone: "warning",
-  },
   "app.load.failed": {text: "Could not load data.", tone: "danger"},
   "paper.read.failed": {text: "Could not update read status.", tone: "danger"},
   "zotero.save.succeeded": {text: "Saved to Zotero.", tone: "success"},
   "feedback.save.succeeded": {text: "Feedback saved.", tone: "success"},
   "feedback.delete.succeeded": {text: "Feedback deleted.", tone: "success"},
   "settings.config.save.succeeded": {text: "Local settings saved.", tone: "success"},
-  "scheduler.save.succeeded": {text: "Scheduled task saved.", tone: "success"},
-  "scheduler.delete.succeeded": {text: "Scheduled task removed.", tone: "success"},
+  "scheduler.save.succeeded": {text: "Daily sync settings saved.", tone: "success"},
+  "scheduler.delete.succeeded": {text: "Daily sync disabled.", tone: "success"},
   "app.control.open.succeeded": {text: "Opened local target.", tone: "success"},
   "app.control.exit.succeeded": {text: "FeedMeDaily is shutting down.", tone: "info"},
   "feeds.validation.failed": {
@@ -33,7 +29,6 @@ const catalog = {
     tone: "danger",
   },
   "feeds.save.succeeded": {text: "Feed subscriptions saved.", tone: "success"},
-  "profile.bootstrap.started": {text: "Initial profile generation started.", tone: "info"},
   "profile.proposal.started": {text: "Profile proposal job started.", tone: "info"},
   "profile.proposal.applied": {text: "Profile proposal applied.", tone: "success"},
   "profile.proposal.rejected": {text: "Profile proposal rejected.", tone: "success"},
@@ -44,7 +39,7 @@ const catalog = {
   "pipeline.feeds.fetching": {text: "Fetching RSS feeds.", tone: "info"},
   "pipeline.metadata.enriching": {text: "Getting metadata.", tone: "info"},
   "pipeline.classifier.classifying": {text: "Classifying papers.", tone: "info"},
-  "pipeline.report.writing": {text: "Publishing report.", tone: "info"},
+  "pipeline.report.refreshing": {text: "Refreshing report from SQLite.", tone: "info"},
   "profile.proposal.collecting_feedback": {
     text: "Collecting feedback for profile review.",
     tone: "info",

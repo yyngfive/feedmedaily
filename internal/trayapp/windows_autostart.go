@@ -12,6 +12,7 @@ import (
 const autostartValueName = "FeedMeDailyTray"
 
 func autostartCommandLine(rootDir string) (string, error) {
+	// 生成写入注册表的启动命令行，确保下次登录还能定位到同一个 root。
 	executable, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -20,6 +21,7 @@ func autostartCommandLine(rootDir string) (string, error) {
 }
 
 func isAutostartEnabled(rootDir string) (bool, error) {
+	// 检查 HKCU Run 键中是否存在匹配当前 root 的托盘启动项。
 	expected, err := autostartCommandLine(rootDir)
 	if err != nil {
 		return false, err
@@ -46,6 +48,7 @@ func isAutostartEnabled(rootDir string) (bool, error) {
 }
 
 func setAutostartEnabled(rootDir string, enabled bool) error {
+	// 通过修改 HKCU Run 注册表项启用或禁用开机自启动。
 	if !enabled {
 		cmd := exec.Command(
 			"reg",

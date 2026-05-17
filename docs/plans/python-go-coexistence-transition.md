@@ -1,6 +1,6 @@
 # Python/Go 共存期临时应对方案
 
-Status: Draft  
+Status: Historical reference  
 Owner: TBD  
 Last Updated: 2026-05-08  
 Scope: Windows first / mac compatible / Linux source-first  
@@ -8,6 +8,11 @@ Related Docs: `go-backend-migration-master-plan.md`, `go-backend-phase-1-plan.md
 
 > 本文件只规范迁移过渡期，不替代 `go-backend-migration-master-plan.md`。  
 > 本文件用于约束 Python/Go 共存时的职责边界和切换规则。
+
+Current note:
+
+- 当前分支已经进入 `Go backend as single production surface` 阶段。
+- 本文件保留为历史过渡说明，帮助理解为什么仓库里仍保留 Python 参考实现。
 
 ## Summary
 
@@ -44,7 +49,7 @@ Related Docs: `go-backend-migration-master-plan.md`, `go-backend-phase-1-plan.md
   - 监控健康状态
   - 执行定时触发
   - 打开浏览器
-- Python 继续提供现有 FastAPI `/api/*`
+- Python 在该历史阶段继续提供现有 FastAPI `/api/*`
 - 该阶段用于尽快验证托盘产品形态是否可行
 - 该阶段的重点是“托盘管理层是否成立”，而不是“后台命令是否已经改写为 Go”
 - 因此第一阶段允许托盘通过统一命令封装继续执行 Python 命令
@@ -60,7 +65,7 @@ Related Docs: `go-backend-migration-master-plan.md`, `go-backend-phase-1-plan.md
 
 ### Transition C：移除运行时 Python 依赖
 
-- Windows 正式分发中不再包含 Python 运行时
+- Windows 正式分发是否彻底移除 Python 运行时，后续再决定
 - Python 仅保留为仓库中的参考或测试辅助代码
 - 是否彻底删除 Python 代码，单独后续决定，不作为迁移首版必要条件
 

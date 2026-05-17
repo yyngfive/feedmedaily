@@ -1,0 +1,54 @@
+# Front end
+
+## Profile
+
+- [ ] 增加自己编辑Profile功能
+- [ ] 增加AI自动简化Profile的功能，优化Profile更新逻辑
+- [ ] 修改tag生成逻辑，改为ai对direct和indirect生成，对unrelated不生成
+
+## Feed
+
+- [ ] 增加一个内置的Feed List以及官方RSS List跳转页
+- [ ] 增加获取feed、metadata、llm分类时的具体进度条
+
+## Initialization & Settings
+
+- [ ] 精简参数界面，把确认按钮放在下方
+- [ ] 增加DeepSeek开发者中心链接指引
+- [ ] 增加起始界面的说明文档
+
+## Filter
+
+- [ ] 增加mark wrong筛选
+- [ ] 增加期刊的多选filter
+
+## Card List
+
+- [ ] 增加按照期刊、日期、置信度的排序功能
+- [ ] 增加一个一键全部read功能
+
+## Update
+
+- [ ] 增加内置的manifest
+
+# Server
+
+## Feed
+
+- [ ] APSB等Elsevier期刊解析报错
+- [ ] NAR的RSS无法获取
+- [ ] 避免数据更新时的终端弹窗
+- [ ] Last Update没有更新却自动增加
+
+## Scheduler
+
+- [ ] 增加对linux和mac的支持
+
+## Installer
+
+- [ ] 增加对mac的支持，linux推荐使用源码安装uv直接运行
+
+## 托盘
+
+- [ ] 休眠打开后卡死
+- [ ] 后台服务检测到托盘程序未启动，自动打开托盘
