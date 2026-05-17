@@ -402,6 +402,7 @@ func openWithShell(target string) error {
 	switch goruntime.GOOS {
 	case "windows":
 		cmd := exec.Command("cmd", "/c", "start", "", target)
+		cmd.SysProcAttr = hiddenBuildSysProcAttr()
 		return cmd.Start()
 	case "darwin":
 		return exec.Command("open", target).Start()
@@ -417,6 +418,7 @@ func ProcessRunning(pid int) bool {
 	}
 	if goruntime.GOOS == "windows" {
 		cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid))
+		cmd.SysProcAttr = hiddenBuildSysProcAttr()
 		output, err := cmd.Output()
 		return err == nil && strings.Contains(string(output), strconv.Itoa(pid))
 	}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	goruntime "runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -174,11 +175,6 @@ func main() {
 		}
 		return
 	}
-	if settings.Mode == appruntime.ModeRelease && os.Getenv("FEEDMEDAILY_LAUNCHED_BY_TRAY") != "1" {
-		if err := appruntime.EnsureTrayRunning(settings.RootDir); err != nil {
-			fmt.Fprintln(os.Stderr, "warning: ensure tray running:", err)
-		}
-	}
 	// 显式传参优先于配置文件中的默认值。
 	if *host != "" {
 		settings.ServerHost = *host
@@ -211,6 +207,9 @@ func main() {
 	}
 	defer appruntime.ClearState(settings.RuntimeStatePath)
 
+	maybeEnsureTray(settings)
+	printDaemonStartup(settings)
+
 	// 监听 Ctrl+C 或系统终止信号，确保命令行运行时也能正常退出。
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -225,11 +224,41 @@ func main() {
 		fmt.Fprintln(os.Stderr, "serve:", err)
 		os.Exit(1)
 	}
+	fmt.Fprintf(os.Stderr, "[%s] FeedMeDaily server stopped.\n", time.Now().Format("15:04:05"))
 }
 
 func stringPtr(value string) *string {
 	clean := value
 	return &clean
+}
+
+func maybeEnsureTray(settings config.Settings) {
+	if os.Getenv("FEEDMEDAILY_LAUNCHED_BY_TRAY") == "1" {
+		return
+	}
+	if goruntime.GOOS != "windows" {
+		fmt.Fprintf(
+			os.Stderr,
+			"[%s] Tray auto-launch is skipped on %s.\n",
+			time.Now().Format("15:04:05"),
+			goruntime.GOOS,
+		)
+		return
+	}
+	if err := appruntime.EnsureTrayRunning(settings.RootDir); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: ensure tray running:", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[%s] FeedMeDaily tray is running.\n", time.Now().Format("15:04:05"))
+}
+
+func printDaemonStartup(settings config.Settings) {
+	fmt.Fprintf(os.Stderr, "[%s] FeedMeDaily server started.\n", time.Now().Format("15:04:05"))
+	fmt.Fprintf(os.Stderr, "  mode: %s\n", settings.Mode)
+	fmt.Fprintf(os.Stderr, "  url: http://%s:%d\n", settings.ServerHost, settings.ServerPort)
+	fmt.Fprintf(os.Stderr, "  logs: %s\n", settings.LogsDir)
+	fmt.Fprintf(os.Stderr, "  data: %s\n", settings.DataDir)
+	fmt.Fprintf(os.Stderr, "Press Ctrl+C to stop.\n")
 }
 
 func progressReporter(logsDir string, component string) jobruntime.ProgressFunc {

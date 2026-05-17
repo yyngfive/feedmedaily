@@ -114,6 +114,8 @@ export function App() {
   const [systemTheme, setSystemTheme] = React.useState<"light" | "dark">("light");
   const knownJobStateRef = React.useRef(new Map<string, string>());
   const jobsHydratedRef = React.useRef(false);
+  const bootstrapRefreshRef = React.useRef<string | null>(null);
+  const activeJobMessageRef = React.useRef<string | null>(null);
   const deferredQuery = React.useDeferredValue(query);
   const resolvedTheme = themePreference === "system" ? systemTheme : themePreference;
 
@@ -268,6 +270,19 @@ export function App() {
     bootstrapJob?.status === "running";
 
   React.useEffect(() => {
+    if (!bootstrapJob) {
+      bootstrapRefreshRef.current = null;
+      return;
+    }
+    const completionKey = `${bootstrapJob.id}:${bootstrapJob.status}:${bootstrapJob.finished_at ?? ""}`;
+    if (bootstrapJob.status !== "completed" || bootstrapRefreshRef.current === completionKey) {
+      return;
+    }
+    bootstrapRefreshRef.current = completionKey;
+    void refreshAll();
+  }, [bootstrapJob, refreshAll]);
+
+  React.useEffect(() => {
     let cancelled = false;
 
     const pollJobs = async () => {
@@ -279,11 +294,18 @@ export function App() {
 
         let shouldRefresh = false;
         let announcement: JobInfo | null = null;
+        let activeAnnouncement: JobInfo | null = null;
         const nextJobState = new Map<string, string>();
         for (const job of serverJobs) {
           const signature = `${job.status}:${job.finished_at ?? job.started_at ?? ""}:${job.message_key ?? ""}:${job.message ?? ""}:${job.error ?? ""}`;
           const previousSignature = knownJobStateRef.current.get(job.id);
           nextJobState.set(job.id, signature);
+          if (
+            activeAnnouncement == null &&
+            (job.status === "queued" || job.status === "running")
+          ) {
+            activeAnnouncement = job;
+          }
           if (!jobsHydratedRef.current || previousSignature === signature) {
             continue;
           }
@@ -326,7 +348,17 @@ export function App() {
         });
         knownJobStateRef.current = nextJobState;
         if (jobsHydratedRef.current && announcement) {
+          activeJobMessageRef.current = null;
           setMessage(messageFromJob(announcement));
+        } else if (!jobsHydratedRef.current && activeAnnouncement) {
+          const activeSignature = `${activeAnnouncement.id}:${activeAnnouncement.status}:${activeAnnouncement.message_key ?? ""}:${activeAnnouncement.message ?? ""}`;
+          if (activeJobMessageRef.current !== activeSignature) {
+            activeJobMessageRef.current = activeSignature;
+            setMessage(messageFromJob(activeAnnouncement));
+          }
+        } else if (!activeAnnouncement && activeJobMessageRef.current !== null) {
+          activeJobMessageRef.current = null;
+          setMessage((current) => (current?.ttlMs === 0 ? null : current));
         }
         jobsHydratedRef.current = true;
 

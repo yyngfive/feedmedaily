@@ -318,31 +318,27 @@ func (t *windowsTray) handleCommand(commandID uint16) {
 	case menuRunSync:
 		t.runAction(func() error { return t.app.RunSyncNow() }, "Sync job started.", "Run sync failed")
 	case menuToggleSchedule:
-		go func() {
-			state, err := t.app.ToggleScheduleEnabled()
-			if err != nil {
-				t.ShowError("FeedMeDaily Tray", "Update schedule failed: "+err.Error())
-				return
-			}
-			if state.ScheduleEnabled {
-				t.ShowInfo("FeedMeDaily Tray", fmt.Sprintf("Daily sync enabled at %s.", state.DailyTime))
-			} else {
-				t.ShowInfo("FeedMeDaily Tray", "Daily sync disabled.")
-			}
-		}()
+		state, err := t.app.ToggleScheduleEnabled()
+		if err != nil {
+			t.ShowError("FeedMeDaily Tray", "Update schedule failed: "+err.Error())
+			return
+		}
+		if state.ScheduleEnabled {
+			t.ShowInfo("FeedMeDaily Tray", fmt.Sprintf("Daily sync enabled at %s.", state.DailyTime))
+		} else {
+			t.ShowInfo("FeedMeDaily Tray", "Daily sync disabled.")
+		}
 	case menuLaunchAtLogin:
-		go func() {
-			state, err := t.app.ToggleLaunchAtLogin()
-			if err != nil {
-				t.ShowError("FeedMeDaily Tray", "Update launch at login failed: "+err.Error())
-				return
-			}
-			if state.LaunchAtLogin {
-				t.ShowInfo("FeedMeDaily Tray", "Launch at login enabled.")
-			} else {
-				t.ShowInfo("FeedMeDaily Tray", "Launch at login disabled.")
-			}
-		}()
+		state, err := t.app.ToggleLaunchAtLogin()
+		if err != nil {
+			t.ShowError("FeedMeDaily Tray", "Update launch at login failed: "+err.Error())
+			return
+		}
+		if state.LaunchAtLogin {
+			t.ShowInfo("FeedMeDaily Tray", "Launch at login enabled.")
+		} else {
+			t.ShowInfo("FeedMeDaily Tray", "Launch at login disabled.")
+		}
 	case menuOpenTraySettings:
 		t.runAction(func() error { return t.app.OpenTraySettings() }, "Opened tray settings.", "Open tray settings failed")
 	case menuOpenDataDir:
