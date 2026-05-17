@@ -253,12 +253,6 @@ func buildItemPayload(paper store.Paper, classification store.Classification, co
 		{"tag": "scirssagent"},
 		{"tag": classification.Relevance},
 	}
-	for _, tag := range classification.TopicTags {
-		if len(tags) >= 10 {
-			break
-		}
-		tags = append(tags, map[string]string{"tag": tag})
-	}
 	payload := map[string]any{
 		"itemType":         "journalArticle",
 		"title":            paper.Title,

@@ -5,7 +5,7 @@ import {relevanceTabs, type RelevanceFilter} from "../../app/constants";
 import {EmptyStateCard} from "../common/EmptyStateCard";
 import {StatusBanner} from "../common/StatusBanner";
 import {PaperCard} from "./PaperCard";
-import type {ClassificationProfile, Paper, Relevance} from "../../types";
+import type {Paper, Relevance} from "../../types";
 
 export function PaperListSection({
   hasNoFetchedPapers,
@@ -16,7 +16,6 @@ export function PaperListSection({
   onSelectPaper,
   onStartFeedSetup,
   papers,
-  profile,
   query,
   reportErrors,
   relevance,
@@ -34,7 +33,6 @@ export function PaperListSection({
   onSelectPaper: (paper: Paper) => void;
   onStartFeedSetup: () => void;
   papers: Paper[];
-  profile: ClassificationProfile | null;
   query: string;
   reportErrors: string[];
   relevance: RelevanceFilter;
@@ -124,7 +122,7 @@ export function PaperListSection({
         <EmptyStateCard
           eyebrow="No results"
           title="No papers match the current filters"
-          body="Try broadening the journal, topic, date, or read-status filters to bring more papers back into view."
+          body="Try broadening the journal, date, or read-status filters to bring more papers back into view."
           actions={
             <Button size="sm" variant="outline" onPress={onResetFilters}>
               Reset filters
@@ -146,7 +144,6 @@ export function PaperListSection({
                 <div className="px-1 py-1.5">
                   <PaperCard
                     paper={paper}
-                    profile={profile}
                     isSelected={paper.id === selectedId}
                     isUnread={!paper.read_at}
                     onSelect={() => onSelectPaper(paper)}

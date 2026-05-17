@@ -18,14 +18,11 @@ export function FiltersSidebar({
   onJournalChange,
   onReadFilterChange,
   onReset,
-  onTopicChange,
   profileName,
   profileVersion,
   readFilter,
   reportDate,
   shownCount,
-  topic,
-  topicOptions,
   totalCount,
   visibleTotals,
 }: {
@@ -36,14 +33,11 @@ export function FiltersSidebar({
   onJournalChange: (value: string) => void;
   onReadFilterChange: (value: ReadFilter) => void;
   onReset: () => void;
-  onTopicChange: (value: string) => void;
   profileName: string;
   profileVersion: number;
   readFilter: ReadFilter;
   reportDate: string;
   shownCount: number;
-  topic: string;
-  topicOptions: SelectOption[];
   totalCount: number;
   visibleTotals: Record<Relevance, number>;
 }) {
@@ -79,7 +73,6 @@ export function FiltersSidebar({
           value={journal}
           onChange={onJournalChange}
         />
-        <SelectField label="Topic" options={topicOptions} value={topic} onChange={onTopicChange} />
         <SelectField
           label="Date"
           options={[...dateFilterOptions]}

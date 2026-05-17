@@ -16,16 +16,13 @@ import (
 const baseClassificationInstructions = `You are a careful scientific literature classifier.
 
 Classify each paper using only the user-supplied classification profile.
-Do not invent interests, labels, tags, or rules that are not present in the profile.
+Do not invent new interests, relevance rules, or decision criteria outside the profile.
+Do not broaden the user's scope beyond what the profile supports.
 
 Labels are fixed:
 - direct
 - indirect
 - unrelated
-
-topic_tags rules:
-- Only emit tag ids that exist in the profile topic taxonomy.
-- Use an empty list when no tag clearly applies.
 
 Return concise, evidence-based reasoning grounded in the title and abstract.`
 
@@ -95,7 +92,7 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 	var decoded map[string]any
 	lastContent := ""
 	for range 2 {
-		content, err := requestJSONContent(cfg, payload, "classification")
+		content, err := requestJSONContentWithFallback(cfg, payload, "classification")
 		if err != nil {
 			return nil, err
 		}
@@ -298,6 +295,56 @@ func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string)
 	return decoded.Choices[0].Message.Content, nil
 }
 
+func requestJSONContentWithFallback(cfg LLMConfig, payload map[string]any, operation string) (string, error) {
+	content, err := requestJSONContent(cfg, payload, operation)
+	if err == nil {
+		return content, nil
+	}
+	if normalizedThinking(cfg.Thinking) == "disabled" || !shouldRetryWithoutThinking(err) {
+		return "", err
+	}
+
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "warning",
+		Component: "classifier",
+		Action:    operation + "_thinking_fallback_started",
+		Message:   "Retrying request with thinking disabled.",
+		Error:     err.Error(),
+		Data: map[string]any{
+			"model":     cfg.Model,
+			"operation": operation,
+		},
+	})
+	fallbackPayload := clonePayload(payload)
+	fallbackPayload["thinking"] = map[string]string{"type": "disabled"}
+	content, fallbackErr := requestJSONContent(cfg, fallbackPayload, operation)
+	if fallbackErr != nil {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "error",
+			Component: "classifier",
+			Action:    operation + "_thinking_fallback_failed",
+			Message:   "Retry with thinking disabled failed.",
+			Error:     fallbackErr.Error(),
+			Data: map[string]any{
+				"model":     cfg.Model,
+				"operation": operation,
+			},
+		})
+		return "", fallbackErr
+	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "classifier",
+		Action:    operation + "_thinking_fallback_completed",
+		Message:   "Retry with thinking disabled succeeded.",
+		Data: map[string]any{
+			"model":     cfg.Model,
+			"operation": operation,
+		},
+	})
+	return content, nil
+}
+
 func batchClassificationPrompt(papers []promptPaper, profile map[string]any) string {
 	profileJSON, _ := json.MarshalIndent(profilePromptPayload(profile), "", "  ")
 	items := make([]map[string]any, 0, len(papers))
@@ -323,7 +370,6 @@ Return valid JSON only, with this exact shape:
       "id": "string",
       "relevance": "direct | indirect | unrelated",
       "confidence": 0.0,
-      "topic_tags": ["profile_topic_id"],
       "reason": "one concise sentence",
       "recommended_action": "read | scan | skip",
       "translated_title_zh": "concise Chinese title translation"
@@ -367,7 +413,6 @@ func profilePromptPayload(profile map[string]any) map[string]any {
 	payload := map[string]any{
 		"scope":           normalizedString(profile["scope"]),
 		"relevance_rules": map[string]any{"direct": []string{}, "indirect": []string{}, "unrelated": []string{}},
-		"topic_taxonomy":  []any{},
 	}
 	if rawRules, ok := profile["relevance_rules"].(map[string]any); ok {
 		payload["relevance_rules"] = map[string]any{
@@ -375,27 +420,6 @@ func profilePromptPayload(profile map[string]any) map[string]any {
 			"indirect":  normalizeStringSlice(rawRules["indirect"]),
 			"unrelated": normalizeStringSlice(rawRules["unrelated"]),
 		}
-	}
-	if rawTags, ok := profile["topic_taxonomy"].([]any); ok {
-		seen := map[string]struct{}{}
-		tags := make([]map[string]any, 0, len(rawTags))
-		for _, rawTag := range rawTags {
-			tagMap, ok := rawTag.(map[string]any)
-			if !ok {
-				continue
-			}
-			id := normalizedString(tagMap["id"])
-			label := normalizedString(tagMap["label"])
-			if id == "" || label == "" {
-				continue
-			}
-			if _, exists := seen[id]; exists {
-				continue
-			}
-			seen[id] = struct{}{}
-			tags = append(tags, map[string]any{"id": id, "label": label})
-		}
-		payload["topic_taxonomy"] = tags
 	}
 	if rawFewShots, ok := profile["few_shots"].([]any); ok && len(rawFewShots) > 0 {
 		fewShots := make([]map[string]any, 0, min(2, len(rawFewShots)))
@@ -407,7 +431,6 @@ func profilePromptPayload(profile map[string]any) map[string]any {
 			fewShots = append(fewShots, map[string]any{
 				"title":     normalizedString(item["title"]),
 				"relevance": normalizedString(item["relevance"]),
-				"tags":      normalizeStringSlice(item["tags"]),
 				"rationale": normalizedString(item["rationale"]),
 			})
 		}
@@ -419,7 +442,6 @@ func profilePromptPayload(profile map[string]any) map[string]any {
 }
 
 func decodeClassification(item map[string]any, model string) (store.Classification, error) {
-	topicTags := normalizeStringSlice(item["topic_tags"])
 	relevance := normalizedString(item["relevance"])
 	if relevance != "direct" && relevance != "indirect" && relevance != "unrelated" {
 		return store.Classification{}, fmt.Errorf("classifier returned unsupported relevance: %s", relevance)
@@ -431,7 +453,7 @@ func decodeClassification(item map[string]any, model string) (store.Classificati
 	classification := store.Classification{
 		Relevance:         relevance,
 		Confidence:        floatValue(item["confidence"]),
-		TopicTags:         topicTags,
+		TopicTags:         []string{},
 		Reason:            normalizedString(item["reason"]),
 		RecommendedAction: recommendedAction,
 		Model:             model,
@@ -511,6 +533,26 @@ func normalizedThinking(value string) string {
 		return "disabled"
 	}
 	return strings.TrimSpace(value)
+}
+
+func shouldRetryWithoutThinking(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "timeout") ||
+		strings.Contains(message, "timed out") ||
+		strings.Contains(message, "deadline exceeded") ||
+		strings.Contains(message, "thinking") ||
+		strings.Contains(message, "reasoning") ||
+		strings.Contains(message, "reasoner") ||
+		strings.Contains(message, "504") ||
+		strings.Contains(message, "502")
+}
+
+func clonePayload(source map[string]any) map[string]any {
+	cloned := make(map[string]any, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func stringValue(value *string) string {

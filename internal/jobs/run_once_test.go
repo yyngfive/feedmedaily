@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/yyngfive/scirssagent/internal/feeds"
+	"github.com/yyngfive/scirssagent/internal/profile"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
@@ -63,7 +64,7 @@ func TestRunOnceBuildsSummaryWithoutDiskReportArtifacts(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.95,\"topic_tags\":[],\"reason\":\"Matches scope.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"迁移论文\"}]}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.95,\"reason\":\"Matches scope.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"迁移论文\"}]}"}}]}`))
 	}))
 	defer server.Close()
 	settings.ClassifierBaseURL = server.URL
@@ -80,6 +81,147 @@ func TestRunOnceBuildsSummaryWithoutDiskReportArtifacts(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(settings.ReportsDir, "latest", "index.html")); !os.IsNotExist(err) {
 		t.Fatalf("expected no static report artifact, got err=%v", err)
+	}
+}
+
+func TestRunOnceDoesNotExpandProfileTaxonomyAndClearsTopicTags(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings.ProfilePath, []byte(`{"meta":{"name":"Test","version":1,"created_at":"2026-05-16T00:00:00Z","updated_at":"2026-05-16T00:00:00Z","source_description":"test"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[{"id":"rna_bio","label":"RNA Bio"}],"few_shots":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	previousFetch := fetchAllFeedsFunc
+	defer func() { fetchAllFeedsFunc = previousFetch }()
+	fetchAllFeedsFunc = func(_ string, _ feeds.FetchOptions) (feeds.FetchResult, error) {
+		return feeds.FetchResult{
+			Papers: []store.Paper{
+				{
+					SourceURL:      "https://example.com/rss",
+					Title:          "RNA CRISPR paper",
+					URL:            "https://example.com/paper-1",
+					Journal:        testStringPtr("Nature"),
+					Abstract:       testStringPtr("RNA and CRISPR regulation."),
+					AbstractSource: "rss",
+					Raw:            map[string]any{"guid": "abc"},
+				},
+				{
+					SourceURL:      "https://example.com/rss",
+					Title:          "Gene regulation paper",
+					URL:            "https://example.com/paper-2",
+					Journal:        testStringPtr("Science"),
+					Abstract:       testStringPtr("Gene regulation pathway."),
+					AbstractSource: "rss",
+					Raw:            map[string]any{"guid": "def"},
+				},
+			},
+			Fetched: 2,
+			Errors:  []string{},
+		}, nil
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.95,\"reason\":\"Matches scope.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"RNA CRISPR 论文\"},{\"id\":\"2\",\"relevance\":\"indirect\",\"confidence\":0.7,\"reason\":\"Partially relevant.\",\"recommended_action\":\"scan\",\"translated_title_zh\":\"基因调控论文\"}]}"}}]}`))
+	}))
+	defer server.Close()
+	settings.ClassifierBaseURL = server.URL
+
+	summary, err := RunOnce(settings, RunOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Fetched != 2 || summary.Inserted != 2 || summary.Classified != 2 {
+		t.Fatalf("unexpected summary: %#v", summary)
+	}
+
+	profileBytes, err := os.ReadFile(settings.ProfilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedProfile := `{"meta":{"name":"Test","version":1,"created_at":"2026-05-16T00:00:00Z","updated_at":"2026-05-16T00:00:00Z","source_description":"test"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[{"id":"rna_bio","label":"RNA Bio"}],"few_shots":[]}`
+	if string(profileBytes) != expectedProfile {
+		t.Fatalf("profile should remain unchanged, got %s", string(profileBytes))
+	}
+
+	sqliteStore, err := store.Open(settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqliteStore.Close()
+	first, err := sqliteStore.LatestClassification(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := sqliteStore.LatestClassification(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == nil || second == nil {
+		t.Fatalf("missing classifications: %#v %#v", first, second)
+	}
+	if len(first.TopicTags) != 0 {
+		t.Fatalf("unexpected first topic tags: %#v", first.TopicTags)
+	}
+	if len(second.TopicTags) != 0 {
+		t.Fatalf("unexpected second topic tags: %#v", second.TopicTags)
+	}
+}
+
+func TestRunOnceLeavesProfileUntouchedWhenClassifierReturnsNoTags(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initialProfile := `{"meta":{"name":"Test","version":1,"created_at":"2026-05-16T00:00:00Z","updated_at":"2026-05-16T00:00:00Z","source_description":"test"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[{"id":"rna_bio","label":"RNA Bio"}],"few_shots":[]}`
+	if err := os.WriteFile(settings.ProfilePath, []byte(initialProfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	previousFetch := fetchAllFeedsFunc
+	defer func() { fetchAllFeedsFunc = previousFetch }()
+	fetchAllFeedsFunc = func(_ string, _ feeds.FetchOptions) (feeds.FetchResult, error) {
+		return feeds.FetchResult{
+			Papers: []store.Paper{{
+				SourceURL:      "https://example.com/rss",
+				Title:          "RNA paper",
+				URL:            "https://example.com/paper-1",
+				Journal:        testStringPtr("Nature"),
+				Abstract:       testStringPtr("RNA paper."),
+				AbstractSource: "rss",
+				Raw:            map[string]any{"guid": "abc"},
+			}},
+			Fetched: 1,
+			Errors:  []string{},
+		}, nil
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.95,\"reason\":\"Matches scope.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"RNA 论文\"}]}"}}]}`))
+	}))
+	defer server.Close()
+	settings.ClassifierBaseURL = server.URL
+
+	if _, err := RunOnce(settings, RunOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	updatedProfile, err := profile.ReadCurrent(settings.ProfilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := updatedProfile["meta"].(map[string]any)
+	if meta["version"] != float64(1) {
+		t.Fatalf("expected profile version to stay 1, got %#v", meta)
 	}
 }
 

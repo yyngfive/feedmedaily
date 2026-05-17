@@ -216,29 +216,7 @@ Required JSON shape:
 	return draft, nil
 }
 
-func requestProfileModelJSON(settings config.Settings, systemPrompt string, userPrompt string, maxTokens int) (string, error) {
-	// 通过 OpenAI-compatible chat completions 调用 profile model 并返回 message content。
-	if strings.TrimSpace(settings.ProfileAPIKey) == "" {
-		return "", fmt.Errorf("SCIRSS_PROFILE_API_KEY is required for profile generation and prompt revision")
-	}
-	endpoint := strings.TrimRight(strings.TrimSpace(settings.ProfileBaseURL), "/") + "/chat/completions"
-	payload := map[string]any{
-		"model": settings.ProfileModel,
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": userPrompt},
-		},
-		"temperature":     0,
-		"max_tokens":      maxTokens,
-		"response_format": map[string]string{"type": "json_object"},
-	}
-	if thinking := strings.TrimSpace(settings.ProfileThinking); thinking != "" {
-		payload["thinking"] = map[string]string{"type": thinking}
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("encode profile generation request: %w", err)
-	}
+func requestProfileModelJSONBody(settings config.Settings, endpoint string, body []byte) (string, error) {
 	request, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("build profile generation request: %w", err)
@@ -298,6 +276,80 @@ func requestProfileModelJSON(settings config.Settings, systemPrompt string, user
 		return "", fmt.Errorf("profile model response did not contain any choices")
 	}
 	return payloadResponse.Choices[0].Message.Content, nil
+}
+
+func requestProfileModelJSON(settings config.Settings, systemPrompt string, userPrompt string, maxTokens int) (string, error) {
+	// 通过 OpenAI-compatible chat completions 调用 profile model 并返回 message content。
+	if strings.TrimSpace(settings.ProfileAPIKey) == "" {
+		return "", fmt.Errorf("SCIRSS_PROFILE_API_KEY is required for profile generation and prompt revision")
+	}
+	endpoint := strings.TrimRight(strings.TrimSpace(settings.ProfileBaseURL), "/") + "/chat/completions"
+	payload := map[string]any{
+		"model": settings.ProfileModel,
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userPrompt},
+		},
+		"temperature":     0,
+		"max_tokens":      maxTokens,
+		"response_format": map[string]string{"type": "json_object"},
+	}
+	if thinking := strings.TrimSpace(settings.ProfileThinking); thinking != "" {
+		payload["thinking"] = map[string]string{"type": thinking}
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("encode profile generation request: %w", err)
+	}
+	content, err := requestProfileModelJSONBody(settings, endpoint, body)
+	if err == nil || strings.TrimSpace(settings.ProfileThinking) == "" || strings.EqualFold(strings.TrimSpace(settings.ProfileThinking), "disabled") || !shouldRetryProfileWithoutThinking(err) {
+		return content, err
+	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "warning",
+		Component: "profile",
+		Action:    "thinking_fallback_started",
+		Message:   "Retrying profile request with thinking disabled.",
+		Error:     err.Error(),
+		Data:      map[string]any{"model": settings.ProfileModel},
+	})
+	payload["thinking"] = map[string]string{"type": "disabled"}
+	fallbackBody, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		return "", fmt.Errorf("encode fallback profile generation request: %w", marshalErr)
+	}
+	content, fallbackErr := requestProfileModelJSONBody(settings, endpoint, fallbackBody)
+	if fallbackErr != nil {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "error",
+			Component: "profile",
+			Action:    "thinking_fallback_failed",
+			Message:   "Retry with thinking disabled failed.",
+			Error:     fallbackErr.Error(),
+			Data:      map[string]any{"model": settings.ProfileModel},
+		})
+		return "", fallbackErr
+	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "profile",
+		Action:    "thinking_fallback_completed",
+		Message:   "Retry with thinking disabled succeeded.",
+		Data:      map[string]any{"model": settings.ProfileModel},
+	})
+	return content, nil
+}
+
+func shouldRetryProfileWithoutThinking(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "timeout") ||
+		strings.Contains(message, "timed out") ||
+		strings.Contains(message, "deadline exceeded") ||
+		strings.Contains(message, "thinking") ||
+		strings.Contains(message, "reasoning") ||
+		strings.Contains(message, "reasoner") ||
+		strings.Contains(message, "504") ||
+		strings.Contains(message, "502")
 }
 
 func coerceProfileDocument(settings config.Settings, content string) (profileDocument, error) {
