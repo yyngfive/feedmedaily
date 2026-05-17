@@ -1,8 +1,7 @@
-import {Button, Chip} from "@heroui/react";
+import {Button} from "@heroui/react";
 
 import {authorsLine, doiHref, feedbackLabel, paperDate} from "../../app/utils";
-import {tagLabel} from "../../reportData";
-import type {ClassificationProfile, Paper} from "../../types";
+import type {Paper} from "../../types";
 
 export function DetailPanel({
   isUnread,
@@ -10,14 +9,12 @@ export function DetailPanel({
   onMarkWrong,
   onSave,
   paper,
-  profile,
 }: {
   isUnread: boolean;
   onMarkRead: () => void;
   onMarkWrong: () => void;
   onSave: () => void;
   paper: Paper | null;
-  profile: ClassificationProfile | null;
 }) {
   if (!paper) {
     return (
@@ -50,23 +47,6 @@ export function DetailPanel({
           <p className="text-sm leading-6 text-(--body)">{paper.feedback_status.note}</p>
         </section>
       ) : null}
-
-      <section className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-          Keywords
-        </h3>
-        <div className="flex flex-wrap gap-2">
-          {paper.classification.topic_tags.length ? (
-            paper.classification.topic_tags.map((tag) => (
-              <Chip key={tag} size="sm" variant="secondary">
-                {tagLabel(tag, profile)}
-              </Chip>
-            ))
-          ) : (
-            <span className="text-sm text-muted">No keywords</span>
-          )}
-        </div>
-      </section>
 
       <section className="space-y-2">
         <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">

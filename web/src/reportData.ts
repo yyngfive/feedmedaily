@@ -3,7 +3,6 @@ import type {
   AppControlTarget,
   AppMeta,
   AppUpdate,
-  ClassificationProfile,
   CurrentProfileResponse,
   FeedSubscription,
   FeedbackRecord,
@@ -316,9 +315,4 @@ export async function fetchJobs(): Promise<JobInfo[]> {
     throw new Error(await responseErrorMessage(response));
   }
   return (await response.json()) as JobInfo[];
-}
-
-export function tagLabel(tag: string, profile: ClassificationProfile | null): string {
-  const match = profile?.topic_taxonomy.find((item) => item.id === tag);
-  return match?.label ?? tag.replaceAll("_", " ");
 }

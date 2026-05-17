@@ -28,7 +28,6 @@ import {
   saveSchedulerSettings,
   saveSettingsConfig,
   saveToZotero,
-  tagLabel,
 } from "./reportData";
 import {
   matchesDateFilter,
@@ -84,7 +83,6 @@ export function App() {
   const [message, setMessage] = React.useState<UiMessage | null>(null);
   const [query, setQuery] = React.useState("");
   const [relevance, setRelevance] = React.useState<RelevanceFilter>("direct");
-  const [topic, setTopic] = React.useState("all");
   const [journal, setJournal] = React.useState("all");
   const [dateFilter, setDateFilter] = React.useState<DateFilter>("30d");
   const [readFilter, setReadFilter] = React.useState<ReadFilter>("unread");
@@ -381,20 +379,9 @@ export function App() {
     };
   }, [profile, pushMessage, refreshAll]);
 
-  const tags = React.useMemo(
-    () => profile?.topic_taxonomy.map((item) => item.id).sort() ?? [],
-    [profile],
-  );
   const journals = React.useMemo(
     () => Array.from(new Set(report.papers.map((paper) => paper.journal).filter(Boolean) as string[])).sort(),
     [report.papers],
-  );
-  const topicOptions = React.useMemo(
-    () => [
-      {value: "all", label: "All topics"},
-      ...tags.map((item) => ({value: item, label: tagLabel(item, profile)})),
-    ],
-    [profile, tags],
   );
   const journalOptions = React.useMemo(
     () => [{value: "all", label: "All journals"}, ...journals.map((item) => ({value: item, label: item}))],
@@ -410,22 +397,20 @@ export function App() {
           paper.abstract ?? "",
           paper.journal ?? "",
           paper.authors?.join(" ") ?? "",
-          paper.classification.topic_tags.join(" "),
           paper.feedback_status?.note ?? "",
         ]
           .join(" ")
           .toLowerCase();
         const matchesQuery = !deferredQuery || haystack.includes(deferredQuery.toLowerCase());
-        const matchesTopic = topic === "all" || paper.classification.topic_tags.includes(topic);
         const matchesJournal = journal === "all" || paper.journal === journal;
         const dateValue = paper.published_date ?? paper.seen_date;
         const matchesRead =
           readFilter === "all" ||
           (readFilter === "read" ? Boolean(paper.read_at) : !paper.read_at);
         const matchesDate = matchesDateFilter(dateValue, report.report_date, dateFilter);
-        return matchesQuery && matchesTopic && matchesJournal && matchesRead && matchesDate;
+        return matchesQuery && matchesJournal && matchesRead && matchesDate;
       }),
-    [dateFilter, deferredQuery, journal, readFilter, report.papers, report.report_date, topic],
+    [dateFilter, deferredQuery, journal, readFilter, report.papers, report.report_date],
   );
 
   const filtered = React.useMemo(
@@ -776,7 +761,6 @@ export function App() {
 
   // 统一重置筛选器，供侧栏和空状态按钮复用。
   const resetFilters = React.useCallback(() => {
-    setTopic("all");
     setJournal("all");
     setDateFilter("30d");
     setReadFilter("unread");
@@ -890,14 +874,11 @@ export function App() {
           onJournalChange={setJournal}
           onReadFilterChange={setReadFilter}
           onReset={resetFilters}
-          onTopicChange={setTopic}
           profileName={profile.meta.name}
           profileVersion={profile.meta.version}
           readFilter={readFilter}
           reportDate={report.report_date}
           shownCount={visibleList.length}
-          topic={topic}
-          topicOptions={topicOptions}
           totalCount={needsFeedSetup ? 0 : report.papers.length}
           visibleTotals={visibleTotals}
         />
@@ -917,7 +898,6 @@ export function App() {
             setAdminOpen(true);
           }}
           papers={visibleList}
-          profile={profile}
           query={query}
           reportErrors={report.errors}
           relevance={relevance}
@@ -930,7 +910,6 @@ export function App() {
 
         <DetailPanel
           paper={needsFeedSetup ? null : selectedPaper}
-          profile={profile}
           isUnread={Boolean(selectedPaper && !selectedPaper.read_at)}
           onMarkRead={() => selectedPaper && void persistReadStatus(selectedPaper.id)}
           onMarkWrong={() => selectedPaper && openFeedbackModal(selectedPaper)}

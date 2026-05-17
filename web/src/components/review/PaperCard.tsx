@@ -3,21 +3,18 @@ import React from "react";
 
 import {relevanceLabel, relevanceTone} from "../../app/constants";
 import {authorsLine, feedbackLabel, paperDate} from "../../app/utils";
-import {tagLabel} from "../../reportData";
-import type {ClassificationProfile, Paper} from "../../types";
+import type {Paper} from "../../types";
 
 export function PaperCard({
   isSelected,
   isUnread,
   onSelect,
   paper,
-  profile,
 }: {
   isSelected: boolean;
   isUnread: boolean;
   onSelect: () => void;
   paper: Paper;
-  profile: ClassificationProfile | null;
 }) {
   const tone = relevanceTone[paper.classification.relevance];
   const feedbackText = feedbackLabel(paper);
@@ -50,11 +47,6 @@ export function PaperCard({
             <Chip color={tone.chip} size="sm" variant="soft">
               {relevanceLabel[paper.classification.relevance]}
             </Chip>
-            {paper.classification.topic_tags.slice(0, 2).map((tag) => (
-              <Chip key={tag} size="sm" variant="secondary">
-                {tagLabel(tag, profile)}
-              </Chip>
-            ))}
             {feedbackText ? (
               <Chip color="danger" size="sm" variant="soft">
                 {feedbackText}

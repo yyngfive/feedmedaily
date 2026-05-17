@@ -109,7 +109,7 @@ func TestSavePaperBuildsExpectedPayload(t *testing.T) {
 		t.Fatalf("unexpected collections field: %#v", captured[0]["collections"])
 	}
 	tags, ok := captured[0]["tags"].([]any)
-	if !ok || len(tags) < 3 {
+	if !ok || len(tags) != 2 {
 		t.Fatalf("unexpected tags: %#v", captured[0]["tags"])
 	}
 }

@@ -68,7 +68,6 @@ export function ZoteroSaveModal({
           <p>Journal: {paper.journal || paper.feed_title || "Unknown journal"}</p>
           <p>DOI: {paper.doi || "—"}</p>
           <p>URL: {paper.url}</p>
-          <p>Tags: {["scirssagent", paper.classification.relevance, ...paper.classification.topic_tags].join(", ") || "—"}</p>
           <p>Collection: {selectedCollectionLabel}</p>
         </div>
       </div>
