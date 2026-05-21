@@ -5,6 +5,7 @@
 FeedMeDaily is a local-first paper triage app for journal RSS feeds. It stores paper metadata in SQLite, classifies relevance with profile-driven LLM prompts, serves a local review UI, and lets you send selected papers to Zotero.
 
 Current system architecture is documented in [ARCHITECTURE.md](./ARCHITECTURE.md).
+Version history and upcoming release notes are tracked in [CHANGELOG.md](./CHANGELOG.md).
 
 ## Release-first usage
 
@@ -72,9 +73,9 @@ FeedMeDaily does not migrate these files automatically in v1.
 
 ```json
 {
-  "version": "0.2.0",
-  "download_url": "https://github.com/yyngfive/feedmedaily/releases/download/v0.2.0/FeedMeDaily-Setup.exe",
-  "release_notes_url": "https://github.com/yyngfive/feedmedaily/releases/tag/v0.2.0"
+  "version": "0.2.1",
+  "download_url": "https://github.com/yyngfive/feedmedaily/releases/download/v0.2.1/FeedMeDaily-v0.2.1.exe",
+  "release_notes_url": "https://github.com/yyngfive/feedmedaily/releases/tag/v0.2.1"
 }
 ```
 

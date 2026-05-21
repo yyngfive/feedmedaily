@@ -58,6 +58,18 @@ uv sync
 - When a code change updates behavior, stage the directly affected docs in the same commit, but do not use doc updates as a reason to sweep unrelated work into that commit.
 - If the working tree already contains unrelated edits, commit only the files that belong to the requested change and leave the rest unstaged.
 
+## Changelog
+
+- `CHANGELOG.md` is the canonical versioned changelog for user-facing product changes.
+- Maintain changelog entries grouped by version number, starting from `0.2.0`.
+- Each version section should describe changes relative to the previous released version, not as an all-time cumulative list.
+- The latest released version is `0.2.1`; the current rolling unreleased section should therefore be `0.2.2` until `0.2.2` is shipped.
+- When a version is released, convert that section from unreleased to dated release notes and open a new unreleased section for the next planned version.
+- Add behavior changes, bug fixes, runtime changes, packaging changes, and notable UX changes that matter to users or release notes readers.
+- Avoid filling the changelog with pure planning-only edits, internal note reshuffles, or agent-policy-only changes unless they have a user-visible release impact.
+- Release draft files under `docs/release-notes-v*.md` should stay very short and use a simple bullet list style like `docs/release-notes-v0.2.1-draft.md`.
+- Treat `CHANGELOG.md` as the detailed canonical source and keep per-version release drafts as compact human-facing summaries.
+
 ## Current Architecture
 
 - Classification is profile-driven. The active rules live in `data/classification_profile.json`, which is user-local and Git-ignored.
