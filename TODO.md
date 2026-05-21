@@ -4,8 +4,7 @@
 
 - [ ] 增加自己编辑Profile功能
 - [ ] 增加AI自动简化Profile的功能，优化Profile更新逻辑
-- [ ] 修改tag生成逻辑，改为ai对direct和indirect生成，对unrelated不生成
-- [ ] 开启llm model的thinking模式容易导致超时
+- [ ] 如果要恢复 paper-level topic tags，需要先重新设计 tag 的生成、存储和展示方案
 
 ## Feed
 
@@ -19,6 +18,7 @@
 - [ ] 精简参数界面，把确认按钮放在下方
 - [ ] 增加DeepSeek开发者中心链接指引
 - [ ] 增加起始界面的说明文档
+- [ ] thinking 自动降级时补更明确的前端提示和设置说明
 
 ## Filter
 

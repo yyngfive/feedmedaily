@@ -10,7 +10,7 @@ FeedMeDaily is the public Windows release name for this single-user literature t
 - `cmd/feedmedailyd/`: Go backend service entrypoint
 - `cmd/feedmedaily-tray/`: first-stage Go tray entrypoint for Windows runtime management
 - `internal/api/`: Go HTTP compatibility layer for app/report metadata, tray-facing control routes, migrated storage-backed APIs, background jobs, and static UI serving
-- `internal/classifier/`: Go-side OpenAI-compatible batch classifier and title-translation fallback
+- `internal/classifier/`: Go-side OpenAI-compatible batch classifier with title-translation fallback and automatic thinking-disable retry on provider timeout/reasoning failures
 - `internal/config/`: early Go settings and path resolution layer
 - `internal/jobs/`: Go-side run-once orchestration, reclassify orchestration, and background-job helpers
 - `internal/metadata/`: Go-side metadata enrich logic for DOI/OpenAlex/Crossref lookups during reclassify
@@ -165,6 +165,10 @@ Each role can use its own API key and base URL:
 - `SCIRSS_PROFILE_API_KEY` / `SCIRSS_PROFILE_BASE_URL`
 
 The code owns the task shell and response schema. User interest boundaries, taxonomy, notes, and few-shot guidance live in the profile file.
+
+The current Go classifier path does not emit paper-level topic tags. It stores relevance, confidence, reason, recommended action, and translated title, while the profile file may still retain taxonomy metadata for future use.
+
+Both configurable LLM roles can request provider thinking mode. If a request fails with timeout, reasoning-mode, or gateway-style errors, the Go path retries once with `thinking=disabled`.
 
 Editable configuration is exposed in the UI, but secret values are still handled as local-only state:
 

@@ -150,6 +150,7 @@ Notes:
 - `SCIRSS_PROFILE_*` is used for onboarding, profile generation, and profile revision prompts.
 - `SCIRSS_ZOTERO_*` is used for Zotero export.
 - `FEEDMEDAILY_UPDATE_MANIFEST_URL` is optional and intended for packaged builds.
+- If a provider times out or fails in thinking mode, the Go classifier/profile flows retry once with `thinking=disabled`.
 
 ## Daily workflow
 
