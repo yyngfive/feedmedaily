@@ -4,9 +4,13 @@ package trayapp
 
 import (
 	"fmt"
+	"runtime"
+	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
+	"github.com/yyngfive/scirssagent/internal/logging"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 )
 
@@ -31,8 +35,10 @@ const (
 	nimAdd             = 0x00000000
 	nimDelete          = 0x00000002
 	nimModify          = 0x00000001
+	nimSetVersion      = 0x00000004
 	niifError          = 0x00000003
 	niifInfo           = 0x00000001
+	notifyIconVersion  = 0x00000003
 	swHide             = 0
 	swShow             = 5
 	tpmBottomAlign     = 0x0020
@@ -67,7 +73,14 @@ const (
 	pbtApmResumeSuspend   = 0x0007
 )
 
-const trayCallbackMessage = wmApp + 1
+const (
+	trayCallbackMessage = wmApp + 1
+	trayMsgRefreshIcon  = wmApp + 2
+	trayMsgShowInfo     = wmApp + 3
+	trayMsgShowError    = wmApp + 4
+)
+
+const refreshRetryDelay = time.Second
 
 var (
 	user32                = syscall.NewLazyDLL("user32.dll")
@@ -104,6 +117,15 @@ var (
 var (
 	globalTray            *windowsTray
 	taskbarCreatedMessage uint32
+	shellNotifyIconCall   = func(message uint32, data *notifyIconData) (bool, error) {
+		ok, _, err := procShellNotifyIconW.Call(uintptr(message), uintptr(unsafe.Pointer(data)))
+		return ok != 0, err
+	}
+	postMessageCall = func(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) bool {
+		ok, _, _ := procPostMessageW.Call(hwnd, uintptr(message), wParam, lParam)
+		return ok != 0
+	}
+	scheduleAfterFunc = time.AfterFunc
 )
 
 type trayMenuState struct {
@@ -159,12 +181,21 @@ type notifyIconData struct {
 	BalloonIcon    uintptr
 }
 
+type trayBalloonRequest struct {
+	title     string
+	body      string
+	infoFlags uint32
+}
+
 type windowsTray struct {
-	app         *App
-	hwnd        uintptr
-	icon        uintptr
-	mutexHandle uintptr
-	nid         notifyIconData
+	app                   *App
+	hwnd                  uintptr
+	icon                  uintptr
+	mutexHandle           uintptr
+	nid                   notifyIconData
+	balloonMutex          sync.Mutex
+	balloonQueue          []trayBalloonRequest
+	refreshRetryScheduled bool
 }
 
 func newWindowsTray(app *App) (*windowsTray, error) {
@@ -189,6 +220,15 @@ func newWindowsTray(app *App) (*windowsTray, error) {
 
 func (t *windowsTray) Run() error {
 	// 注册隐藏窗口、托盘图标和消息循环，进入真正的 Windows 托盘生命周期。
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	defer func() {
+		globalTray = nil
+		if t.mutexHandle != 0 {
+			procCloseHandle.Call(t.mutexHandle)
+			t.mutexHandle = 0
+		}
+	}()
 	globalTray = t
 	taskbarCreatedMessage = registerWindowMessage("TaskbarCreated")
 	className, _ := syscall.UTF16PtrFromString("FeedMeDailyTrayWindow")
@@ -250,26 +290,26 @@ func (t *windowsTray) Run() error {
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&message)))
 	}
 
-	if t.mutexHandle != 0 {
-		procCloseHandle.Call(t.mutexHandle)
-	}
-
 	return nil
 }
 
 func (t *windowsTray) addTrayIcon() error {
 	// 把图标注册到系统托盘区。
 	t.nid = notifyIconData{
-		Size:        uint32(unsafe.Sizeof(notifyIconData{})),
-		HWnd:        t.hwnd,
-		ID:          1,
-		Flags:       nifMessage | nifIcon | nifTip,
-		CallbackMsg: trayCallbackMessage,
-		Icon:        t.icon,
+		Size:           uint32(unsafe.Sizeof(notifyIconData{})),
+		HWnd:           t.hwnd,
+		ID:             1,
+		Flags:          nifMessage | nifIcon | nifTip,
+		CallbackMsg:    trayCallbackMessage,
+		Icon:           t.icon,
+		VersionOrTimer: notifyIconVersion,
 	}
 	copyUTF16ToFixedArray(t.nid.Tip[:], "FeedMeDaily Tray")
-	if ok, _, err := procShellNotifyIconW.Call(nimAdd, uintptr(unsafe.Pointer(&t.nid))); ok == 0 {
+	if ok, err := shellNotifyIconCall(nimAdd, &t.nid); !ok {
 		return fmt.Errorf("add tray icon: %v", err)
+	}
+	if ok, err := shellNotifyIconCall(nimSetVersion, &t.nid); !ok {
+		return fmt.Errorf("set tray icon version: %v", err)
 	}
 	return nil
 }
@@ -279,34 +319,52 @@ func (t *windowsTray) refreshTrayIcon() error {
 	if t.hwnd == 0 {
 		return nil
 	}
-	procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&t.nid)))
+	_, _ = shellNotifyIconCall(nimDelete, &t.nid)
 	return t.addTrayIcon()
 }
 
 func (t *windowsTray) removeTrayIcon() {
 	// 退出时从系统托盘移除图标。
 	if t.hwnd != 0 {
-		procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&t.nid)))
+		_, _ = shellNotifyIconCall(nimDelete, &t.nid)
 	}
 }
 
 func (t *windowsTray) ShowInfo(title string, body string) {
 	// 弹出普通信息气泡提示。
-	t.showBalloon(title, body, niifInfo)
+	t.enqueueBalloon(trayMsgShowInfo, title, body, niifInfo)
 }
 
 func (t *windowsTray) ShowError(title string, body string) {
 	// 弹出错误气泡提示。
-	t.showBalloon(title, body, niifError)
+	t.enqueueBalloon(trayMsgShowError, title, body, niifError)
 }
 
-func (t *windowsTray) showBalloon(title string, body string, infoFlags uint32) {
+func (t *windowsTray) enqueueBalloon(message uint32, title string, body string, infoFlags uint32) {
+	// 后台 goroutine 只排队并通知 UI 线程，不直接碰托盘状态。
+	t.balloonMutex.Lock()
+	t.balloonQueue = append(t.balloonQueue, trayBalloonRequest{
+		title:     title,
+		body:      body,
+		infoFlags: infoFlags,
+	})
+	t.balloonMutex.Unlock()
+	if !t.postTrayMessage(message, 0, 0) {
+		t.log("error", "tray_balloon_post_failed", "Posting tray balloon message failed.", nil, nil)
+	}
+}
+
+func (t *windowsTray) showBalloon(request trayBalloonRequest) {
 	// 用托盘气泡向用户反馈后台操作结果。
 	t.nid.Flags = nifInfo
-	copyUTF16ToFixedArray(t.nid.InfoTitle[:], title)
-	copyUTF16ToFixedArray(t.nid.Info[:], body)
-	t.nid.InfoFlags = infoFlags
-	procShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&t.nid)))
+	copyUTF16ToFixedArray(t.nid.InfoTitle[:], request.title)
+	copyUTF16ToFixedArray(t.nid.Info[:], request.body)
+	t.nid.InfoFlags = request.infoFlags
+	if ok, err := shellNotifyIconCall(nimModify, &t.nid); !ok {
+		t.log("error", "tray_balloon_failed", "Showing tray balloon failed.", map[string]any{
+			"title": request.title,
+		}, err)
+	}
 	t.nid.Flags = nifMessage | nifIcon | nifTip
 }
 
@@ -406,7 +464,7 @@ func (t *windowsTray) showContextMenu() {
 		0,
 	)
 	// 这是 Windows 托盘右键菜单的经典收尾动作，否则菜单状态有时会卡住。
-	procPostMessageW.Call(t.hwnd, wmNull, 0, 0)
+	t.postTrayMessage(wmNull, 0, 0)
 }
 
 func (t *windowsTray) loadIcon() (uintptr, error) {
@@ -437,24 +495,36 @@ func windowProc(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) ui
 
 	switch message {
 	case taskbarCreatedMessage:
-		if err := globalTray.refreshTrayIcon(); err != nil {
-			globalTray.ShowError("FeedMeDaily Tray", "Tray icon recovery failed: "+err.Error())
-		}
+		globalTray.log("info", "taskbar_created", "Received TaskbarCreated broadcast.", nil, nil)
+		globalTray.requestRefreshIcon(false)
 		return 0
 	case trayCallbackMessage:
 		switch uint32(lParam) {
 		case wmLButtonDblClk:
+			globalTray.log("info", "tray_callback", "Received tray callback.", map[string]any{"event": "WM_LBUTTONDBLCLK"}, nil)
 			globalTray.handleCommand(menuOpenApp)
 		case wmRButtonUp, wmContextMenu:
+			event := "WM_RBUTTONUP"
+			if uint32(lParam) == wmContextMenu {
+				event = "WM_CONTEXTMENU"
+			}
+			globalTray.log("info", "tray_callback", "Received tray callback.", map[string]any{"event": event}, nil)
 			globalTray.showContextMenu()
 		}
 		return 0
+	case trayMsgRefreshIcon:
+		globalTray.handleRefreshMessage(wParam != 0)
+		return 0
+	case trayMsgShowInfo, trayMsgShowError:
+		globalTray.handleQueuedBalloon()
+		return 0
 	case wmPowerBroadcast:
 		switch uint32(wParam) {
-		case pbtApmResumeAutomatic, pbtApmResumeSuspend:
-			if err := globalTray.refreshTrayIcon(); err != nil {
-				globalTray.ShowError("FeedMeDaily Tray", "Tray resume recovery failed: "+err.Error())
-			}
+		case pbtApmResumeAutomatic:
+			globalTray.log("info", "power_resume_automatic", "Received automatic resume broadcast.", nil, nil)
+		case pbtApmResumeSuspend:
+			globalTray.log("info", "power_resume_suspend", "Received resume-from-suspend broadcast.", nil, nil)
+			globalTray.requestRefreshIcon(false)
 		}
 		return 1
 	case wmCommand:
@@ -485,7 +555,7 @@ func registerWindowMessage(name string) uint32 {
 
 func (t *windowsTray) requestQuit() {
 	// 通过给隐藏窗口发关闭消息来结束托盘循环。
-	procPostMessageW.Call(t.hwnd, wmClose, 0, 0)
+	t.postTrayMessage(wmClose, 0, 0)
 }
 
 func (t *windowsTray) requestQuitAndStopService() {
@@ -523,4 +593,92 @@ func copyUTF16ToFixedArray(target []uint16, value string) {
 		encoded[len(target)-1] = 0
 	}
 	copy(target, encoded)
+}
+
+func (t *windowsTray) handleQueuedBalloon() {
+	// 由 UI 线程消费一条待显示的气泡消息。
+	request, ok := t.dequeueBalloon()
+	if !ok {
+		return
+	}
+	t.showBalloon(request)
+}
+
+func (t *windowsTray) dequeueBalloon() (trayBalloonRequest, bool) {
+	// 从线程安全队列取出下一条气泡消息。
+	t.balloonMutex.Lock()
+	defer t.balloonMutex.Unlock()
+	if len(t.balloonQueue) == 0 {
+		return trayBalloonRequest{}, false
+	}
+	request := t.balloonQueue[0]
+	t.balloonQueue = t.balloonQueue[1:]
+	return request, true
+}
+
+func (t *windowsTray) requestRefreshIcon(retry bool) {
+	// 后台线程只请求一次刷新，实际刷新逻辑始终在 UI 线程执行。
+	var retryValue uintptr
+	if retry {
+		retryValue = 1
+	}
+	if !t.postTrayMessage(trayMsgRefreshIcon, retryValue, 0) {
+		t.log("error", "tray_refresh_post_failed", "Posting tray refresh message failed.", map[string]any{
+			"retry": retry,
+		}, nil)
+	}
+}
+
+func (t *windowsTray) handleRefreshMessage(retry bool) {
+	// 在 UI 线程刷新托盘图标，并在首次失败后做一次延迟重试。
+	if retry {
+		if !t.refreshRetryScheduled {
+			return
+		}
+		t.refreshRetryScheduled = false
+	}
+	t.log("info", "tray_icon_refresh_started", "Refreshing tray icon.", map[string]any{
+		"retry": retry,
+	}, nil)
+	if err := t.refreshTrayIcon(); err != nil {
+		t.log("error", "tray_icon_refresh_failed", "Refreshing tray icon failed.", map[string]any{
+			"retry": retry,
+		}, err)
+		if !retry && !t.refreshRetryScheduled {
+			t.refreshRetryScheduled = true
+			scheduleAfterFunc(refreshRetryDelay, func() {
+				t.requestRefreshIcon(true)
+			})
+			return
+		}
+		t.ShowError("FeedMeDaily Tray", "Tray icon recovery failed: "+err.Error())
+		return
+	}
+	t.refreshRetryScheduled = false
+	t.log("info", "tray_icon_refresh_succeeded", "Refreshed tray icon.", map[string]any{
+		"retry": retry,
+	}, nil)
+}
+
+func (t *windowsTray) postTrayMessage(message uint32, wParam uintptr, lParam uintptr) bool {
+	// 统一封装 PostMessage，便于测试和后台线程调度。
+	if t.hwnd == 0 {
+		return false
+	}
+	return postMessageCall(t.hwnd, message, wParam, lParam)
+}
+
+func (t *windowsTray) log(level string, action string, message string, data map[string]any, err error) {
+	// 给托盘恢复和回调路径补上最小但关键的日志。
+	event := logging.Event{
+		Level:     level,
+		Component: "tray",
+		Action:    action,
+		Message:   message,
+		Data:      data,
+	}
+	if err != nil {
+		event.Error = err.Error()
+	}
+	_, _ = logging.Write(t.app.layout.LogsDir, event)
 }
