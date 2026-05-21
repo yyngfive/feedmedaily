@@ -49,6 +49,15 @@ uv sync
 - Prefer deterministic pipeline logic over free-form agent behavior for RSS ingestion, classification, and reporting.
 - For larger changes, create a new Git branch first and merge it back only after the work is complete and verified.
 
+## Commit Hygiene
+
+- Before staging or committing, review the current diff and group changes by feature, fix, or documentation scope.
+- Do not bundle unrelated backend, frontend, tray, and planning changes into one large commit when they can be separated cleanly.
+- If a task touches multiple independent scopes, prefer multiple focused commits with messages that describe the specific slice.
+- Keep scratch files, temporary assets, and exploratory notes out of feature commits unless they are intentional deliverables.
+- When a code change updates behavior, stage the directly affected docs in the same commit, but do not use doc updates as a reason to sweep unrelated work into that commit.
+- If the working tree already contains unrelated edits, commit only the files that belong to the requested change and leave the rest unstaged.
+
 ## Current Architecture
 
 - Classification is profile-driven. The active rules live in `data/classification_profile.json`, which is user-local and Git-ignored.
