@@ -179,6 +179,63 @@ func TestReadOnlyBootstrapEndpoints(t *testing.T) {
 	}
 }
 
+func TestProfileCurrentPutUpdatesExistingProfile(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":2,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`)
+	handler := NewServer(settings, nil).Handler()
+
+	body := `{
+		"meta":{"name":"Edited profile","version":1,"created_at":"2026-05-20T00:00:00Z","updated_at":"2026-05-20T00:00:00Z","source_description":"edited"},
+		"scope":"RNA biology and splicing",
+		"relevance_rules":{"direct":["RNA","Splicing"],"indirect":["Protein complexes"],"unrelated":["Plant biology"]},
+		"topic_taxonomy":[{"id":"rna_bio","label":"RNA Bio"}],
+		"few_shots":[{"title":"Example paper","relevance":"direct","tags":["rna_bio"],"rationale":"Tracks RNA mechanisms."}]
+	}`
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/api/profile/current", strings.NewReader(body)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("put profile = %d %s", recorder.Code, recorder.Body.String())
+	}
+	if !contains(recorder.Body.String(), `"name":"Edited profile"`) || !contains(recorder.Body.String(), `"version":3`) {
+		t.Fatalf("unexpected response: %s", recorder.Body.String())
+	}
+	if !contains(recorder.Body.String(), `"created_at":"2026-05-10T00:00:00Z"`) {
+		t.Fatalf("expected created_at preserved: %s", recorder.Body.String())
+	}
+	if !contains(recorder.Body.String(), `"source_description":"current"`) {
+		t.Fatalf("expected source_description preserved: %s", recorder.Body.String())
+	}
+
+	saved, err := os.ReadFile(settings.ProfilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(saved), `"version": 3`) || !contains(string(saved), `"name": "Edited profile"`) {
+		t.Fatalf("saved profile = %s", saved)
+	}
+}
+
+func TestProfileCurrentPutRejectsInvalidOrMissingProfile(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	handler := NewServer(settings, nil).Handler()
+
+	missingRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(missingRecorder, httptest.NewRequest(http.MethodPut, "/api/profile/current", strings.NewReader(`{}`)))
+	if missingRecorder.Code != http.StatusBadRequest || !contains(missingRecorder.Body.String(), `No classification profile exists yet.`) {
+		t.Fatalf("missing profile response = %d %s", missingRecorder.Code, missingRecorder.Body.String())
+	}
+
+	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`)
+	invalidRecorder := httptest.NewRecorder()
+	invalidBody := `{"meta":{"name":"","version":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"","relevance_rules":{"direct":[],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`
+	handler.ServeHTTP(invalidRecorder, httptest.NewRequest(http.MethodPut, "/api/profile/current", strings.NewReader(invalidBody)))
+	if invalidRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("invalid profile response = %d %s", invalidRecorder.Code, invalidRecorder.Body.String())
+	}
+}
+
 func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)

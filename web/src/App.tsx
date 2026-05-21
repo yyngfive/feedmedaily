@@ -25,6 +25,7 @@ import {
   openAppTarget,
   rejectProfileProposal,
   saveFeedSubscriptions,
+  saveCurrentProfile,
   saveSchedulerSettings,
   saveSettingsConfig,
   saveToZotero,
@@ -97,6 +98,7 @@ export function App() {
   const [feedsSaving, setFeedsSaving] = React.useState(false);
   const [schedulerSaving, setSchedulerSaving] = React.useState(false);
   const [settingsConfigSaving, setSettingsConfigSaving] = React.useState(false);
+  const [profileSaving, setProfileSaving] = React.useState(false);
   const [zoteroPaper, setZoteroPaper] = React.useState<Paper | null>(null);
   const [zoteroCollections, setZoteroCollections] = React.useState<ZoteroCollectionOption[]>([]);
   const [zoteroCollectionKey, setZoteroCollectionKey] = React.useState("");
@@ -648,6 +650,20 @@ export function App() {
     }
   }, [pushMessage]);
 
+  const handleSaveProfile = React.useCallback(async (nextProfile: ClassificationProfile) => {
+    try {
+      setProfileSaving(true);
+      const saved = await saveCurrentProfile(nextProfile);
+      setProfile(saved.profile);
+      pushMessage("profile.current.save.succeeded");
+    } catch (error) {
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      throw error;
+    } finally {
+      setProfileSaving(false);
+    }
+  }, [pushMessage]);
+
   const handleDeleteScheduler = React.useCallback(async () => {
     try {
       setSchedulerSaving(true);
@@ -816,6 +832,7 @@ export function App() {
         configSaving={settingsConfigSaving}
         open={adminOpen}
         profile={profile}
+        profileSaving={profileSaving}
         hasFeeds={feeds.length > 0}
         feeds={feeds}
         feedsSaving={feedsSaving}
@@ -828,6 +845,7 @@ export function App() {
         onAddFeed={handleAddFeed}
         onRemoveFeed={handleRemoveFeed}
         onSaveConfig={handleSaveConfig}
+        onSaveProfile={handleSaveProfile}
         onSaveScheduler={handleSaveScheduler}
         onSaveFeeds={() => void handleSaveFeeds()}
         onTabChange={setAdminTab}

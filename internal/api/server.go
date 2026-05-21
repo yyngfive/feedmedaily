@@ -337,16 +337,44 @@ func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleProfileCurrent(w http.ResponseWriter, r *http.Request) {
-	// 读取并校验当前 profile 文件，保持 {"profile": ...} 响应结构。
-	if !requireMethod(w, r, http.MethodGet) {
-		return
+	// 读取或保存当前 profile 文件，保持 {"profile": ...} 响应结构。
+	switch r.Method {
+	case http.MethodGet:
+		profilePayload, err := profile.ReadCurrent(s.settings.ProfilePath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"profile": profilePayload})
+	case http.MethodPut:
+		currentProfile, err := profile.ReadCurrent(s.settings.ProfilePath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if currentProfile == nil {
+			writeError(w, http.StatusBadRequest, "No classification profile exists yet.")
+			return
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid JSON body.")
+			return
+		}
+		updatedProfile, _, err := profile.PrepareUpdatedProfile(payload, currentProfile, time.Now())
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := profile.WriteCurrent(s.settings.ProfilePath, updatedProfile); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"profile": updatedProfile})
+	default:
+		w.Header().Set("Allow", "GET, PUT")
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed.")
 	}
-	profilePayload, err := profile.ReadCurrent(s.settings.ProfilePath)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"profile": profilePayload})
 }
 
 func (s *Server) handleProfileBootstrap(w http.ResponseWriter, r *http.Request) {
