@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
 func TestFetchAllParsesRSSAndContinuesOnFeedFailure(t *testing.T) {
@@ -449,6 +447,51 @@ func TestFetchAllRetriesAfterChallengePageThenParsesRSS(t *testing.T) {
 	}
 }
 
+func TestFetchAllUsesBrowserLikeUserAgent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("User-Agent"), "Mozilla/5.0") || !strings.Contains(r.Header.Get("User-Agent"), "SciRSSAgent/0.1") {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>ChemRxiv</title>
+    <item>
+      <title>Browser-like UA sample</title>
+      <link>https://example.com/browser-ua</link>
+      <guid>doi:10.1000/browser-ua</guid>
+      <description>Abstract text after browser-style user agent.</description>
+      <pubDate>Thu, 21 May 2026 11:52:10 +0000</pubDate>
+      <author>Alice Smith</author>
+    </item>
+  </channel>
+</rss>`))
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[{"journal":"Chemrxiv","url":"`+server.URL+`"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Errors) != 0 || len(result.Papers) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	if result.Papers[0].Title != "Browser-like UA sample" {
+		t.Fatalf("unexpected paper: %#v", result.Papers[0])
+	}
+}
+
 func TestFetchAllStopsAfterRetryableFailuresAndContinues(t *testing.T) {
 	oldBackoffs := fetchRetryBackoffs
 	fetchRetryBackoffs = []time.Duration{0, 0}
@@ -506,16 +549,7 @@ func TestFetchAllStopsAfterRetryableFailuresAndContinues(t *testing.T) {
 	}
 }
 
-func TestFetchAllBackfillsScienceAbstractWhenFeedTextIsMetadataOnly(t *testing.T) {
-	oldBackfill := feedMetadataBackfill
-	feedMetadataBackfill = func(paper store.Paper) store.Paper {
-		enriched := paper
-		enriched.Abstract = stringPtr("Crossref abstract text.")
-		enriched.AbstractSource = "crossref"
-		return enriched
-	}
-	defer func() { feedMetadataBackfill = oldBackfill }()
-
+func TestFetchAllLeavesScienceAbstractEmptyWhenFeedTextIsMetadataOnly(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
 		_, _ = w.Write([]byte(`<?xml version="1.0"?>
@@ -553,20 +587,104 @@ func TestFetchAllBackfillsScienceAbstractWhenFeedTextIsMetadataOnly(t *testing.T
 	if len(result.Papers) != 1 {
 		t.Fatalf("papers = %d", len(result.Papers))
 	}
-	if result.Papers[0].Abstract == nil || *result.Papers[0].Abstract != "Crossref abstract text." || result.Papers[0].AbstractSource != "crossref" {
+	if result.Papers[0].Abstract != nil || result.Papers[0].AbstractSource != "none" {
 		t.Fatalf("unexpected paper: %#v", result.Papers[0])
 	}
 }
 
-func TestFetchAllBackfillsNARAuthorsWhenFeedOmitsThem(t *testing.T) {
-	oldBackfill := feedMetadataBackfill
-	feedMetadataBackfill = func(paper store.Paper) store.Paper {
-		enriched := paper
-		enriched.Authors = []string{"Alice Ng", "Bob Chen"}
-		return enriched
-	}
-	defer func() { feedMetadataBackfill = oldBackfill }()
+func TestFetchAllSplitsSemicolonDelimitedAuthorPairs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Angewandte Chemie International Edition</title>
+    <item>
+      <title>Semicolon author sample</title>
+      <link>https://example.com/semicolon-authors</link>
+      <guid>doi:10.1000/semicolon-authors</guid>
+      <dc:creator>Heleen Lauwers, Jamie De Baere; Ilke Aernout, Federica Cappellesso; Bruno G. De Geest</dc:creator>
+      <description><![CDATA[<p>Abstract text.</p>]]></description>
+    </item>
+  </channel>
+</rss>`))
+	}))
+	defer server.Close()
 
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[{"journal":"Angew","url":"`+server.URL+`"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Papers) != 1 {
+		t.Fatalf("papers = %d", len(result.Papers))
+	}
+	want := []string{"Heleen Lauwers", "Jamie De Baere", "Ilke Aernout", "Federica Cappellesso", "Bruno G. De Geest"}
+	if len(result.Papers[0].Authors) != len(want) {
+		t.Fatalf("unexpected authors: %#v", result.Papers[0].Authors)
+	}
+	for i := range want {
+		if result.Papers[0].Authors[i] != want[i] {
+			t.Fatalf("unexpected authors: %#v", result.Papers[0].Authors)
+		}
+	}
+}
+
+func TestFetchAllSplitsTrailingAndAuthor(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>ACS sample</title>
+    <item>
+      <title>Trailing and sample</title>
+      <link>https://example.com/trailing-and</link>
+      <guid>doi:10.1000/trailing-and</guid>
+      <dc:creator>Yanjing Gao, Guangrui Chen, and Jihong Yu</dc:creator>
+      <description><![CDATA[<p>Abstract text.</p>]]></description>
+    </item>
+  </channel>
+</rss>`))
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[{"journal":"JACS","url":"`+server.URL+`"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Papers) != 1 {
+		t.Fatalf("papers = %d", len(result.Papers))
+	}
+	want := []string{"Yanjing Gao", "Guangrui Chen", "Jihong Yu"}
+	if len(result.Papers[0].Authors) != len(want) {
+		t.Fatalf("unexpected authors: %#v", result.Papers[0].Authors)
+	}
+	for i := range want {
+		if result.Papers[0].Authors[i] != want[i] {
+			t.Fatalf("unexpected authors: %#v", result.Papers[0].Authors)
+		}
+	}
+}
+
+func TestFetchAllLeavesNARAuthorsEmptyWhenFeedOmitsThem(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
 		_, _ = w.Write([]byte(`<?xml version="1.0"?>
@@ -602,73 +720,12 @@ func TestFetchAllBackfillsNARAuthorsWhenFeedOmitsThem(t *testing.T) {
 	if len(result.Papers) != 1 {
 		t.Fatalf("papers = %d", len(result.Papers))
 	}
-	if len(result.Papers[0].Authors) != 2 || result.Papers[0].Authors[0] != "Alice Ng" || result.Papers[0].Authors[1] != "Bob Chen" {
-		t.Fatalf("unexpected paper: %#v", result.Papers[0])
-	}
-}
-
-func TestFetchAllUsesPlatformFallbackForChallengeBlockedFeed(t *testing.T) {
-	oldBackoffs := fetchRetryBackoffs
-	oldPlatformFetch := feedPlatformFetch
-	oldPlatformFallback := feedPlatformFallback
-	fetchRetryBackoffs = []time.Duration{0}
-	feedPlatformFallback = func(url string, statusCode int, body []byte) bool {
-		return statusCode == http.StatusForbidden
-	}
-	feedPlatformFetch = func(url string) ([]byte, int, error) {
-		return []byte(`<?xml version="1.0"?>
-<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns="http://purl.org/rss/1.0/">
-  <channel rdf:about="https://chemrxiv.org/action/showFeed?type=latest&amp;format=rss">
-    <title>ChemRxiv</title>
-  </channel>
-  <item rdf:about="https://chemrxiv.org/doi/full/10.26434/chemrxiv-2025-hssg2/v3?af=R">
-    <title>Fallback sample</title>
-    <link>https://chemrxiv.org/doi/full/10.26434/chemrxiv-2025-hssg2/v3?af=R</link>
-    <description>Fallback abstract.</description>
-    <dc:identifier>doi:10.26434/chemrxiv-2025-hssg2/v3</dc:identifier>
-    <dc:date>2026-05-21T11:52:10Z</dc:date>
-    <dc:creator>Alice Smith</dc:creator>
-    <prism:publicationName xmlns:prism="http://prismstandard.org/namespaces/basic/2.0/">ChemRxiv</prism:publicationName>
-  </item>
-</rdf:RDF>`), http.StatusOK, nil
-	}
-	defer func() {
-		fetchRetryBackoffs = oldBackoffs
-		feedPlatformFetch = oldPlatformFetch
-		feedPlatformFallback = oldPlatformFallback
-	}()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-	}))
-	defer server.Close()
-
-	root := t.TempDir()
-	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
-	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(feedsPath, []byte(`[{"journal":"Chemrxiv","url":"`+server.URL+`"}]`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := FetchAll(feedsPath, FetchOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Errors) != 0 || len(result.Papers) != 1 {
-		t.Fatalf("result = %#v", result)
-	}
-	if result.Papers[0].Title != "Fallback sample" {
+	if len(result.Papers[0].Authors) != 0 {
 		t.Fatalf("unexpected paper: %#v", result.Papers[0])
 	}
 }
 
 func TestFetchAllExtractsElsevierDescriptionMetadata(t *testing.T) {
-	oldBackfill := feedMetadataBackfill
-	feedMetadataBackfill = func(paper store.Paper) store.Paper { return paper }
-	defer func() { feedMetadataBackfill = oldBackfill }()
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
 		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
@@ -717,17 +774,7 @@ func TestFetchAllExtractsElsevierDescriptionMetadata(t *testing.T) {
 	}
 }
 
-func TestFetchAllBackfillsScienceDirectPaperWithoutDOI(t *testing.T) {
-	oldBackfill := feedMetadataBackfill
-	feedMetadataBackfill = func(paper store.Paper) store.Paper {
-		enriched := paper
-		enriched.DOI = stringPtr("10.1016/j.cell.2026.05.001")
-		enriched.Abstract = stringPtr("OpenAlex abstract text.")
-		enriched.AbstractSource = "openalex"
-		return enriched
-	}
-	defer func() { feedMetadataBackfill = oldBackfill }()
-
+func TestFetchAllLeavesScienceDirectPaperWithoutDOIForLaterEnrichment(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
 		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
@@ -762,10 +809,10 @@ func TestFetchAllBackfillsScienceDirectPaperWithoutDOI(t *testing.T) {
 		t.Fatalf("papers = %d", len(result.Papers))
 	}
 	paper := result.Papers[0]
-	if paper.DOI == nil || *paper.DOI != "10.1016/j.cell.2026.05.001" {
+	if paper.DOI != nil {
 		t.Fatalf("unexpected doi: %#v", paper.DOI)
 	}
-	if paper.Abstract == nil || *paper.Abstract != "OpenAlex abstract text." || paper.AbstractSource != "openalex" {
+	if paper.Abstract != nil || paper.AbstractSource != "none" {
 		t.Fatalf("unexpected abstract: %#v", paper)
 	}
 }

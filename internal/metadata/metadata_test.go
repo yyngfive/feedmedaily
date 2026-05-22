@@ -18,10 +18,44 @@ func TestNormalizeDOIAndPaperKey(t *testing.T) {
 	}
 }
 
-func TestEnrichPaperPrefersOpenAlexAndFallsBackToRSS(t *testing.T) {
+func TestEnrichPaperSkipsProvidersWhenRSSIsComplete(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	previousOpenAlex := openAlexBaseURL
+	previousCrossref := crossrefBaseURL
+	defer func() {
+		openAlexBaseURL = previousOpenAlex
+		crossrefBaseURL = previousCrossref
+	}()
+	openAlexBaseURL = server.URL
+	crossrefBaseURL = server.URL
+
+	paper := store.Paper{
+		Title:          "RNA paper",
+		DOI:            stringPtr("10.1000/test"),
+		Journal:        stringPtr("Nature"),
+		Authors:        []string{"Alice Smith"},
+		Abstract:       stringPtr("rss abstract"),
+		AbstractSource: "rss",
+	}
+	enriched := EnrichPaper(paper)
+	if requests != 0 {
+		t.Fatalf("requests = %d", requests)
+	}
+	if enriched.Abstract == nil || *enriched.Abstract != "rss abstract" || enriched.AbstractSource != "rss" {
+		t.Fatalf("unexpected enriched paper: %#v", enriched)
+	}
+}
+
+func TestEnrichPaperPrefersOpenAlexWhenMetadataIsMissing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/works/https://doi.org/10.1000/test" {
-			_, _ = w.Write([]byte(`{"doi":"https://doi.org/10.1000/test","abstract_inverted_index":{"RNA":[0],"biology":[1]},"primary_location":{"source":{"display_name":"Nature"}}}`))
+			_, _ = w.Write([]byte(`{"doi":"https://doi.org/10.1000/test","abstract_inverted_index":{"RNA":[0],"biology":[1]},"primary_location":{"source":{"display_name":"Nature"}},"authorships":[{"author":{"display_name":"Alice Smith"}}]}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -32,10 +66,16 @@ func TestEnrichPaperPrefersOpenAlexAndFallsBackToRSS(t *testing.T) {
 	defer func() { openAlexBaseURL = previousOpenAlex }()
 	openAlexBaseURL = server.URL
 
-	paper := store.Paper{Title: "RNA paper", DOI: stringPtr("10.1000/test"), Abstract: stringPtr("rss abstract"), AbstractSource: "rss"}
+	paper := store.Paper{Title: "RNA paper", DOI: stringPtr("10.1000/test")}
 	enriched := EnrichPaper(paper)
 	if enriched.Abstract == nil || *enriched.Abstract != "RNA biology" || enriched.AbstractSource != "openalex" {
 		t.Fatalf("unexpected enriched paper: %#v", enriched)
+	}
+	if len(enriched.Authors) != 1 || enriched.Authors[0] != "Alice Smith" {
+		t.Fatalf("unexpected authors: %#v", enriched.Authors)
+	}
+	if enriched.Journal == nil || *enriched.Journal != "Nature" {
+		t.Fatalf("unexpected journal: %#v", enriched.Journal)
 	}
 }
 
@@ -122,5 +162,45 @@ func TestEnrichPaperKeepsRSSAbstractWhileBackfillingAuthors(t *testing.T) {
 	}
 	if enriched.Journal == nil || *enriched.Journal != "Journal of the American Chemical Society" {
 		t.Fatalf("unexpected journal: %#v", enriched.Journal)
+	}
+}
+
+func TestEnrichPaperWithoutDOIUsesOpenAlexOnly(t *testing.T) {
+	openAlexRequests := 0
+	crossrefRequests := 0
+	openAlexServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		openAlexRequests++
+		if r.URL.Path == "/works" {
+			_, _ = w.Write([]byte(`{"results":[{"doi":"https://doi.org/10.1000/search-hit","abstract_inverted_index":{"Useful":[0],"abstract":[1]},"primary_location":{"source":{"display_name":"Cell"}},"authorships":[{"author":{"display_name":"Alice Smith"}}]}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer openAlexServer.Close()
+	crossrefServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		crossrefRequests++
+		http.NotFound(w, r)
+	}))
+	defer crossrefServer.Close()
+
+	previousOpenAlex := openAlexBaseURL
+	previousCrossref := crossrefBaseURL
+	defer func() {
+		openAlexBaseURL = previousOpenAlex
+		crossrefBaseURL = previousCrossref
+	}()
+	openAlexBaseURL = openAlexServer.URL
+	crossrefBaseURL = crossrefServer.URL
+
+	paper := store.Paper{Title: "Search-only paper"}
+	enriched := EnrichPaper(paper)
+	if openAlexRequests != 1 {
+		t.Fatalf("openAlexRequests = %d", openAlexRequests)
+	}
+	if crossrefRequests != 0 {
+		t.Fatalf("crossrefRequests = %d", crossrefRequests)
+	}
+	if enriched.DOI == nil || *enriched.DOI != "10.1000/search-hit" {
+		t.Fatalf("unexpected doi: %#v", enriched.DOI)
 	}
 }

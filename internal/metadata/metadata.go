@@ -78,8 +78,9 @@ func AbstractFromOpenAlexInvertedIndex(index map[string][]int) string {
 func EnrichPaper(paper store.Paper) store.Paper {
 	// 只迁 reclassify 所需的 metadata enrich，失败时走本地内容回退。
 	normalizedDOI := NormalizeDOI(stringValue(paper.DOI))
+	hadDOIAtStart := normalizedDOI != ""
 	externalErrors := []string{}
-	if (paper.AbstractSource == "openalex" || paper.AbstractSource == "crossref") && paper.Abstract != nil && paper.Journal != nil && len(paper.Authors) > 0 {
+	if !needsExternalEnrichment(paper) {
 		result := paper
 		if normalizedDOI != "" {
 			result.DOI = stringPtr(normalizedDOI)
@@ -98,10 +99,12 @@ func EnrichPaper(paper store.Paper) store.Paper {
 	} else if errText != "" {
 		externalErrors = append(externalErrors, "openalex:"+errText)
 	}
-	if crossrefPaper, ok, errText := enrichWithCrossref(enriched); ok {
-		enriched = applyMetadataCandidate(enriched, crossrefPaper)
-	} else if errText != "" {
-		externalErrors = append(externalErrors, "crossref:"+errText)
+	if hadDOIAtStart {
+		if crossrefPaper, ok, errText := enrichWithCrossref(enriched); ok {
+			enriched = applyMetadataCandidate(enriched, crossrefPaper)
+		} else if errText != "" {
+			externalErrors = append(externalErrors, "crossref:"+errText)
+		}
 	}
 	if !hasAbstractContent(enriched) {
 		enriched.Abstract = nil
@@ -111,6 +114,19 @@ func EnrichPaper(paper store.Paper) store.Paper {
 	}
 	logEnrichmentResult(enriched, normalizedDOI, externalErrors)
 	return enriched
+}
+
+func needsExternalEnrichment(paper store.Paper) bool {
+	if strings.TrimSpace(stringValue(paper.DOI)) == "" {
+		return true
+	}
+	if strings.TrimSpace(stringValue(paper.Journal)) == "" {
+		return true
+	}
+	if len(paper.Authors) == 0 {
+		return true
+	}
+	return !hasAbstractContent(paper)
 }
 
 func enrichWithOpenAlex(paper store.Paper) (store.Paper, bool, string) {

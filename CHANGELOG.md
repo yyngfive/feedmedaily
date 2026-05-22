@@ -12,8 +12,13 @@ Changes since `0.2.1`:
 
 - Restored Nature-family RSS ingestion after upstream feeds switched to RSS 1.0 / RDF roots such as `rdf:RDF`. The Go feed parser now accepts RDF-backed RSS feeds, keeps the existing RSS normalization path, and preserves multiple `dc:creator` authors instead of only the first author.
 - Fixed the review sidebar `Last Update` label so it no longer changes on page refresh or job polling. The UI now shows the latest real feed refresh timestamp derived from stored paper fetch metadata, rather than the time when `/api/report/latest` was read.
-- Hardened RSS fetching against intermittent upstream blocking by adding richer request headers, limited retry handling for `403`/`429`/`5xx`, challenge-page detection, and a Windows platform fallback for challenge-prone feeds such as ChemRxiv.
-- Improved RSS metadata extraction across publisher-specific feeds, including bioRxiv author parsing, ACS TOC graphic fallback, feed-time Crossref/OpenAlex backfill for missing authors or abstracts, and detailed Elsevier/ScienceDirect `description` parsing for author/date/source metadata.
+- Hardened RSS fetching against intermittent upstream blocking by adding richer request headers, limited retry handling for `403`/`429`/`5xx`, and challenge-page detection without relying on the old Windows-only platform fetch fallback.
+- Improved RSS metadata extraction across publisher-specific feeds, including bioRxiv author parsing, ACS TOC graphic fallback, and detailed Elsevier/ScienceDirect `description` parsing for author/date/source metadata.
+
+### Changed
+
+- Refactored the Go feed pipeline into layered fetch client, generic parser, and small publisher-extractor stages, and moved OpenAlex/Crossref back to a dedicated metadata-enrich layer.
+- Changed metadata enrichment so already-complete RSS entries no longer trigger routine OpenAlex/Crossref lookups; external metadata is now requested only when DOI, authors, journal, or usable abstract content is missing.
 
 ## 0.2.1 (2026-05-21)
 

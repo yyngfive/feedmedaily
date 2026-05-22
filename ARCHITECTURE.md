@@ -13,7 +13,7 @@ FeedMeDaily is the public Windows release name for this single-user literature t
 - `internal/classifier/`: Go-side OpenAI-compatible batch classifier with title-translation fallback and automatic thinking-disable retry on provider timeout/reasoning failures
 - `internal/config/`: early Go settings and path resolution layer
 - `internal/jobs/`: Go-side run-once orchestration, reclassify orchestration, and background-job helpers
-- `internal/metadata/`: Go-side metadata enrich logic for DOI/OpenAlex/Crossref lookups during reclassify
+- `internal/metadata/`: Go-side metadata enrich logic for DOI/OpenAlex/Crossref lookups during reclassify, now used as a field-completion layer instead of a default second-pass lookup for already-complete RSS entries
 - `internal/profile/`: Go-side profile JSON validation, load, and persisted write helpers
 - `internal/runtime/`: shared Go runtime helpers for app mode, paths, version, ports, and runtime state
 - `internal/store/sqlite/`: Go-side SQLite access for reports, feedback, profile proposals, paper read-state, and local Zotero status writes
@@ -28,9 +28,9 @@ FeedMeDaily is the public Windows release name for this single-user literature t
 The production path is:
 
 1. RSS feed subscriptions are stored in `data/rss_feeds.json`.
-2. The backend fetches feed entries and normalizes them into `Paper` records.
+2. The backend fetches feed entries through a layered feed pipeline: generic HTTP client, generic RSS/Atom/RDF parser, and a small set of publisher-specific local extractors.
 3. Papers are deduplicated and upserted into `data/literature.sqlite`.
-4. Papers that need classification are enriched with metadata.
+4. Papers that need classification are enriched with metadata only when core fields such as DOI, authors, journal, or usable abstract content are missing.
 5. The classifier model scores papers against the active `data/classification_profile.json`.
 6. Classifications, feedback, profile proposals, and Zotero save state are persisted in SQLite.
 7. `feedmedailyd` serves the built React app from `web/dist` and exposes JSON APIs for the UI.
@@ -85,7 +85,15 @@ It currently owns the compatibility boundary, local-state write paths, and the f
 - `/api/admin/jobs`
 - React static asset serving and SPA fallback from `web/dist`
 
-The Go service now owns `Run Sync Now` end-to-end, including feed fetching/parsing, SQLite ingest, metadata enrich, classifier execution, report refresh, and Zotero collection/save integration. Python remains as a reference implementation and compatibility shell for regression comparison.
+The Go service now owns `Run Sync Now` end-to-end, including feed fetching/parsing, SQLite ingest, conditional metadata enrich, classifier execution, report refresh, and Zotero collection/save integration. Python remains as a reference implementation and compatibility shell for regression comparison.
+
+The Go feed path is intentionally layered:
+
+- feed client: request headers, retry policy, and challenge-page detection
+- generic parser: RSS 2.0, Atom, and RDF-backed RSS normalization into `Paper`
+- publisher extractors: a small set of feed-local rules such as Nature prefix cleanup, RSS author normalization, Elsevier `description` extraction, and ACS TOC graphic retention
+
+External metadata requests are not part of feed parsing. OpenAlex and Crossref remain in the metadata layer and are only consulted when fetched feed content is still missing core fields.
 
 ### CLI
 
