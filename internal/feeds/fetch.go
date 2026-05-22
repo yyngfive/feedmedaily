@@ -1,17 +1,22 @@
 package feeds
 
 import (
+	"encoding/base64"
 	"encoding/xml"
 	"fmt"
 	"html"
 	"io"
 	"net/http"
 	neturl "net/url"
+	"os/exec"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/yyngfive/scirssagent/internal/logging"
+	"github.com/yyngfive/scirssagent/internal/metadata"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
@@ -34,6 +39,9 @@ type FeedError struct {
 var (
 	fetchHTTPClient       = &http.Client{Timeout: 30 * time.Second}
 	fetchRetryBackoffs    = []time.Duration{200 * time.Millisecond, 600 * time.Millisecond}
+	feedMetadataBackfill  = func(paper store.Paper) store.Paper { return metadata.EnrichPaper(paper) }
+	feedPlatformFetch     = fetchFeedBodyViaPlatform
+	feedPlatformFallback  = shouldUsePlatformFeedFallback
 	whitespaceRE          = regexp.MustCompile(`\s+`)
 	tagRE                 = regexp.MustCompile(`<[^>]+>`)
 	imgSrcRE              = regexp.MustCompile(`(?i)<img[^>]+src=["']([^"']+)["']`)
@@ -44,6 +52,7 @@ var (
 	feedXMLPrefixRE       = regexp.MustCompile(`(?is)^\s*(?:<\?xml\b[^>]*>\s*)?<(?:rss|rdf:RDF|feed)\b`)
 	feedHTMLPrefixRE      = regexp.MustCompile(`(?is)^\s*(?:<!doctype\s+html\b\s*>)?\s*<html\b`)
 	feedChallengeMarkerRE = regexp.MustCompile(`(?is)(just a moment|enable javascript and cookies|attention required|__cf_chl_|cf-browser-verification|challenge-platform)`)
+	elsevierDateRE        = regexp.MustCompile(`(?i)(\d{1,2}\s+[A-Za-z]+\s+\d{4})`)
 )
 
 type rssDoc struct {
@@ -98,6 +107,14 @@ type feedRootProbe struct {
 	XMLName xml.Name
 	Channel *struct{}  `xml:"channel"`
 	Items   []struct{} `xml:"item"`
+}
+
+type elsevierDescription struct {
+	Authors       []string
+	Journal       string
+	PublishedDate *string
+	AbstractText  string
+	AbstractHTML  string
 }
 
 // FetchAll reads configured feeds, fetches them, and normalizes entries into paper candidates.
@@ -221,14 +238,20 @@ func fetchFeedAttempt(url string, attempt int) ([]store.Paper, int, bool, bool, 
 			"request_method": http.MethodGet,
 		},
 	})
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		defer response.Body.Close()
-		retryable := isRetryableFeedStatus(response.StatusCode)
-		return nil, response.StatusCode, false, retryable, fmt.Errorf("request failed with %s", response.Status)
-	}
 	body, err := ioReadAll(response)
 	if err != nil {
 		return nil, response.StatusCode, false, true, err
+	}
+	if fallbackBody, fallbackStatus, fallbackUsed, fallbackErr := maybeFetchFeedBodyWithPlatformFallback(url, response.StatusCode, body); fallbackUsed {
+		if fallbackErr != nil {
+			return nil, fallbackStatus, looksLikeChallengeResponse(body), true, fallbackErr
+		}
+		body = fallbackBody
+		response.StatusCode = fallbackStatus
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		retryable := isRetryableFeedStatus(response.StatusCode)
+		return nil, response.StatusCode, false, retryable, fmt.Errorf("request failed with %s", response.Status)
 	}
 	if challenge := looksLikeChallengeResponse(body); challenge {
 		_, _ = logging.WriteDefault(logging.Event{
@@ -290,6 +313,32 @@ func fetchFeedAttempt(url string, attempt int) ([]store.Paper, int, bool, bool, 
 	}
 }
 
+func maybeFetchFeedBodyWithPlatformFallback(url string, statusCode int, body []byte) ([]byte, int, bool, error) {
+	if !feedPlatformFallback(url, statusCode, body) {
+		return nil, statusCode, false, nil
+	}
+	fallbackBody, fallbackStatus, err := feedPlatformFetch(url)
+	if err != nil {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "warning",
+			Component: "feeds",
+			Action:    "feed_platform_fallback_failed",
+			Message:   fmt.Sprintf("Platform feed fallback failed for %s", url),
+			Error:     err.Error(),
+			Data:      map[string]any{"url": url, "status_code": statusCode},
+		})
+		return nil, fallbackStatus, true, err
+	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "feeds",
+		Action:    "feed_platform_fallback_succeeded",
+		Message:   fmt.Sprintf("Platform feed fallback succeeded for %s", url),
+		Data:      map[string]any{"url": url, "status_code": fallbackStatus},
+	})
+	return fallbackBody, fallbackStatus, true, nil
+}
+
 func applyFeedRequestHeaders(request *http.Request) {
 	request.Header.Set("User-Agent", "SciRSSAgent/0.1")
 	request.Header.Set("Accept", "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7")
@@ -324,6 +373,77 @@ func looksLikeChallengeResponse(body []byte) bool {
 	return feedChallengeMarkerRE.MatchString(sample)
 }
 
+func shouldUsePlatformFeedFallback(url string, statusCode int, body []byte) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	target, err := neturl.Parse(url)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(target.Host)) {
+	case "www.cell.com", "chemrxiv.org":
+	default:
+		return false
+	}
+	if statusCode == http.StatusForbidden || statusCode == http.StatusTooManyRequests {
+		return true
+	}
+	return looksLikeChallengeResponse(body)
+}
+
+func fetchFeedBodyViaPlatform(url string) ([]byte, int, error) {
+	script := `$ProgressPreference='SilentlyContinue'; ` +
+		`$headers = @{ ` +
+		`'User-Agent'='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 SciRSSAgent/0.1'; ` +
+		`'Accept'='application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7'; ` +
+		`'Accept-Language'='en-US,en;q=0.9' }; ` +
+		`$resp = Invoke-WebRequest -Uri $args[0] -MaximumRedirection 5 -Headers $headers; ` +
+		`$body = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([string]$resp.Content)); ` +
+		`Write-Output ('__STATUS__:' + [int]$resp.StatusCode); ` +
+		`Write-Output ('__BODY__:' + $body)`
+	command := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script, url)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return nil, 0, fmt.Errorf("powershell feed fetch failed: %w", err)
+	}
+	statusCode, body, parseErr := parsePlatformFetchOutput(string(output))
+	if parseErr != nil {
+		return nil, 0, parseErr
+	}
+	return body, statusCode, nil
+}
+
+func parsePlatformFetchOutput(output string) (int, []byte, error) {
+	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+	statusCode := 0
+	bodyBase64 := ""
+	for _, line := range lines {
+		if strings.HasPrefix(line, "__STATUS__:") {
+			value := strings.TrimSpace(strings.TrimPrefix(line, "__STATUS__:"))
+			parsed, err := strconv.Atoi(value)
+			if err != nil {
+				return 0, nil, err
+			}
+			statusCode = parsed
+		}
+		if strings.HasPrefix(line, "__BODY__:") {
+			bodyBase64 = strings.TrimSpace(strings.TrimPrefix(line, "__BODY__:"))
+		}
+	}
+	if statusCode == 0 {
+		return 0, nil, fmt.Errorf("platform feed fetch did not return a status code")
+	}
+	if bodyBase64 == "" {
+		return statusCode, nil, fmt.Errorf("platform feed fetch did not return a body")
+	}
+	body, err := base64.StdEncoding.DecodeString(bodyBase64)
+	if err != nil {
+		return statusCode, nil, err
+	}
+	return statusCode, body, nil
+}
+
 func detectFeedFormat(body []byte) (string, string, error) {
 	var probe feedRootProbe
 	if err := xml.Unmarshal(body, &probe); err != nil {
@@ -354,20 +474,37 @@ func parseRSS(doc rssDoc, sourceURL string) []store.Paper {
 		if title == "" || link == "" {
 			continue
 		}
-		abstract, abstractHTML, images := chooseBestAbstract([]string{
-			childTagInnerXML(item.InnerXML, "encoded"),
-			childTagInnerXML(item.InnerXML, "description"),
-			childTagText(item.InnerXML, "description"),
-			childTagText(item.InnerXML, "description"),
-		})
+		descriptionHTML := childTagInnerXML(item.InnerXML, "description")
+		descriptionText := childTagText(item.InnerXML, "description")
+		elsevierActive := isElsevierFeed(sourceURL, link)
+		elsevierDetails := extractElsevierDescription(sourceURL, link, descriptionHTML, descriptionText)
+		abstractCandidates := []string{childTagInnerXML(item.InnerXML, "encoded")}
+		if elsevierDetails.AbstractHTML != "" || elsevierDetails.AbstractText != "" {
+			abstractCandidates = append(abstractCandidates, elsevierDetails.AbstractHTML, elsevierDetails.AbstractText)
+		} else if !elsevierActive {
+			abstractCandidates = append(abstractCandidates, descriptionHTML, descriptionText, descriptionText)
+		}
+		abstract, abstractHTML, images := chooseBestAbstract(abstractCandidates)
 		authors := collectRSSAuthors(item)
+		if len(authors) == 0 && len(elsevierDetails.Authors) > 0 {
+			authors = append([]string{}, elsevierDetails.Authors...)
+		}
 		journal := normalizeFeedJournalTitle(firstNonEmpty(childTagText(item.InnerXML, "publicationName"), childTagText(item.InnerXML, "source"), doc.Channel.Title))
+		if isGenericElsevierJournalTitle(journal) && strings.TrimSpace(elsevierDetails.Journal) != "" {
+			journal = normalizeFeedJournalTitle(elsevierDetails.Journal)
+		} else if journal == "" && strings.TrimSpace(elsevierDetails.Journal) != "" {
+			journal = normalizeFeedJournalTitle(elsevierDetails.Journal)
+		}
 		doi := entryDOI(childTagText(item.InnerXML, "doi"), childTagText(item.InnerXML, "identifier"), item.GUID, link)
+		publishedDate := parseEntryDateText(item.PubDate, childTagText(item.InnerXML, "date"))
+		if publishedDate == nil && elsevierDetails.PublishedDate != nil {
+			publishedDate = elsevierDetails.PublishedDate
+		}
 		raw := map[string]any{}
 		if guid := normalizeText(item.GUID); guid != "" {
 			raw["guid"] = guid
 		}
-		papers = append(papers, store.Paper{
+		paper := store.Paper{
 			SourceURL:      sourceURL,
 			FeedTitle:      stringPtr(normalizeText(doc.Channel.Title)),
 			Title:          title,
@@ -379,9 +516,10 @@ func parseRSS(doc rssDoc, sourceURL string) []store.Paper {
 			AbstractHTML:   stringPtr(abstractHTML),
 			AbstractImages: images,
 			AbstractSource: abstractSourceForContent(abstract, abstractHTML, images),
-			PublishedDate:  parseEntryDateText(item.PubDate, childTagText(item.InnerXML, "date")),
+			PublishedDate:  publishedDate,
 			Raw:            raw,
-		})
+		}
+		papers = append(papers, maybeBackfillFeedMetadata(paper))
 	}
 	return papers
 }
@@ -419,7 +557,7 @@ func parseAtom(doc atomDoc, sourceURL string) []store.Paper {
 		if id := normalizeText(entry.ID); id != "" {
 			raw["id"] = id
 		}
-		papers = append(papers, store.Paper{
+		paper := store.Paper{
 			SourceURL:      sourceURL,
 			FeedTitle:      stringPtr(normalizeText(doc.Title)),
 			Title:          title,
@@ -433,9 +571,50 @@ func parseAtom(doc atomDoc, sourceURL string) []store.Paper {
 			AbstractSource: abstractSourceForContent(abstract, abstractHTML, images),
 			PublishedDate:  parseEntryDateText(entry.Published, entry.Updated),
 			Raw:            raw,
-		})
+		}
+		papers = append(papers, maybeBackfillFeedMetadata(paper))
 	}
 	return papers
+}
+
+func maybeBackfillFeedMetadata(paper store.Paper) store.Paper {
+	if !shouldBackfillFeedMetadata(paper) {
+		return paper
+	}
+	return feedMetadataBackfill(paper)
+}
+
+func shouldBackfillFeedMetadata(paper store.Paper) bool {
+	hosts := []string{}
+	for _, rawURL := range []string{paper.URL, paper.SourceURL} {
+		target, err := neturl.Parse(rawURL)
+		if err != nil {
+			continue
+		}
+		host := strings.ToLower(strings.TrimSpace(target.Host))
+		if host != "" {
+			hosts = append(hosts, host)
+		}
+	}
+	for _, host := range hosts {
+		switch host {
+		case "www.sciencedirect.com", "rss.sciencedirect.com":
+			if strings.TrimSpace(paper.Title) == "" {
+				return false
+			}
+			return strings.TrimSpace(stringValue(paper.DOI)) == "" || len(paper.Authors) == 0 || !feedPaperHasAbstractContent(paper)
+		case "www.science.org", "academic.oup.com", "www.nature.com":
+			if strings.TrimSpace(stringValue(paper.DOI)) == "" {
+				return false
+			}
+			return len(paper.Authors) == 0 || !feedPaperHasAbstractContent(paper)
+		}
+	}
+	return false
+}
+
+func feedPaperHasAbstractContent(paper store.Paper) bool {
+	return paper.Abstract != nil || paper.AbstractHTML != nil || len(paper.AbstractImages) > 0
 }
 
 func chooseBestAbstract(candidates []string) (string, string, []store.AbstractImage) {
@@ -814,6 +993,119 @@ func stringPtr(value string) *string {
 		return nil
 	}
 	return &clean
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func extractElsevierDescription(sourceURL string, articleURL string, descriptionHTML string, descriptionText string) elsevierDescription {
+	if !isElsevierFeed(sourceURL, articleURL) {
+		return elsevierDescription{}
+	}
+	blocks := extractElsevierDescriptionBlocks(descriptionHTML, descriptionText)
+	result := elsevierDescription{}
+	abstractBlocks := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		switch {
+		case strings.HasPrefix(strings.ToLower(block), "publication date:"):
+			if result.PublishedDate == nil {
+				result.PublishedDate = parseElsevierPublicationDate(block)
+			}
+		case strings.HasPrefix(strings.ToLower(block), "source:"):
+			result.Journal = strings.TrimSpace(strings.TrimPrefix(block, "Source:"))
+			if result.Journal == block {
+				result.Journal = strings.TrimSpace(strings.TrimPrefix(block, "source:"))
+			}
+		case strings.HasPrefix(strings.ToLower(block), "author(s):"):
+			rawAuthors := strings.TrimSpace(strings.TrimPrefix(block, "Author(s):"))
+			if rawAuthors == block {
+				rawAuthors = strings.TrimSpace(strings.TrimPrefix(block, "author(s):"))
+			}
+			result.Authors = splitElsevierAuthors(rawAuthors)
+		default:
+			abstractBlocks = append(abstractBlocks, block)
+		}
+	}
+	if len(abstractBlocks) > 0 {
+		result.AbstractText = strings.Join(abstractBlocks, " ")
+		result.AbstractHTML = "<p>" + html.EscapeString(strings.Join(abstractBlocks, "</p><p>")) + "</p>"
+	}
+	return result
+}
+
+func isElsevierFeed(sourceURL string, articleURL string) bool {
+	for _, rawURL := range []string{sourceURL, articleURL} {
+		target, err := neturl.Parse(rawURL)
+		if err != nil {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(target.Host)) {
+		case "rss.sciencedirect.com", "www.sciencedirect.com", "sciencedirect.com":
+			return true
+		}
+	}
+	return false
+}
+
+func extractElsevierDescriptionBlocks(descriptionHTML string, descriptionText string) []string {
+	raw := strings.TrimSpace(descriptionHTML)
+	if raw != "" {
+		matches := regexp.MustCompile(`(?is)<p\b[^>]*>(.*?)</p>`).FindAllStringSubmatch(raw, -1)
+		blocks := make([]string, 0, len(matches))
+		for _, match := range matches {
+			if len(match) < 2 {
+				continue
+			}
+			text := normalizeText(stripTags(match[1]))
+			if text != "" {
+				blocks = append(blocks, text)
+			}
+		}
+		if len(blocks) > 0 {
+			return blocks
+		}
+	}
+	if text := normalizeText(descriptionText); text != "" {
+		return []string{text}
+	}
+	return nil
+}
+
+func parseElsevierPublicationDate(value string) *string {
+	match := elsevierDateRE.FindStringSubmatch(value)
+	if len(match) < 2 {
+		return nil
+	}
+	if parsed, err := time.Parse("2 January 2006", match[1]); err == nil {
+		formatted := parsed.Format("2006-01-02")
+		return &formatted
+	}
+	return nil
+}
+
+func splitElsevierAuthors(value string) []string {
+	clean := normalizeText(value)
+	if clean == "" {
+		return nil
+	}
+	parts := strings.Split(clean, ",")
+	authors := make([]string, 0, len(parts))
+	for _, part := range parts {
+		name := normalizeText(strings.TrimSuffix(strings.TrimSpace(part), "."))
+		if name == "" {
+			continue
+		}
+		authors = append(authors, name)
+	}
+	return authors
+}
+
+func isGenericElsevierJournalTitle(value string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), "sciencedirect publication:")
 }
 
 func containsString(values []string, needle string) bool {

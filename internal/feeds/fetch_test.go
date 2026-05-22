@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
 func TestFetchAllParsesRSSAndContinuesOnFeedFailure(t *testing.T) {
@@ -501,5 +503,269 @@ func TestFetchAllStopsAfterRetryableFailuresAndContinues(t *testing.T) {
 	}
 	if len(result.Papers) != 1 || result.Papers[0].Title != "Healthy feed sample" {
 		t.Fatalf("papers = %#v", result.Papers)
+	}
+}
+
+func TestFetchAllBackfillsScienceAbstractWhenFeedTextIsMetadataOnly(t *testing.T) {
+	oldBackfill := feedMetadataBackfill
+	feedMetadataBackfill = func(paper store.Paper) store.Paper {
+		enriched := paper
+		enriched.Abstract = stringPtr("Crossref abstract text.")
+		enriched.AbstractSource = "crossref"
+		return enriched
+	}
+	defer func() { feedMetadataBackfill = oldBackfill }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns="http://purl.org/rss/1.0/">
+  <channel rdf:about="https://www.science.org/loi/science?af=R">
+    <title>Science</title>
+  </channel>
+  <item rdf:about="https://www.science.org/doi/abs/10.1126/science.aeg5507?af=R">
+    <title>Artificial intimacies</title>
+    <link>https://www.science.org/doi/abs/10.1126/science.aeg5507?af=R</link>
+    <content:encoded xmlns:content="http://purl.org/rss/1.0/modules/content/">Science, Volume 392, Issue 6800, Page 814-814, May 2026.</content:encoded>
+    <description>Science, Volume 392, Issue 6800, Page 814-814, May 2026.</description>
+    <dc:identifier>doi:10.1126/science.aeg5507</dc:identifier>
+    <dc:source>Science</dc:source>
+    <dc:date>2026-05-21T06:00:10Z</dc:date>
+    <dc:creator>Jessica M. Szczuka</dc:creator>
+  </item>
+</rdf:RDF>`))
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[{"journal":"Science","url":"`+server.URL+`"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Papers) != 1 {
+		t.Fatalf("papers = %d", len(result.Papers))
+	}
+	if result.Papers[0].Abstract == nil || *result.Papers[0].Abstract != "Crossref abstract text." || result.Papers[0].AbstractSource != "crossref" {
+		t.Fatalf("unexpected paper: %#v", result.Papers[0])
+	}
+}
+
+func TestFetchAllBackfillsNARAuthorsWhenFeedOmitsThem(t *testing.T) {
+	oldBackfill := feedMetadataBackfill
+	feedMetadataBackfill = func(paper store.Paper) store.Paper {
+		enriched := paper
+		enriched.Authors = []string{"Alice Ng", "Bob Chen"}
+		return enriched
+	}
+	defer func() { feedMetadataBackfill = oldBackfill }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0"?>
+<rss version="2.0" xmlns:prism="http://purl.org/rss/1.0/modules/prism/">
+  <channel>
+    <title>Nucleic Acids Research Current Issue</title>
+    <item>
+      <title>Combinatorial histone modifications direct ATP-dependent chromatin remodeling by NURF to promoter-proximal nucleosomes</title>
+      <link>https://academic.oup.com/nar/article/doi/10.1093/nar/gkag494/8688746?rss=1</link>
+      <pubDate>Thu, 21 May 2026 00:00:00 GMT</pubDate>
+      <description>Abstract text.</description>
+      <prism:doi>10.1093/nar/gkag494</prism:doi>
+      <guid>http://doi.org/10.1093/nar/gkag494</guid>
+    </item>
+  </channel>
+</rss>`))
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[{"journal":"NAR","url":"`+server.URL+`"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Papers) != 1 {
+		t.Fatalf("papers = %d", len(result.Papers))
+	}
+	if len(result.Papers[0].Authors) != 2 || result.Papers[0].Authors[0] != "Alice Ng" || result.Papers[0].Authors[1] != "Bob Chen" {
+		t.Fatalf("unexpected paper: %#v", result.Papers[0])
+	}
+}
+
+func TestFetchAllUsesPlatformFallbackForChallengeBlockedFeed(t *testing.T) {
+	oldBackoffs := fetchRetryBackoffs
+	oldPlatformFetch := feedPlatformFetch
+	oldPlatformFallback := feedPlatformFallback
+	fetchRetryBackoffs = []time.Duration{0}
+	feedPlatformFallback = func(url string, statusCode int, body []byte) bool {
+		return statusCode == http.StatusForbidden
+	}
+	feedPlatformFetch = func(url string) ([]byte, int, error) {
+		return []byte(`<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns="http://purl.org/rss/1.0/">
+  <channel rdf:about="https://chemrxiv.org/action/showFeed?type=latest&amp;format=rss">
+    <title>ChemRxiv</title>
+  </channel>
+  <item rdf:about="https://chemrxiv.org/doi/full/10.26434/chemrxiv-2025-hssg2/v3?af=R">
+    <title>Fallback sample</title>
+    <link>https://chemrxiv.org/doi/full/10.26434/chemrxiv-2025-hssg2/v3?af=R</link>
+    <description>Fallback abstract.</description>
+    <dc:identifier>doi:10.26434/chemrxiv-2025-hssg2/v3</dc:identifier>
+    <dc:date>2026-05-21T11:52:10Z</dc:date>
+    <dc:creator>Alice Smith</dc:creator>
+    <prism:publicationName xmlns:prism="http://prismstandard.org/namespaces/basic/2.0/">ChemRxiv</prism:publicationName>
+  </item>
+</rdf:RDF>`), http.StatusOK, nil
+	}
+	defer func() {
+		fetchRetryBackoffs = oldBackoffs
+		feedPlatformFetch = oldPlatformFetch
+		feedPlatformFallback = oldPlatformFallback
+	}()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[{"journal":"Chemrxiv","url":"`+server.URL+`"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Errors) != 0 || len(result.Papers) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	if result.Papers[0].Title != "Fallback sample" {
+		t.Fatalf("unexpected paper: %#v", result.Papers[0])
+	}
+}
+
+func TestFetchAllExtractsElsevierDescriptionMetadata(t *testing.T) {
+	oldBackfill := feedMetadataBackfill
+	feedMetadataBackfill = func(paper store.Paper) store.Paper { return paper }
+	defer func() { feedMetadataBackfill = oldBackfill }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title><![CDATA[ScienceDirect Publication: Cell]]></title>
+    <item>
+      <title><![CDATA[Harnessing citizen science to contextualize adaptation mechanism discovery]]></title>
+      <description><![CDATA[<p>Publication date: Available online 20 May 2026</p><p><b>Source:</b> Cell</p><p>Author(s): Laura E. Tibbs-Cortes, Linqian Han, Jeremy B. Jewell</p>]]></description>
+      <link>https://www.sciencedirect.com/science/article/pii/S0092867426005064?dgcid=rss_sd_all</link>
+      <guid isPermaLink="false">https://www.sciencedirect.com/science/article/pii/S0092867426005064</guid>
+    </item>
+  </channel>
+</rss>`))
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[{"journal":"Cell","url":"`+server.URL+`"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Papers) != 1 {
+		t.Fatalf("papers = %d", len(result.Papers))
+	}
+	paper := result.Papers[0]
+	if len(paper.Authors) != 3 || paper.Authors[0] != "Laura E. Tibbs-Cortes" || paper.Authors[2] != "Jeremy B. Jewell" {
+		t.Fatalf("unexpected authors: %#v", paper.Authors)
+	}
+	if paper.PublishedDate == nil || *paper.PublishedDate != "2026-05-20" {
+		t.Fatalf("unexpected published date: %#v", paper.PublishedDate)
+	}
+	if paper.Journal == nil || *paper.Journal != "Cell" {
+		t.Fatalf("unexpected journal: %#v", paper.Journal)
+	}
+	if paper.Abstract != nil || paper.AbstractHTML != nil {
+		t.Fatalf("expected metadata-only description not to become abstract: %#v %#v", paper.Abstract, paper.AbstractHTML)
+	}
+}
+
+func TestFetchAllBackfillsScienceDirectPaperWithoutDOI(t *testing.T) {
+	oldBackfill := feedMetadataBackfill
+	feedMetadataBackfill = func(paper store.Paper) store.Paper {
+		enriched := paper
+		enriched.DOI = stringPtr("10.1016/j.cell.2026.05.001")
+		enriched.Abstract = stringPtr("OpenAlex abstract text.")
+		enriched.AbstractSource = "openalex"
+		return enriched
+	}
+	defer func() { feedMetadataBackfill = oldBackfill }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title><![CDATA[ScienceDirect Publication: Cell]]></title>
+    <item>
+      <title><![CDATA[Harnessing citizen science to contextualize adaptation mechanism discovery]]></title>
+      <description><![CDATA[<p>Publication date: Available online 20 May 2026</p><p><b>Source:</b> Cell</p><p>Author(s): Laura E. Tibbs-Cortes, Linqian Han</p>]]></description>
+      <link>https://www.sciencedirect.com/science/article/pii/S0092867426005064?dgcid=rss_sd_all</link>
+      <guid isPermaLink="false">https://www.sciencedirect.com/science/article/pii/S0092867426005064</guid>
+    </item>
+  </channel>
+</rss>`))
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[{"journal":"Cell","url":"`+server.URL+`"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Papers) != 1 {
+		t.Fatalf("papers = %d", len(result.Papers))
+	}
+	paper := result.Papers[0]
+	if paper.DOI == nil || *paper.DOI != "10.1016/j.cell.2026.05.001" {
+		t.Fatalf("unexpected doi: %#v", paper.DOI)
+	}
+	if paper.Abstract == nil || *paper.Abstract != "OpenAlex abstract text." || paper.AbstractSource != "openalex" {
+		t.Fatalf("unexpected abstract: %#v", paper)
 	}
 }
