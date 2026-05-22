@@ -8,7 +8,10 @@ The latest released version is `0.2.1`. The next planned release is `0.2.2`, so 
 
 Changes since `0.2.1`:
 
-- No unreleased product changes recorded yet.
+### Fixed
+
+- Restored Nature-family RSS ingestion after upstream feeds switched to RSS 1.0 / RDF roots such as `rdf:RDF`. The Go feed parser now accepts RDF-backed RSS feeds, keeps the existing RSS normalization path, and preserves multiple `dc:creator` authors instead of only the first author.
+- Fixed the review sidebar `Last Update` label so it no longer changes on page refresh or job polling. The UI now shows the latest real feed refresh timestamp derived from stored paper fetch metadata, rather than the time when `/api/report/latest` was read.
 
 ## 0.2.1 (2026-05-21)
 
