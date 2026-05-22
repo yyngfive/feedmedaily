@@ -51,12 +51,14 @@ export function AdminPanel({
   onRemoveFeed,
   onRunFeedSync,
   onSaveConfig,
+  onSaveProfile,
   onSaveScheduler,
   onSaveFeeds,
   onTabChange,
   onDeleteScheduler,
   open,
   profile,
+  profileSaving,
   proposalGenerating,
   proposals,
   scheduler,
@@ -86,12 +88,14 @@ export function AdminPanel({
   onRemoveFeed: (index: number) => void;
   onRunFeedSync: () => void;
   onSaveConfig: (fields: Record<string, SettingsConfigUpdate>) => Promise<void>;
+  onSaveProfile: (profile: ClassificationProfile) => Promise<void> | void;
   onSaveScheduler: (dailyTime: string) => Promise<void>;
   onSaveFeeds: () => void;
   onTabChange: (tab: AdminTab) => void;
   onDeleteScheduler: () => Promise<void>;
   open: boolean;
   profile: ClassificationProfile | null;
+  profileSaving: boolean;
   proposalGenerating: boolean;
   proposals: ProfileProposal[];
   scheduler: SchedulerSettings | null;
@@ -460,7 +464,12 @@ export function AdminPanel({
                     </div>
                   </>
                 ) : profile ? (
-                  <ProfileRulesDocument profile={profile} />
+                  <ProfileRulesDocument
+                    editable
+                    onSave={onSaveProfile}
+                    profile={profile}
+                    saving={profileSaving}
+                  />
                 ) : (
                   <p className="text-sm text-muted">No profile available yet.</p>
                 )}

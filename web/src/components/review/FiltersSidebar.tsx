@@ -14,6 +14,7 @@ export function FiltersSidebar({
   dateFilter,
   journal,
   journalOptions,
+  lastUpdateLabel,
   onDateFilterChange,
   onJournalChange,
   onReadFilterChange,
@@ -21,7 +22,6 @@ export function FiltersSidebar({
   profileName,
   profileVersion,
   readFilter,
-  reportDate,
   shownCount,
   totalCount,
   visibleTotals,
@@ -29,6 +29,7 @@ export function FiltersSidebar({
   dateFilter: DateFilter;
   journal: string;
   journalOptions: SelectOption[];
+  lastUpdateLabel: string;
   onDateFilterChange: (value: DateFilter) => void;
   onJournalChange: (value: string) => void;
   onReadFilterChange: (value: ReadFilter) => void;
@@ -36,7 +37,6 @@ export function FiltersSidebar({
   profileName: string;
   profileVersion: number;
   readFilter: ReadFilter;
-  reportDate: string;
   shownCount: number;
   totalCount: number;
   visibleTotals: Record<Relevance, number>;
@@ -45,7 +45,7 @@ export function FiltersSidebar({
     <aside className="h-full space-y-4 overflow-hidden rounded-lg border border-(--line) bg-(--paper-accent) p-4">
       <div>
         <p className="text-sm leading-6 text-muted">
-          Last Update: {reportDate}
+          Last Update: {lastUpdateLabel}
         </p>
         <p className="mt-1 text-sm leading-6 text-muted">
           {shownCount} shown, {totalCount} total

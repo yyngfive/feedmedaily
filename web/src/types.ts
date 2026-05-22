@@ -179,6 +179,7 @@ export type Paper = {
 
 export type Report = {
   generated_at: string;
+  last_updated_at?: string | null;
   report_date: string;
   totals: Record<string, number>;
   papers: Paper[];
@@ -281,6 +282,7 @@ export type SettingsConfigUpdate = {
 
 export const EMPTY_REPORT: Report = {
   generated_at: new Date().toISOString(),
+  last_updated_at: null,
   report_date: new Date().toISOString().slice(0, 10),
   totals: {total: 0, direct: 0, indirect: 0, unrelated: 0},
   papers: [],

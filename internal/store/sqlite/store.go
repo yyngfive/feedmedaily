@@ -99,11 +99,12 @@ type ReportPaper struct {
 }
 
 type Report struct {
-	GeneratedAt time.Time      `json:"generated_at"`
-	ReportDate  string         `json:"report_date"`
-	Totals      map[string]int `json:"totals"`
-	Papers      []ReportPaper  `json:"papers"`
-	Errors      []string       `json:"errors"`
+	GeneratedAt   time.Time      `json:"generated_at"`
+	LastUpdatedAt *time.Time     `json:"last_updated_at"`
+	ReportDate    string         `json:"report_date"`
+	Totals        map[string]int `json:"totals"`
+	Papers        []ReportPaper  `json:"papers"`
+	Errors        []string       `json:"errors"`
 }
 
 type FeedbackRecord struct {
@@ -217,13 +218,37 @@ func (s *Store) BuildLatestReport(now time.Time) (Report, error) {
 	if len(s.paperColumns) == 0 || len(s.classificationColumns) == 0 {
 		return report, nil
 	}
+	lastUpdatedAt, err := s.latestReportUpdatedAt()
+	if err != nil {
+		return Report{}, err
+	}
 	papers, err := s.listReportPapers()
 	if err != nil {
 		return Report{}, err
 	}
+	report.LastUpdatedAt = lastUpdatedAt
 	report.Papers = papers
 	report.Totals = reportTotals(papers)
 	return report, nil
+}
+
+func (s *Store) latestReportUpdatedAt() (*time.Time, error) {
+	if len(s.paperColumns) == 0 {
+		return nil, nil
+	}
+	column := s.columnExpr(s.paperColumns, "last_checked_at", "first_seen_at")
+	var raw sql.NullString
+	if err := s.db.QueryRow(fmt.Sprintf(`SELECT MAX(%s) FROM papers`, column)).Scan(&raw); err != nil {
+		return nil, fmt.Errorf("query latest report updated at: %w", err)
+	}
+	if !raw.Valid || strings.TrimSpace(raw.String) == "" {
+		return nil, nil
+	}
+	parsed, err := parseTime(raw.String)
+	if err != nil {
+		return nil, fmt.Errorf("parse latest report updated at: %w", err)
+	}
+	return &parsed, nil
 }
 
 func (s *Store) ListFeedback() ([]FeedbackRecord, error) {
@@ -1082,8 +1107,9 @@ func reportTotals(papers []ReportPaper) map[string]int {
 
 func emptyReport(now time.Time) Report {
 	return Report{
-		GeneratedAt: now,
-		ReportDate:  now.Format("2006-01-02"),
+		GeneratedAt:   now,
+		LastUpdatedAt: nil,
+		ReportDate:    now.Format("2006-01-02"),
 		Totals: map[string]int{
 			"total":     0,
 			"direct":    0,

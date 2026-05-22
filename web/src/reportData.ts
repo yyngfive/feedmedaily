@@ -3,6 +3,7 @@ import type {
   AppControlTarget,
   AppMeta,
   AppUpdate,
+  ClassificationProfile,
   CurrentProfileResponse,
   FeedSubscription,
   FeedbackRecord,
@@ -159,6 +160,18 @@ export async function fetchCurrentProfile(): Promise<CurrentProfileResponse> {
   const response = await fetch("/api/profile/current");
   if (!response.ok) {
     throw new Error(`Could not load current profile (${response.status})`);
+  }
+  return (await response.json()) as CurrentProfileResponse;
+}
+
+export async function saveCurrentProfile(profile: ClassificationProfile): Promise<CurrentProfileResponse> {
+  const response = await fetch("/api/profile/current", {
+    method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(profile),
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
   }
   return (await response.json()) as CurrentProfileResponse;
 }

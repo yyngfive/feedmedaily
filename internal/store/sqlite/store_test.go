@@ -136,6 +136,9 @@ INSERT INTO zotero_saves (
 	if report.Totals["total"] != 1 || report.Totals["indirect"] != 1 {
 		t.Fatalf("unexpected totals: %#v", report.Totals)
 	}
+	if report.LastUpdatedAt == nil || !report.LastUpdatedAt.Equal(time.Date(2026, 5, 16, 1, 2, 3, 0, time.UTC)) {
+		t.Fatalf("unexpected last updated at: %#v", report.LastUpdatedAt)
+	}
 	paper := report.Papers[0]
 	if paper.Title != "Fixture paper" || paper.Classification.TranslatedTitleZH == nil || *paper.Classification.TranslatedTitleZH != "测试标题" {
 		t.Fatalf("unexpected paper payload: %#v", paper)
@@ -151,6 +154,54 @@ INSERT INTO zotero_saves (
 	}
 	if paper.Raw["source"] != "fixture" {
 		t.Fatalf("unexpected raw payload: %#v", paper.Raw)
+	}
+}
+
+func TestBuildLatestReportLastUpdatedAtDoesNotDriftWithReadTime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	store, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	seenAt := time.Date(2026, 5, 16, 1, 2, 3, 0, time.UTC)
+	paper := Paper{
+		SourceURL:      "https://example.com/rss",
+		FeedTitle:      stringPtr("Feed"),
+		Title:          "Stable timestamp paper",
+		URL:            "https://example.com/paper",
+		Authors:        []string{"Alice"},
+		AbstractSource: "none",
+	}
+	paperID, _, err := store.UpsertPaper(paper, seenAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveClassification(paperID, Classification{
+		Relevance:         "direct",
+		Confidence:        0.9,
+		TopicTags:         []string{"rna_bio"},
+		Reason:            "Fixture",
+		RecommendedAction: "read",
+		Model:             "test-model",
+	}, seenAt); err != nil {
+		t.Fatal(err)
+	}
+
+	reportA, err := store.BuildLatestReport(time.Date(2026, 5, 20, 8, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reportB, err := store.BuildLatestReport(time.Date(2026, 5, 22, 9, 30, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reportA.LastUpdatedAt == nil || reportB.LastUpdatedAt == nil {
+		t.Fatalf("missing last updated timestamps: %#v %#v", reportA.LastUpdatedAt, reportB.LastUpdatedAt)
+	}
+	if !reportA.LastUpdatedAt.Equal(seenAt) || !reportB.LastUpdatedAt.Equal(seenAt) {
+		t.Fatalf("last updated timestamp drifted: %#v %#v", reportA.LastUpdatedAt, reportB.LastUpdatedAt)
 	}
 }
 

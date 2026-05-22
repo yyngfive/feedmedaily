@@ -25,6 +25,7 @@ import {
   openAppTarget,
   rejectProfileProposal,
   saveFeedSubscriptions,
+  saveCurrentProfile,
   saveSchedulerSettings,
   saveSettingsConfig,
   saveToZotero,
@@ -97,6 +98,7 @@ export function App() {
   const [feedsSaving, setFeedsSaving] = React.useState(false);
   const [schedulerSaving, setSchedulerSaving] = React.useState(false);
   const [settingsConfigSaving, setSettingsConfigSaving] = React.useState(false);
+  const [profileSaving, setProfileSaving] = React.useState(false);
   const [zoteroPaper, setZoteroPaper] = React.useState<Paper | null>(null);
   const [zoteroCollections, setZoteroCollections] = React.useState<ZoteroCollectionOption[]>([]);
   const [zoteroCollectionKey, setZoteroCollectionKey] = React.useState("");
@@ -420,6 +422,10 @@ export function App() {
       ),
     [filteredBase, relevance],
   );
+  const lastUpdateLabel = React.useMemo(
+    () => report.last_updated_at?.slice(0, 10) ?? "Never",
+    [report.last_updated_at],
+  );
 
   const needsFeedSetup = Boolean(profile && feedsLoaded && feeds.length === 0);
   const hasNoFetchedPapers = !needsFeedSetup && feeds.length > 0 && report.papers.length === 0;
@@ -648,6 +654,20 @@ export function App() {
     }
   }, [pushMessage]);
 
+  const handleSaveProfile = React.useCallback(async (nextProfile: ClassificationProfile) => {
+    try {
+      setProfileSaving(true);
+      const saved = await saveCurrentProfile(nextProfile);
+      setProfile(saved.profile);
+      pushMessage("profile.current.save.succeeded");
+    } catch (error) {
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      throw error;
+    } finally {
+      setProfileSaving(false);
+    }
+  }, [pushMessage]);
+
   const handleDeleteScheduler = React.useCallback(async () => {
     try {
       setSchedulerSaving(true);
@@ -816,6 +836,7 @@ export function App() {
         configSaving={settingsConfigSaving}
         open={adminOpen}
         profile={profile}
+        profileSaving={profileSaving}
         hasFeeds={feeds.length > 0}
         feeds={feeds}
         feedsSaving={feedsSaving}
@@ -828,6 +849,7 @@ export function App() {
         onAddFeed={handleAddFeed}
         onRemoveFeed={handleRemoveFeed}
         onSaveConfig={handleSaveConfig}
+        onSaveProfile={handleSaveProfile}
         onSaveScheduler={handleSaveScheduler}
         onSaveFeeds={() => void handleSaveFeeds()}
         onTabChange={setAdminTab}
@@ -870,6 +892,7 @@ export function App() {
           dateFilter={dateFilter}
           journal={journal}
           journalOptions={journalOptions}
+          lastUpdateLabel={lastUpdateLabel}
           onDateFilterChange={setDateFilter}
           onJournalChange={setJournal}
           onReadFilterChange={setReadFilter}
@@ -877,7 +900,6 @@ export function App() {
           profileName={profile.meta.name}
           profileVersion={profile.meta.version}
           readFilter={readFilter}
-          reportDate={report.report_date}
           shownCount={visibleList.length}
           totalCount={needsFeedSetup ? 0 : report.papers.length}
           visibleTotals={visibleTotals}

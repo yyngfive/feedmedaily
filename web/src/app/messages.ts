@@ -32,6 +32,7 @@ const catalog = {
   "profile.proposal.started": {text: "Profile proposal job started.", tone: "info"},
   "profile.proposal.applied": {text: "Profile proposal applied.", tone: "success"},
   "profile.proposal.rejected": {text: "Profile proposal rejected.", tone: "success"},
+  "profile.current.save.succeeded": {text: "Classification profile saved.", tone: "success"},
   "job.started": {text: "Job started.", tone: "info"},
   "job.reclassify.started": {text: "Reclassification job started.", tone: "info"},
   "job.completed": {text: "Completed.", tone: "success"},

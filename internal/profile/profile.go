@@ -114,6 +114,26 @@ func PrepareAppliedProfile(proposed map[string]any, current map[string]any, now 
 	return compactDocumentMap(proposedDocument)
 }
 
+func PrepareUpdatedProfile(edited map[string]any, current map[string]any, now time.Time) (map[string]any, int, error) {
+	// 保存用户直接编辑的 profile 时，保留创建时间和来源描述，只递增版本与更新时间。
+	if current == nil {
+		return nil, 0, fmt.Errorf("no classification profile exists yet")
+	}
+	editedDocument, err := parseDocumentMap(edited)
+	if err != nil {
+		return nil, 0, err
+	}
+	currentDocument, err := parseDocumentMap(current)
+	if err != nil {
+		return nil, 0, err
+	}
+	editedDocument.Meta.Version = currentDocument.Meta.Version + 1
+	editedDocument.Meta.CreatedAt = currentDocument.Meta.CreatedAt
+	editedDocument.Meta.UpdatedAt = now.UTC()
+	editedDocument.Meta.SourceDescription = currentDocument.Meta.SourceDescription
+	return compactDocumentMap(editedDocument)
+}
+
 func ValidateBytes(data []byte) (map[string]any, error) {
 	// 用严格 JSON 解码校验 profile 结构，再返回原始对象形状。
 	if _, err := parseDocumentBytes(data); err != nil {

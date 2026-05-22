@@ -166,3 +166,72 @@ func TestPrepareAppliedProfileIncrementsVersionAndPreservesCreatedAt(t *testing.
 		t.Fatalf("unexpected applied meta: %#v", meta)
 	}
 }
+
+func TestPrepareUpdatedProfilePreservesCreatedAtAndSourceDescription(t *testing.T) {
+	now := time.Date(2026, 5, 21, 11, 45, 0, 0, time.UTC)
+	edited := map[string]any{
+		"meta": map[string]any{
+			"name":               "Edited Profile",
+			"version":            1,
+			"created_at":         "2026-05-20T00:00:00Z",
+			"updated_at":         "2026-05-20T00:00:00Z",
+			"source_description": "edited",
+		},
+		"scope": "RNA biology and splicing",
+		"relevance_rules": map[string]any{
+			"direct":    []any{"RNA", "Splicing"},
+			"indirect":  []any{"Protein complexes"},
+			"unrelated": []any{"Plant biology"},
+		},
+		"topic_taxonomy": []any{map[string]any{"id": "rna_bio", "label": "RNA Bio"}},
+		"few_shots": []any{
+			map[string]any{
+				"title":     "Example paper",
+				"relevance": "direct",
+				"tags":      []any{"rna_bio"},
+				"rationale": "Tracks RNA mechanisms.",
+			},
+		},
+	}
+	current := map[string]any{
+		"meta": map[string]any{
+			"name":               "Current",
+			"version":            2,
+			"created_at":         "2026-05-01T00:00:00Z",
+			"updated_at":         "2026-05-12T00:00:00Z",
+			"source_description": "current profile",
+		},
+		"scope": "RNA biology",
+		"relevance_rules": map[string]any{
+			"direct":    []any{"RNA"},
+			"indirect":  []any{},
+			"unrelated": []any{},
+		},
+		"topic_taxonomy": []any{},
+		"few_shots":      []any{},
+	}
+
+	updated, version, err := PrepareUpdatedProfile(edited, current, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != 3 {
+		t.Fatalf("version = %d", version)
+	}
+	meta := updated["meta"].(map[string]any)
+	if meta["name"] != "Edited Profile" {
+		t.Fatalf("name = %#v", meta["name"])
+	}
+	if meta["version"] != float64(3) {
+		t.Fatalf("version meta = %#v", meta["version"])
+	}
+	if meta["created_at"] != "2026-05-01T00:00:00Z" {
+		t.Fatalf("created_at = %#v", meta["created_at"])
+	}
+	if meta["updated_at"] != now.Format(time.RFC3339) {
+		t.Fatalf("updated_at = %#v", meta["updated_at"])
+	}
+	if meta["source_description"] != "current profile" {
+		t.Fatalf("source_description = %#v", meta["source_description"])
+	}
+}
