@@ -14,18 +14,21 @@ import (
 )
 
 type jobInfo struct {
-	ID           string         `json:"id"`
-	JobType      string         `json:"job_type"`
-	Status       string         `json:"status"`
-	MessageKey   string         `json:"message_key,omitempty"`
-	Message      string         `json:"message,omitempty"`
-	Error        string         `json:"error,omitempty"`
-	Result       map[string]any `json:"result,omitempty"`
-	LogPath      string         `json:"log_path,omitempty"`
-	WarningCount int            `json:"warning_count,omitempty"`
-	CreatedAt    time.Time      `json:"created_at"`
-	StartedAt    *time.Time     `json:"started_at,omitempty"`
-	FinishedAt   *time.Time     `json:"finished_at,omitempty"`
+	ID                   string         `json:"id"`
+	JobType              string         `json:"job_type"`
+	Status               string         `json:"status"`
+	MessageKey           string         `json:"message_key,omitempty"`
+	Message              string         `json:"message,omitempty"`
+	Error                string         `json:"error,omitempty"`
+	VerificationRequired bool           `json:"verification_required,omitempty"`
+	VerificationTarget   string         `json:"verification_target,omitempty"`
+	VerificationFeedURL  string         `json:"verification_feed_url,omitempty"`
+	Result               map[string]any `json:"result,omitempty"`
+	LogPath              string         `json:"log_path,omitempty"`
+	WarningCount         int            `json:"warning_count,omitempty"`
+	CreatedAt            time.Time      `json:"created_at"`
+	StartedAt            *time.Time     `json:"started_at,omitempty"`
+	FinishedAt           *time.Time     `json:"finished_at,omitempty"`
 }
 
 type jobRegistry struct {

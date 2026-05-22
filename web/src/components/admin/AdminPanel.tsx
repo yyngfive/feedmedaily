@@ -43,6 +43,7 @@ export function AdminPanel({
   onDeleteFeedback,
   onFeedChange,
   onGenerateProposal,
+  onStartVerification,
   onReclassifyAll,
   onReclassifyFeedback,
   onReclassifyRecent,
@@ -80,6 +81,7 @@ export function AdminPanel({
   onDeleteFeedback: (id: number) => void;
   onFeedChange: (index: number, field: "journal" | "url", value: string) => void;
   onGenerateProposal: () => void;
+  onStartVerification: (job: JobInfo) => void;
   onReclassifyAll: () => void;
   onReclassifyFeedback: () => void;
   onReclassifyRecent: () => void;
@@ -106,6 +108,13 @@ export function AdminPanel({
   }
   const pendingProposal = proposals.find((item) => item.state === "pending") ?? null;
   const openFeedback = feedback.filter((item) => item.state === "open");
+  const verificationJob =
+    jobs.find(
+      (job) =>
+        job.status === "waiting_for_user" &&
+        job.verification_required &&
+        job.verification_target === "chemrxiv",
+    ) ?? null;
   const [schedulerTime, setSchedulerTime] = React.useState("10:00");
 
   React.useEffect(() => {
@@ -178,6 +187,24 @@ export function AdminPanel({
                   </span>
                 </Button>
               </div>
+              {verificationJob ? (
+                <div className="mt-4 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-3 text-sm text-amber-950">
+                  <p className="font-semibold">ChemRxiv needs manual verification</p>
+                  <p className="mt-1 leading-6">
+                    This sync is paused until you finish the Cloudflare check in a dedicated verification window.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button size="sm" variant="secondary" onPress={() => onStartVerification(verificationJob)}>
+                      Open ChemRxiv Verification
+                    </Button>
+                    {verificationJob.verification_feed_url ? (
+                      <code className="self-center break-all text-xs text-amber-900/80">
+                        {verificationJob.verification_feed_url}
+                      </code>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </section>
 
             <SettingsConfigEditor

@@ -55,6 +55,29 @@ func looksLikeChallengeResponse(body []byte) bool {
 	return feedChallengeMarkerRE.MatchString(sample)
 }
 
+func shouldRequireFeedVerification(feedURL string, statusCode int, challenge bool) bool {
+	target := verificationTargetForURL(feedURL)
+	if target == "" {
+		return false
+	}
+	if challenge {
+		return true
+	}
+	return statusCode == http.StatusForbidden
+}
+
+func verificationTargetForURL(feedURL string) string {
+	parsed, err := neturl.Parse(feedURL)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "chemrxiv.org" {
+		return "chemrxiv"
+	}
+	return ""
+}
+
 func ioReadAll(response *http.Response) ([]byte, error) {
 	defer response.Body.Close()
 	return io.ReadAll(response.Body)

@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -222,6 +223,38 @@ func TestRunOnceLeavesProfileUntouchedWhenClassifierReturnsNoTags(t *testing.T) 
 	meta := updatedProfile["meta"].(map[string]any)
 	if meta["version"] != float64(1) {
 		t.Fatalf("expected profile version to stay 1, got %#v", meta)
+	}
+}
+
+func TestRunOnceReturnsVerificationRequiredWhenFeedNeedsManualCheck(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings.ProfilePath, []byte(`{"meta":{"name":"Test","version":1,"created_at":"2026-05-16T00:00:00Z","updated_at":"2026-05-16T00:00:00Z","source_description":"test"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	previousFetch := fetchAllFeedsFunc
+	defer func() { fetchAllFeedsFunc = previousFetch }()
+	fetchAllFeedsFunc = func(_ string, _ feeds.FetchOptions) (feeds.FetchResult, error) {
+		return feeds.FetchResult{
+			VerificationRequests: []feeds.VerificationRequest{{
+				URL:    "https://chemrxiv.org/action/showFeed?type=latest&format=rss",
+				Target: "chemrxiv",
+				Reason: "challenge",
+			}},
+		}, nil
+	}
+
+	_, err := RunOnce(settings, RunOptions{}, nil)
+	var verificationErr *VerificationRequiredError
+	if !errors.As(err, &verificationErr) {
+		t.Fatalf("expected verification error, got %v", err)
+	}
+	if len(verificationErr.Requests) != 1 || verificationErr.Requests[0].Target != "chemrxiv" {
+		t.Fatalf("unexpected verification requests: %#v", verificationErr.Requests)
 	}
 }
 

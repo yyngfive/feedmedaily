@@ -83,6 +83,8 @@ It currently owns the compatibility boundary, local-state write paths, and the f
 - `/api/admin/reclassify` via Go-side metadata enrich + classifier + report refresh
 - `/api/admin/report/latest`
 - `/api/admin/jobs`
+- `/api/feeds/verification/start`
+- `/api/feeds/verification/callback`
 - React static asset serving and SPA fallback from `web/dist`
 
 The Go service now owns `Run Sync Now` end-to-end, including feed fetching/parsing, SQLite ingest, conditional metadata enrich, classifier execution, report refresh, and Zotero collection/save integration. Python remains as a reference implementation and compatibility shell for regression comparison.
@@ -94,6 +96,16 @@ The Go feed path is intentionally layered:
 - publisher extractors: a small set of feed-local rules such as Nature prefix cleanup, RSS author normalization, Elsevier `description` extraction, and ACS TOC graphic retention
 
 External metadata requests are not part of feed parsing. OpenAlex and Crossref remain in the metadata layer and are only consulted when fetched feed content is still missing core fields.
+
+For ChemRxiv specifically, the Go runtime now has a Windows-only manual verification path:
+
+- when feed fetching encounters a ChemRxiv challenge page, the current `run` job moves to `waiting_for_user`
+- the UI can launch a dedicated WebView2 verification window
+- the user completes the Cloudflare check inside that controlled WebView session
+- the helper captures the resulting RDF/XML response from the same verified session and posts it back to the local backend
+- the backend resumes the paused run using the injected feed XML instead of asking the generic HTTP client to fetch ChemRxiv again
+
+This verification flow is intentionally session-local and non-persistent. Clearance cookies are not stored on disk or reused across future runs.
 
 ### CLI
 

@@ -8,6 +8,10 @@ The latest released version is `0.2.1`. The next planned release is `0.2.2`, so 
 
 Changes since `0.2.1`:
 
+### Added
+
+- Added a Windows-only ChemRxiv recovery flow that pauses a sync job for manual verification, opens a dedicated WebView2 window, and resumes the same job after the verified RDF/XML feed is returned to the local backend.
+
 ### Fixed
 
 - Restored Nature-family RSS ingestion after upstream feeds switched to RSS 1.0 / RDF roots such as `rdf:RDF`. The Go feed parser now accepts RDF-backed RSS feeds, keeps the existing RSS normalization path, and preserves multiple `dc:creator` authors instead of only the first author.
@@ -19,6 +23,7 @@ Changes since `0.2.1`:
 
 - Refactored the Go feed pipeline into layered fetch client, generic parser, and small publisher-extractor stages, and moved OpenAlex/Crossref back to a dedicated metadata-enrich layer.
 - Changed metadata enrichment so already-complete RSS entries no longer trigger routine OpenAlex/Crossref lookups; external metadata is now requested only when DOI, authors, journal, or usable abstract content is missing.
+- Changed admin run-job behavior so protected feeds such as ChemRxiv can move into a `waiting_for_user` state instead of failing immediately when manual verification is required.
 
 ## 0.2.1 (2026-05-21)
 

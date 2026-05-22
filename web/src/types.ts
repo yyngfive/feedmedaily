@@ -267,6 +267,9 @@ export type JobInfo = {
   message_key?: string | null;
   message?: string | null;
   error?: string | null;
+  verification_required?: boolean;
+  verification_target?: string | null;
+  verification_feed_url?: string | null;
   log_path?: string | null;
   warning_count?: number;
   result?: Record<string, unknown> | null;

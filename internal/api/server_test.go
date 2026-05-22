@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/yyngfive/scirssagent/internal/config"
+	"github.com/yyngfive/scirssagent/internal/feeds"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
@@ -724,9 +725,12 @@ func stubAPIGlobals(t *testing.T) func() {
 	previousReclassify := reclassifyPaperIDsFunc
 	previousRebuildLatestReport := rebuildLatestReportFunc
 	previousRunOnce := runOnceFunc
+	previousLaunchVerification := launchVerificationHelperFunc
 	previousNow := nowFunc
 	previousJobs := apiJobs
+	previousVerifications := apiVerifications
 	apiJobs = jobRegistry{jobs: map[string]jobInfo{}}
+	apiVerifications = verificationRegistry{items: map[string]*pendingVerification{}}
 	return func() {
 		openExternalTargetFunc = previousOpen
 		fetchUpdateManifestFunc = previousFetch
@@ -739,8 +743,98 @@ func stubAPIGlobals(t *testing.T) func() {
 		reclassifyPaperIDsFunc = previousReclassify
 		rebuildLatestReportFunc = previousRebuildLatestReport
 		runOnceFunc = previousRunOnce
+		launchVerificationHelperFunc = previousLaunchVerification
 		nowFunc = previousNow
 		apiJobs = previousJobs
+		apiVerifications = previousVerifications
+	}
+}
+
+func TestAdminRunWaitsForChemRxivVerificationAndResumes(t *testing.T) {
+	root := t.TempDir()
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	runCalls := 0
+	runOnceFunc = func(_ config.Settings, opts jobruntime.RunOptions, progress jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		runCalls++
+		if len(opts.FeedBodyOverrides) == 0 {
+			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
+				Requests: []feeds.VerificationRequest{{
+					URL:    "https://chemrxiv.org/action/showFeed?type=latest&format=rss",
+					Target: "chemrxiv",
+					Reason: "challenge",
+				}},
+			}
+		}
+		if string(opts.FeedBodyOverrides["https://chemrxiv.org/action/showFeed?type=latest&format=rss"]) != "<rdf:RDF />" {
+			t.Fatalf("unexpected override body: %#v", opts.FeedBodyOverrides)
+		}
+		return jobruntime.RunSummary{
+			Fetched:    1,
+			Inserted:   1,
+			Updated:    0,
+			Classified: 1,
+			Errors:     nil,
+		}, nil
+	}
+
+	launchedVerificationID := ""
+	launchVerificationHelperFunc = func(_ config.Settings, verificationID string, callbackURL string, feedURL string) error {
+		launchedVerificationID = verificationID
+		if callbackURL == "" || !strings.Contains(callbackURL, "/api/feeds/verification/callback") {
+			t.Fatalf("unexpected callback url: %q", callbackURL)
+		}
+		if feedURL != "https://chemrxiv.org/action/showFeed?type=latest&format=rss" {
+			t.Fatalf("unexpected feed url: %q", feedURL)
+		}
+		return nil
+	}
+
+	handler := NewServer(testSettings(root), nil).Handler()
+
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run launch = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	var runPayload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(runRecorder.Body.Bytes(), &runPayload); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
+
+	job, ok := jobByID(runPayload.Job.ID)
+	if !ok || !job.VerificationRequired || job.VerificationTarget != "chemrxiv" {
+		t.Fatalf("unexpected waiting job: %#v", job)
+	}
+
+	startBody := `{"job_id":"` + runPayload.Job.ID + `","feed_url":"https://chemrxiv.org/action/showFeed?type=latest&format=rss"}`
+	startRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(startRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/start", strings.NewReader(startBody)))
+	if startRecorder.Code != http.StatusOK {
+		t.Fatalf("verification start = %d %s", startRecorder.Code, startRecorder.Body.String())
+	}
+	if launchedVerificationID == "" {
+		t.Fatalf("expected verification helper launch")
+	}
+
+	callbackBody := `{"verification_id":"` + launchedVerificationID + `","status":"success","content_type":"application/xml","feed_xml":"<rdf:RDF />"}`
+	callbackRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/callback", strings.NewReader(callbackBody)))
+	if callbackRecorder.Code != http.StatusOK {
+		t.Fatalf("verification callback = %d %s", callbackRecorder.Code, callbackRecorder.Body.String())
+	}
+
+	waitForJobCompletion(t, runPayload.Job.ID)
+	completedJob, ok := jobByID(runPayload.Job.ID)
+	if !ok || completedJob.Status != "completed" {
+		t.Fatalf("unexpected completed job: %#v", completedJob)
+	}
+	if runCalls != 2 {
+		t.Fatalf("runCalls = %d", runCalls)
 	}
 }
 
@@ -758,4 +852,17 @@ func waitForJobCompletion(t *testing.T, jobID string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("job %s did not complete in time", jobID)
+}
+
+func waitForJobStatus(t *testing.T, jobID string, status string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		job, ok := jobByID(jobID)
+		if ok && job.Status == status {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("job %s did not reach status %s in time", jobID, status)
 }

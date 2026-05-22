@@ -78,6 +78,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/report/latest", s.handleAdminReportLatest)
 	mux.HandleFunc("/api/admin/jobs/", s.handleAdminJobByID)
 	mux.HandleFunc("/api/admin/jobs", s.handleAdminJobs)
+	mux.HandleFunc("/api/feeds/verification/start", s.handleFeedVerificationStart)
+	mux.HandleFunc("/api/feeds/verification/callback", s.handleFeedVerificationCallback)
 	mux.HandleFunc("/", s.handleStatic)
 	return withCORS(mux)
 }
@@ -890,15 +892,12 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	job := launchLocalJob(
-		s.settings.LogsDir,
-		"run",
-		"job.started",
-		"Job queued.",
-		"pipeline.feeds.fetching",
-		"Fetching RSS feeds.",
-		func(progress func(string, string)) (map[string]any, error) {
-			summary, err := runOnceFunc(s.settings, jobruntime.RunOptions{}, progress)
+	job := launchVerificationAwareRunJob(
+		s.settings,
+		func(progress func(string, string), overrides map[string][]byte) (map[string]any, error) {
+			summary, err := runOnceFunc(s.settings, jobruntime.RunOptions{
+				FeedBodyOverrides: overrides,
+			}, progress)
 			if err != nil {
 				return nil, err
 			}
@@ -912,6 +911,80 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 		},
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})
+}
+
+func (s *Server) handleFeedVerificationStart(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var payload struct {
+		JobID   string `json:"job_id"`
+		FeedURL string `json:"feed_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid JSON body.")
+		return
+	}
+	job, ok := jobByID(payload.JobID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Job not found.")
+		return
+	}
+	if job.Status != "waiting_for_user" || !job.VerificationRequired {
+		writeError(w, http.StatusBadRequest, "Job is not waiting for manual verification.")
+		return
+	}
+	pending, ok := pendingVerificationForJob(payload.JobID, payload.FeedURL)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Verification request not found.")
+		return
+	}
+	if err := launchVerificationHelperFunc(s.settings, pending.ID, requestBaseURL(r)+"/api/feeds/verification/callback", pending.FeedURL); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":              true,
+		"verification_id": pending.ID,
+	})
+}
+
+func (s *Server) handleFeedVerificationCallback(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var payload struct {
+		VerificationID string `json:"verification_id"`
+		Status         string `json:"status"`
+		ContentType    string `json:"content_type"`
+		FeedXML        string `json:"feed_xml"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid JSON body.")
+		return
+	}
+	pending, ok := pendingVerificationByID(payload.VerificationID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Verification request not found.")
+		return
+	}
+	result := verificationResult{
+		Status:      payload.Status,
+		ContentType: payload.ContentType,
+	}
+	switch payload.Status {
+	case "success":
+		result.FeedXML = []byte(payload.FeedXML)
+	case "aborted":
+		result.Err = fmt.Errorf("verification aborted by user")
+	default:
+		result.Err = fmt.Errorf("verification failed")
+	}
+	select {
+	case pending.Result <- result:
+	default:
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {

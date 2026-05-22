@@ -35,12 +35,17 @@ const catalog = {
   "profile.current.save.succeeded": {text: "Classification profile saved.", tone: "success"},
   "job.started": {text: "Job started.", tone: "info"},
   "job.reclassify.started": {text: "Reclassification job started.", tone: "info"},
+  "job.verification.started": {text: "Opened the ChemRxiv verification window.", tone: "info"},
   "job.completed": {text: "Completed.", tone: "success"},
   "job.failed": {text: "Job failed.", tone: "danger"},
   "pipeline.feeds.fetching": {text: "Fetching RSS feeds.", tone: "info"},
   "pipeline.metadata.enriching": {text: "Getting metadata.", tone: "info"},
   "pipeline.classifier.classifying": {text: "Classifying papers.", tone: "info"},
   "pipeline.report.refreshing": {text: "Refreshing report from SQLite.", tone: "info"},
+  "pipeline.feeds.verification_required": {
+    text: "ChemRxiv needs manual verification before the sync can continue.",
+    tone: "warning",
+  },
   "profile.proposal.collecting_feedback": {
     text: "Collecting feedback for profile review.",
     tone: "info",
@@ -77,6 +82,13 @@ export function messageFromJob(job: JobInfo): UiMessage {
       tone: "success",
     });
     return {...message, ttlMs: JOB_FINAL_TTL_MS};
+  }
+  if (job.status === "waiting_for_user") {
+    const message = createUiMessage(job.message_key ?? "pipeline.feeds.verification_required", {
+      text: job.message ?? undefined,
+      tone: "warning",
+    });
+    return {...message, ttlMs: STICKY_TTL_MS};
   }
   const message = createUiMessage(job.message_key ?? "job.started", {
     text: job.message ?? undefined,

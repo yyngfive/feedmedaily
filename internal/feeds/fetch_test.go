@@ -3,6 +3,7 @@ package feeds
 import (
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -547,6 +548,69 @@ func TestFetchAllStopsAfterRetryableFailuresAndContinues(t *testing.T) {
 	if len(result.Papers) != 1 || result.Papers[0].Title != "Healthy feed sample" {
 		t.Fatalf("papers = %#v", result.Papers)
 	}
+}
+
+func TestFetchAllMarksChemRxivChallengeAsVerificationRequired(t *testing.T) {
+	oldBackoffs := fetchRetryBackoffs
+	fetchRetryBackoffs = []time.Duration{0}
+	defer func() { fetchRetryBackoffs = oldBackoffs }()
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<!doctype html><html><head><title>Just a moment...</title></head><body>Enable JavaScript and cookies to continue</body></html>`))
+	}))
+	defer server.Close()
+	targetURL, err := neturl.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousClient := fetchHTTPClient
+	fetchHTTPClient = &http.Client{
+		Timeout: previousClient.Timeout,
+		Transport: rewriteFeedTestTransport{
+			target: targetURL,
+			base:   http.DefaultTransport,
+		},
+	}
+	defer func() { fetchHTTPClient = previousClient }()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[{"journal":"Chemrxiv","url":"https://chemrxiv.org/action/showFeed?type=latest&format=rss"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d", requests)
+	}
+	if len(result.Errors) != 0 {
+		t.Fatalf("errors = %#v", result.Errors)
+	}
+	if len(result.VerificationRequests) != 1 || result.VerificationRequests[0].Target != "chemrxiv" {
+		t.Fatalf("unexpected verification requests: %#v", result.VerificationRequests)
+	}
+}
+
+type rewriteFeedTestTransport struct {
+	target *neturl.URL
+	base   http.RoundTripper
+}
+
+func (t rewriteFeedTestTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	cloned := request.Clone(request.Context())
+	cloned.URL.Scheme = t.target.Scheme
+	cloned.URL.Host = t.target.Host
+	cloned.Host = request.URL.Host
+	return t.base.RoundTrip(cloned)
 }
 
 func TestFetchAllLeavesScienceAbstractEmptyWhenFeedTextIsMetadataOnly(t *testing.T) {

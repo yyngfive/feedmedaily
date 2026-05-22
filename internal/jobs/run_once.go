@@ -15,8 +15,9 @@ import (
 )
 
 type RunOptions struct {
-	MaxPapers  int
-	Reclassify bool
+	MaxPapers         int
+	Reclassify        bool
+	FeedBodyOverrides map[string][]byte
 }
 
 type RunSummary struct {
@@ -27,6 +28,17 @@ type RunSummary struct {
 	Errors     []string `json:"errors"`
 }
 
+type VerificationRequiredError struct {
+	Requests []feeds.VerificationRequest
+}
+
+func (e *VerificationRequiredError) Error() string {
+	if len(e.Requests) == 0 {
+		return "manual verification required"
+	}
+	return fmt.Sprintf("manual verification required for %s", e.Requests[0].URL)
+}
+
 var fetchAllFeedsFunc = feeds.FetchAll
 
 // RunOnce executes the end-to-end fetch, ingest, classify, and report pipeline in Go.
@@ -35,9 +47,15 @@ func RunOnce(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 	if progress != nil {
 		progress("pipeline.feeds.fetching", "Fetching RSS feeds.")
 	}
-	fetchResult, err := fetchAllFeedsFunc(settings.FeedsPath, feeds.FetchOptions{MaxPapers: opts.MaxPapers})
+	fetchResult, err := fetchAllFeedsFunc(settings.FeedsPath, feeds.FetchOptions{
+		MaxPapers:      opts.MaxPapers,
+		OverrideBodies: opts.FeedBodyOverrides,
+	})
 	if err != nil {
 		return RunSummary{}, err
+	}
+	if len(fetchResult.VerificationRequests) > 0 {
+		return RunSummary{}, &VerificationRequiredError{Requests: fetchResult.VerificationRequests}
 	}
 	if fetchResult.Fetched == 0 && len(fetchResult.Errors) > 0 {
 		return RunSummary{}, fmt.Errorf("%s", strings.Join(fetchResult.Errors, "\n"))

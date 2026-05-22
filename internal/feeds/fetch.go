@@ -2,6 +2,7 @@ package feeds
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -11,19 +12,38 @@ import (
 )
 
 type FetchOptions struct {
-	MaxPapers int
+	MaxPapers      int
+	OverrideBodies map[string][]byte
 }
 
 type FetchResult struct {
-	Papers   []store.Paper
-	Errors   []string
-	Fetched  int
-	FeedURLs []string
+	Papers               []store.Paper
+	Errors               []string
+	Fetched              int
+	FeedURLs             []string
+	VerificationRequests []VerificationRequest
 }
 
 type FeedError struct {
 	URL   string `json:"url"`
 	Error string `json:"error"`
+}
+
+type VerificationRequest struct {
+	URL     string `json:"url"`
+	Target  string `json:"target"`
+	Reason  string `json:"reason"`
+	Journal string `json:"journal,omitempty"`
+}
+
+type FeedVerificationRequiredError struct {
+	URL    string
+	Target string
+	Reason string
+}
+
+func (e *FeedVerificationRequiredError) Error() string {
+	return fmt.Sprintf("%s requires manual verification", e.URL)
 }
 
 type rssDoc struct {
@@ -80,6 +100,63 @@ type feedRootProbe struct {
 	Items   []struct{} `xml:"item"`
 }
 
+func parseFeedBody(sourceURL string, attempt int, body []byte) ([]store.Paper, error) {
+	format, rootName, err := detectFeedFormat(body)
+	if err != nil {
+		return nil, err
+	}
+	switch format {
+	case "rss":
+		var doc rssDoc
+		if err := xml.Unmarshal(body, &doc); err != nil {
+			return nil, err
+		}
+		papers := parseRSS(doc, sourceURL)
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "info",
+			Component: "feeds",
+			Action:    "feed_parsed",
+			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), sourceURL),
+			Data:      map[string]any{"url": sourceURL, "attempt": attempt, "format": "rss", "root": rootName},
+		})
+		return papers, nil
+	case "atom":
+		var doc atomDoc
+		if err := xml.Unmarshal(body, &doc); err != nil {
+			return nil, err
+		}
+		papers := parseAtom(doc, sourceURL)
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "info",
+			Component: "feeds",
+			Action:    "feed_parsed",
+			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), sourceURL),
+			Data:      map[string]any{"url": sourceURL, "attempt": attempt, "format": "atom", "root": rootName},
+		})
+		return papers, nil
+	default:
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "warning",
+			Component: "feeds",
+			Action:    "feed_unknown_root",
+			Message:   fmt.Sprintf("Feed returned unsupported XML root %q", rootName),
+			Data:      map[string]any{"url": sourceURL, "attempt": attempt, "root": rootName},
+		})
+		return []store.Paper{}, nil
+	}
+}
+
+func feedOverrideBody(url string, overrides map[string][]byte) ([]byte, bool) {
+	if len(overrides) == 0 {
+		return nil, false
+	}
+	body, ok := overrides[url]
+	if !ok || len(body) == 0 {
+		return nil, false
+	}
+	return body, true
+}
+
 // FetchAll reads configured feeds, fetches them, and normalizes entries into paper candidates.
 func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 	subscriptions, err := ReadSubscriptions(feedsPath)
@@ -93,15 +170,26 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 		Message:   fmt.Sprintf("Fetching %d feeds", len(subscriptions)),
 	})
 	result := FetchResult{
-		Papers:   []store.Paper{},
-		Errors:   []string{},
-		Fetched:  0,
-		FeedURLs: make([]string, 0, len(subscriptions)),
+		Papers:               []store.Paper{},
+		Errors:               []string{},
+		Fetched:              0,
+		FeedURLs:             make([]string, 0, len(subscriptions)),
+		VerificationRequests: []VerificationRequest{},
 	}
 	for _, subscription := range subscriptions {
 		result.FeedURLs = append(result.FeedURLs, subscription.URL)
-		papers, err := fetchFeed(subscription.URL)
+		papers, err := fetchFeed(subscription.URL, opts)
 		if err != nil {
+			var verificationErr *FeedVerificationRequiredError
+			if errors.As(err, &verificationErr) {
+				result.VerificationRequests = append(result.VerificationRequests, VerificationRequest{
+					URL:     subscription.URL,
+					Target:  verificationErr.Target,
+					Reason:  verificationErr.Reason,
+					Journal: subscription.Journal,
+				})
+				continue
+			}
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", subscription.URL, err))
 			continue
 		}
@@ -130,7 +218,10 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 	return result, nil
 }
 
-func fetchFeed(url string) ([]store.Paper, error) {
+func fetchFeed(url string, opts FetchOptions) ([]store.Paper, error) {
+	if body, ok := feedOverrideBody(url, opts.OverrideBodies); ok {
+		return parseFeedBody(url, 0, body)
+	}
 	attemptCount := len(fetchRetryBackoffs) + 1
 	lastStatusCode := 0
 	lastChallenge := false
@@ -207,6 +298,13 @@ func fetchFeedAttempt(url string, attempt int) ([]store.Paper, int, bool, bool, 
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		retryable := isRetryableFeedStatus(response.StatusCode)
+		if shouldRequireFeedVerification(url, response.StatusCode, false) {
+			return nil, response.StatusCode, false, retryable, &FeedVerificationRequiredError{
+				URL:    url,
+				Target: verificationTargetForURL(url),
+				Reason: "challenge",
+			}
+		}
 		return nil, response.StatusCode, false, retryable, fmt.Errorf("request failed with %s", response.Status)
 	}
 	if challenge := looksLikeChallengeResponse(body); challenge {
@@ -222,49 +320,18 @@ func fetchFeedAttempt(url string, attempt int) ([]store.Paper, int, bool, bool, 
 				"challenge_suspected": true,
 			},
 		})
+		if shouldRequireFeedVerification(url, response.StatusCode, true) {
+			return nil, response.StatusCode, true, true, &FeedVerificationRequiredError{
+				URL:    url,
+				Target: verificationTargetForURL(url),
+				Reason: "challenge",
+			}
+		}
 		return nil, response.StatusCode, true, true, fmt.Errorf("feed returned challenge-like HTML content")
 	}
-	format, rootName, err := detectFeedFormat(body)
+	papers, err := parseFeedBody(url, attempt, body)
 	if err != nil {
 		return nil, response.StatusCode, false, false, err
 	}
-	switch format {
-	case "rss":
-		var doc rssDoc
-		if err := xml.Unmarshal(body, &doc); err != nil {
-			return nil, response.StatusCode, false, false, err
-		}
-		papers := parseRSS(doc, url)
-		_, _ = logging.WriteDefault(logging.Event{
-			Level:     "info",
-			Component: "feeds",
-			Action:    "feed_parsed",
-			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), url),
-			Data:      map[string]any{"url": url, "attempt": attempt, "format": "rss", "root": rootName},
-		})
-		return papers, response.StatusCode, false, false, nil
-	case "atom":
-		var doc atomDoc
-		if err := xml.Unmarshal(body, &doc); err != nil {
-			return nil, response.StatusCode, false, false, err
-		}
-		papers := parseAtom(doc, url)
-		_, _ = logging.WriteDefault(logging.Event{
-			Level:     "info",
-			Component: "feeds",
-			Action:    "feed_parsed",
-			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), url),
-			Data:      map[string]any{"url": url, "attempt": attempt, "format": "atom", "root": rootName},
-		})
-		return papers, response.StatusCode, false, false, nil
-	default:
-		_, _ = logging.WriteDefault(logging.Event{
-			Level:     "warning",
-			Component: "feeds",
-			Action:    "feed_unknown_root",
-			Message:   fmt.Sprintf("Feed returned unsupported XML root %q", rootName),
-			Data:      map[string]any{"url": url, "attempt": attempt, "root": rootName},
-		})
-		return []store.Paper{}, response.StatusCode, false, false, nil
-	}
+	return papers, response.StatusCode, false, false, nil
 }

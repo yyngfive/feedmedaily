@@ -29,6 +29,7 @@ import {
   saveSchedulerSettings,
   saveSettingsConfig,
   saveToZotero,
+  startFeedVerification,
 } from "./reportData";
 import {
   matchesDateFilter,
@@ -764,6 +765,22 @@ export function App() {
     }
   };
 
+  const handleStartVerification = React.useCallback(async (job: JobInfo) => {
+    if (!job.verification_feed_url) {
+      pushMessage("app.load.failed", {text: "Verification feed URL is missing.", tone: "danger"});
+      return;
+    }
+    try {
+      await startFeedVerification({job_id: job.id, feed_url: job.verification_feed_url});
+      pushMessage("job.verification.started", {
+        text: "Opened the ChemRxiv verification window.",
+        tone: "info",
+      });
+    } catch (error) {
+      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+    }
+  }, [pushMessage]);
+
   const handleReclassify = async (scope: "recent" | "feedback" | "all") => {
     try {
       registerJob(await launchReclassifyJob({scope, limit: scope === "all" ? 500 : 50}));
@@ -855,6 +872,7 @@ export function App() {
         onTabChange={setAdminTab}
         onDeleteScheduler={handleDeleteScheduler}
         onGenerateProposal={() => void handleGenerateProposal()}
+        onStartVerification={(job) => void handleStartVerification(job)}
         onApplyProposal={(id) => void handleApplyProposal(id)}
         onRejectProposal={(id) => void handleRejectProposal(id)}
         onRunFeedSync={() => void handleRunAdminJob("/api/admin/run")}
