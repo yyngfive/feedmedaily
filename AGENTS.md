@@ -57,7 +57,7 @@ uv sync
 - Keep scratch files, temporary assets, and exploratory notes out of feature commits unless they are intentional deliverables.
 - When a code change updates behavior, stage the directly affected docs in the same commit, but do not use doc updates as a reason to sweep unrelated work into that commit.
 - If the working tree already contains unrelated edits, commit only the files that belong to the requested change and leave the rest unstaged.
-- If the user asks to make a git commit, do not limit the commit to agent-authored edits only; include the user's in-scope local modifications in the same commit unless the user says otherwise.
+- If the user asks to make a git commit, do not limit the commit to agent-authored edits only; include the user's local modifications in the same commit unless the user says otherwise.
 
 ## Changelog
 
