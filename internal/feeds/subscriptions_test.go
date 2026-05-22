@@ -54,3 +54,16 @@ func TestWriteSubscriptionsRejectsInvalidInputs(t *testing.T) {
 		t.Fatal("expected non-http URL to fail")
 	}
 }
+
+func TestNormalizeSubscriptionUpgradesLegacyCellURLToHTTPS(t *testing.T) {
+	feed, err := NormalizeSubscription(Subscription{
+		Journal: "Cell",
+		URL:     "http://www.cell.com/cell/current.rss",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if feed.URL != "https://www.cell.com/cell/current.rss" {
+		t.Fatalf("unexpected url: %#v", feed.URL)
+	}
+}

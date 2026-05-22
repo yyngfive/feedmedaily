@@ -3,6 +3,7 @@ package metadata
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"regexp"
@@ -18,6 +19,9 @@ var (
 	openAlexBaseURL    = "https://api.openalex.org"
 	crossrefBaseURL    = "https://api.crossref.org"
 	metadataHTTPClient = &http.Client{Timeout: 15 * time.Second}
+	tagRE              = regexp.MustCompile(`<[^>]+>`)
+	whitespaceRE       = regexp.MustCompile(`\s+`)
+	abstractPrefixRE   = regexp.MustCompile(`(?i)^(abstract|summary)\s*:?`)
 )
 
 func NormalizeDOI(value string) string {
@@ -75,7 +79,7 @@ func EnrichPaper(paper store.Paper) store.Paper {
 	// 只迁 reclassify 所需的 metadata enrich，失败时走本地内容回退。
 	normalizedDOI := NormalizeDOI(stringValue(paper.DOI))
 	externalErrors := []string{}
-	if (paper.AbstractSource == "openalex" || paper.AbstractSource == "crossref") && paper.Abstract != nil && paper.Journal != nil {
+	if (paper.AbstractSource == "openalex" || paper.AbstractSource == "crossref") && paper.Abstract != nil && paper.Journal != nil && len(paper.Authors) > 0 {
 		result := paper
 		if normalizedDOI != "" {
 			result.DOI = stringPtr(normalizedDOI)
@@ -89,70 +93,24 @@ func EnrichPaper(paper store.Paper) store.Paper {
 		enriched.DOI = stringPtr(normalizedDOI)
 	}
 
-	if openAlexPaper, ok, errText := enrichWithOpenAlex(enriched); ok && strings.TrimSpace(stringValue(openAlexPaper.Abstract)) != "" {
-		result := finalizeEnrichedPaper(paper, openAlexPaper, "openalex")
-		logEnrichmentResult(result, normalizedDOI, externalErrors)
-		return result
+	if openAlexPaper, ok, errText := enrichWithOpenAlex(enriched); ok {
+		enriched = applyMetadataCandidate(enriched, openAlexPaper)
 	} else if errText != "" {
 		externalErrors = append(externalErrors, "openalex:"+errText)
 	}
-	if crossrefPaper, ok, errText := enrichWithCrossref(enriched); ok && strings.TrimSpace(stringValue(crossrefPaper.Abstract)) != "" {
-		result := finalizeEnrichedPaper(paper, crossrefPaper, "crossref")
-		logEnrichmentResult(result, normalizedDOI, externalErrors)
-		return result
+	if crossrefPaper, ok, errText := enrichWithCrossref(enriched); ok {
+		enriched = applyMetadataCandidate(enriched, crossrefPaper)
 	} else if errText != "" {
 		externalErrors = append(externalErrors, "crossref:"+errText)
 	}
-	if (paper.AbstractSource == "openalex" || paper.AbstractSource == "crossref") && paper.Abstract != nil {
-		result := paper
-		if normalizedDOI != "" {
-			result.DOI = stringPtr(normalizedDOI)
-		}
-		logEnrichmentResult(result, normalizedDOI, externalErrors)
-		return result
+	if !hasAbstractContent(enriched) {
+		enriched.Abstract = nil
+		enriched.AbstractHTML = nil
+		enriched.AbstractImages = []store.AbstractImage{}
+		enriched.AbstractSource = "none"
 	}
-	if hasAbstractContent(paper) {
-		result := finalizeEnrichedPaper(paper, enriched, "rss")
-		logEnrichmentResult(result, normalizedDOI, externalErrors)
-		return result
-	}
-	result := finalizeEnrichedPaper(paper, enriched, "none")
-	logEnrichmentResult(result, normalizedDOI, externalErrors)
-	return result
-}
-
-func finalizeEnrichedPaper(original store.Paper, candidate store.Paper, source string) store.Paper {
-	journal := firstNonEmpty(stringValue(candidate.Journal), stringValue(original.Journal))
-	doi := NormalizeDOI(firstNonEmpty(stringValue(candidate.DOI), stringValue(original.DOI)))
-	result := original
-	if doi != "" {
-		result.DOI = stringPtr(doi)
-	}
-	if journal != "" {
-		result.Journal = stringPtr(journal)
-	}
-	switch source {
-	case "openalex", "crossref":
-		result.Abstract = candidate.Abstract
-		result.AbstractHTML = nil
-		result.AbstractImages = []store.AbstractImage{}
-		if candidate.Abstract != nil && strings.TrimSpace(*candidate.Abstract) != "" {
-			result.AbstractSource = source
-		} else {
-			result.AbstractSource = "none"
-		}
-		return result
-	case "rss":
-		if hasAbstractContent(original) {
-			result.AbstractSource = "rss"
-			return result
-		}
-	}
-	result.Abstract = nil
-	result.AbstractHTML = nil
-	result.AbstractImages = []store.AbstractImage{}
-	result.AbstractSource = "none"
-	return result
+	logEnrichmentResult(enriched, normalizedDOI, externalErrors)
+	return enriched
 }
 
 func enrichWithOpenAlex(paper store.Paper) (store.Paper, bool, string) {
@@ -199,12 +157,16 @@ func enrichWithOpenAlex(paper store.Paper) (store.Paper, bool, string) {
 			journal = firstNonEmpty(journal, normalizedString(source["display_name"]))
 		}
 	}
+	authors := openAlexAuthors(work)
 	result := paper
 	if doi != "" {
 		result.DOI = stringPtr(doi)
 	}
 	if journal != "" {
 		result.Journal = stringPtr(journal)
+	}
+	if len(authors) > 0 {
+		result.Authors = authors
 	}
 	if strings.TrimSpace(abstract) != "" {
 		result.Abstract = stringPtr(abstract)
@@ -237,11 +199,15 @@ func enrichWithCrossref(paper store.Paper) (store.Paper, bool, string) {
 	if titles, ok := message["container-title"].([]any); ok && len(titles) > 0 {
 		journal = firstNonEmpty(journal, normalizedString(titles[0]))
 	}
-	abstract := normalizedString(message["abstract"])
+	abstract := sanitizeExternalAbstract(normalizedString(message["abstract"]))
+	authors := crossrefAuthors(message)
 	result := paper
 	result.DOI = stringPtr(doi)
 	if journal != "" {
 		result.Journal = stringPtr(journal)
+	}
+	if len(authors) > 0 {
+		result.Authors = authors
 	}
 	if abstract != "" {
 		result.Abstract = stringPtr(abstract)
@@ -255,6 +221,111 @@ func enrichWithCrossref(paper store.Paper) (store.Paper, bool, string) {
 
 func hasAbstractContent(paper store.Paper) bool {
 	return paper.Abstract != nil || paper.AbstractHTML != nil || len(paper.AbstractImages) > 0
+}
+
+func applyMetadataCandidate(base store.Paper, candidate store.Paper) store.Paper {
+	result := base
+	doi := NormalizeDOI(firstNonEmpty(stringValue(candidate.DOI), stringValue(base.DOI)))
+	if doi != "" {
+		result.DOI = stringPtr(doi)
+	}
+	if journal := firstNonEmpty(stringValue(candidate.Journal), stringValue(base.Journal)); journal != "" {
+		result.Journal = stringPtr(journal)
+	}
+	if len(result.Authors) == 0 && len(candidate.Authors) > 0 {
+		result.Authors = append([]string{}, candidate.Authors...)
+	}
+	if shouldReplaceAbstract(result, candidate) {
+		result.Abstract = candidate.Abstract
+		result.AbstractHTML = nil
+		result.AbstractImages = []store.AbstractImage{}
+		result.AbstractSource = candidate.AbstractSource
+	}
+	return result
+}
+
+func shouldReplaceAbstract(existing store.Paper, candidate store.Paper) bool {
+	if !hasAbstractContent(candidate) {
+		return false
+	}
+	if !hasAbstractContent(existing) {
+		return true
+	}
+	return abstractSourcePriority(candidate.AbstractSource) >= abstractSourcePriority(existing.AbstractSource)
+}
+
+func abstractSourcePriority(source string) int {
+	switch strings.TrimSpace(strings.ToLower(source)) {
+	case "rss":
+		return 1
+	case "crossref":
+		return 2
+	case "openalex":
+		return 3
+	default:
+		return 0
+	}
+}
+
+func crossrefAuthors(message map[string]any) []string {
+	rawAuthors, ok := message["author"].([]any)
+	if !ok {
+		return nil
+	}
+	authors := make([]string, 0, len(rawAuthors))
+	for _, rawAuthor := range rawAuthors {
+		author, ok := rawAuthor.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := strings.TrimSpace(strings.Join([]string{
+			normalizedString(author["given"]),
+			normalizedString(author["family"]),
+		}, " "))
+		if name == "" {
+			name = normalizedString(author["name"])
+		}
+		if name == "" {
+			continue
+		}
+		authors = append(authors, whitespaceRE.ReplaceAllString(name, " "))
+	}
+	return authors
+}
+
+func openAlexAuthors(work map[string]any) []string {
+	rawAuthorships, ok := work["authorships"].([]any)
+	if !ok {
+		return nil
+	}
+	authors := make([]string, 0, len(rawAuthorships))
+	for _, rawAuthorship := range rawAuthorships {
+		authorship, ok := rawAuthorship.(map[string]any)
+		if !ok {
+			continue
+		}
+		author, ok := authorship["author"].(map[string]any)
+		if !ok {
+			continue
+		}
+		name := strings.TrimSpace(normalizedString(author["display_name"]))
+		if name == "" {
+			continue
+		}
+		authors = append(authors, whitespaceRE.ReplaceAllString(name, " "))
+	}
+	return authors
+}
+
+func sanitizeExternalAbstract(raw string) string {
+	clean := strings.TrimSpace(html.UnescapeString(raw))
+	if clean == "" {
+		return ""
+	}
+	clean = strings.TrimSpace(tagRE.ReplaceAllString(clean, " "))
+	clean = strings.TrimSpace(whitespaceRE.ReplaceAllString(clean, " "))
+	clean = strings.TrimSpace(abstractPrefixRE.ReplaceAllString(clean, ""))
+	return clean
 }
 
 func httpGet(url string) ([]byte, bool, string) {

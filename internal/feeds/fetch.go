@@ -6,6 +6,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -31,14 +32,18 @@ type FeedError struct {
 }
 
 var (
-	fetchHTTPClient   = &http.Client{Timeout: 30 * time.Second}
-	whitespaceRE      = regexp.MustCompile(`\s+`)
-	tagRE             = regexp.MustCompile(`<[^>]+>`)
-	imgSrcRE          = regexp.MustCompile(`(?i)<img[^>]+src=["']([^"']+)["']`)
-	metadataRE        = regexp.MustCompile(`(?i)\b(vol(?:ume)?|issue|pp?\.|pages?|doi|e?issn|published|online)\b`)
-	abstractHeadingRE = regexp.MustCompile(`(?i)(?:^|\s)ABSTRACT[:\s-]*`)
-	naturePrefixRE    = regexp.MustCompile(`(?i)^[^.]*?,\s*Published online:\s*.*?;\s*doi:\S+\s*`)
-	doiValueRE        = regexp.MustCompile(`10\.\d{4,9}/[-._;()/:A-Z0-9]+`)
+	fetchHTTPClient       = &http.Client{Timeout: 30 * time.Second}
+	fetchRetryBackoffs    = []time.Duration{200 * time.Millisecond, 600 * time.Millisecond}
+	whitespaceRE          = regexp.MustCompile(`\s+`)
+	tagRE                 = regexp.MustCompile(`<[^>]+>`)
+	imgSrcRE              = regexp.MustCompile(`(?i)<img[^>]+src=["']([^"']+)["']`)
+	metadataRE            = regexp.MustCompile(`(?i)\b(vol(?:ume)?|issue|pp?\.|pages?|doi|e?issn|published|online)\b`)
+	abstractHeadingRE     = regexp.MustCompile(`(?i)(?:^|\s)ABSTRACT[:\s-]*`)
+	naturePrefixRE        = regexp.MustCompile(`(?i)^[^.]*?,\s*Published online:\s*.*?;\s*doi:\S+\s*`)
+	doiValueRE            = regexp.MustCompile(`10\.\d{4,9}/[-._;()/:A-Z0-9]+`)
+	feedXMLPrefixRE       = regexp.MustCompile(`(?is)^\s*(?:<\?xml\b[^>]*>\s*)?<(?:rss|rdf:RDF|feed)\b`)
+	feedHTMLPrefixRE      = regexp.MustCompile(`(?is)^\s*(?:<!doctype\s+html\b\s*>)?\s*<html\b`)
+	feedChallengeMarkerRE = regexp.MustCompile(`(?is)(just a moment|enable javascript and cookies|attention required|__cf_chl_|cf-browser-verification|challenge-platform)`)
 )
 
 type rssDoc struct {
@@ -146,11 +151,45 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 }
 
 func fetchFeed(url string) ([]store.Paper, error) {
+	attemptCount := len(fetchRetryBackoffs) + 1
+	lastStatusCode := 0
+	lastChallenge := false
+	var lastErr error
+	for attempt := 1; attempt <= attemptCount; attempt++ {
+		papers, statusCode, challenge, retryable, err := fetchFeedAttempt(url, attempt)
+		if err == nil {
+			return papers, nil
+		}
+		lastStatusCode = statusCode
+		lastChallenge = challenge
+		lastErr = err
+		if !retryable || attempt == attemptCount {
+			break
+		}
+		time.Sleep(fetchRetryBackoffs[attempt-1])
+	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "warning",
+		Component: "feeds",
+		Action:    "feed_fetch_failed",
+		Message:   fmt.Sprintf("Failed to fetch feed after %d attempt(s): %s", attemptCount, url),
+		Error:     lastErr.Error(),
+		Data: map[string]any{
+			"url":                 url,
+			"attempts":            attemptCount,
+			"last_status_code":    lastStatusCode,
+			"challenge_suspected": lastChallenge,
+		},
+	})
+	return nil, lastErr
+}
+
+func fetchFeedAttempt(url string, attempt int) ([]store.Paper, int, bool, bool, error) {
 	request, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, false, false, err
 	}
-	request.Header.Set("User-Agent", "SciRSSAgent/0.1")
+	applyFeedRequestHeaders(request)
 	started := time.Now()
 	response, err := fetchHTTPClient.Do(request)
 	if err != nil {
@@ -162,11 +201,12 @@ func fetchFeed(url string) ([]store.Paper, error) {
 			Error:     err.Error(),
 			Data: map[string]any{
 				"url":            url,
+				"attempt":        attempt,
 				"duration_ms":    time.Since(started).Milliseconds(),
 				"request_method": http.MethodGet,
 			},
 		})
-		return nil, err
+		return nil, 0, false, true, err
 	}
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "info",
@@ -175,6 +215,7 @@ func fetchFeed(url string) ([]store.Paper, error) {
 		Message:   fmt.Sprintf("HTTP Request: GET %s %q", url, response.Proto+" "+response.Status),
 		Data: map[string]any{
 			"url":            url,
+			"attempt":        attempt,
 			"status_code":    response.StatusCode,
 			"duration_ms":    time.Since(started).Milliseconds(),
 			"request_method": http.MethodGet,
@@ -182,21 +223,37 @@ func fetchFeed(url string) ([]store.Paper, error) {
 	})
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		defer response.Body.Close()
-		return nil, fmt.Errorf("request failed with %s", response.Status)
+		retryable := isRetryableFeedStatus(response.StatusCode)
+		return nil, response.StatusCode, false, retryable, fmt.Errorf("request failed with %s", response.Status)
 	}
 	body, err := ioReadAll(response)
 	if err != nil {
-		return nil, err
+		return nil, response.StatusCode, false, true, err
+	}
+	if challenge := looksLikeChallengeResponse(body); challenge {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "warning",
+			Component: "feeds",
+			Action:    "feed_challenge_suspected",
+			Message:   fmt.Sprintf("Feed returned challenge-like HTML instead of XML: %s", url),
+			Data: map[string]any{
+				"url":                 url,
+				"attempt":             attempt,
+				"status_code":         response.StatusCode,
+				"challenge_suspected": true,
+			},
+		})
+		return nil, response.StatusCode, true, true, fmt.Errorf("feed returned challenge-like HTML content")
 	}
 	format, rootName, err := detectFeedFormat(body)
 	if err != nil {
-		return nil, err
+		return nil, response.StatusCode, false, false, err
 	}
 	switch format {
 	case "rss":
 		var doc rssDoc
 		if err := xml.Unmarshal(body, &doc); err != nil {
-			return nil, err
+			return nil, response.StatusCode, false, false, err
 		}
 		papers := parseRSS(doc, url)
 		_, _ = logging.WriteDefault(logging.Event{
@@ -204,13 +261,13 @@ func fetchFeed(url string) ([]store.Paper, error) {
 			Component: "feeds",
 			Action:    "feed_parsed",
 			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), url),
-			Data:      map[string]any{"url": url, "format": "rss", "root": rootName},
+			Data:      map[string]any{"url": url, "attempt": attempt, "format": "rss", "root": rootName},
 		})
-		return papers, nil
+		return papers, response.StatusCode, false, false, nil
 	case "atom":
 		var doc atomDoc
 		if err := xml.Unmarshal(body, &doc); err != nil {
-			return nil, err
+			return nil, response.StatusCode, false, false, err
 		}
 		papers := parseAtom(doc, url)
 		_, _ = logging.WriteDefault(logging.Event{
@@ -218,19 +275,53 @@ func fetchFeed(url string) ([]store.Paper, error) {
 			Component: "feeds",
 			Action:    "feed_parsed",
 			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), url),
-			Data:      map[string]any{"url": url, "format": "atom"},
+			Data:      map[string]any{"url": url, "attempt": attempt, "format": "atom", "root": rootName},
 		})
-		return papers, nil
+		return papers, response.StatusCode, false, false, nil
 	default:
 		_, _ = logging.WriteDefault(logging.Event{
 			Level:     "warning",
 			Component: "feeds",
 			Action:    "feed_unknown_root",
 			Message:   fmt.Sprintf("Feed returned unsupported XML root %q", rootName),
-			Data:      map[string]any{"url": url, "root": rootName},
+			Data:      map[string]any{"url": url, "attempt": attempt, "root": rootName},
 		})
-		return []store.Paper{}, nil
+		return []store.Paper{}, response.StatusCode, false, false, nil
 	}
+}
+
+func applyFeedRequestHeaders(request *http.Request) {
+	request.Header.Set("User-Agent", "SciRSSAgent/0.1")
+	request.Header.Set("Accept", "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7")
+	request.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	if referer := requestReferer(request.URL); referer != "" {
+		request.Header.Set("Referer", referer)
+	}
+}
+
+func requestReferer(target *neturl.URL) string {
+	if target == nil || strings.TrimSpace(target.Scheme) == "" || strings.TrimSpace(target.Host) == "" {
+		return ""
+	}
+	return target.Scheme + "://" + target.Host + "/"
+}
+
+func isRetryableFeedStatus(statusCode int) bool {
+	return statusCode == http.StatusForbidden || statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError
+}
+
+func looksLikeChallengeResponse(body []byte) bool {
+	sample := strings.TrimSpace(string(body))
+	if sample == "" {
+		return false
+	}
+	if feedXMLPrefixRE.MatchString(sample) {
+		return false
+	}
+	if feedHTMLPrefixRE.MatchString(sample) {
+		return true
+	}
+	return feedChallengeMarkerRE.MatchString(sample)
 }
 
 func detectFeedFormat(body []byte) (string, string, error) {
@@ -269,15 +360,7 @@ func parseRSS(doc rssDoc, sourceURL string) []store.Paper {
 			childTagText(item.InnerXML, "description"),
 			childTagText(item.InnerXML, "description"),
 		})
-		authors := make([]string, 0, 1)
-		for _, creator := range childTagTexts(item.InnerXML, "creator") {
-			if !containsString(authors, creator) {
-				authors = append(authors, creator)
-			}
-		}
-		if author := normalizeText(item.Author); author != "" && !containsString(authors, author) {
-			authors = append(authors, author)
-		}
+		authors := collectRSSAuthors(item)
 		journal := normalizeFeedJournalTitle(firstNonEmpty(childTagText(item.InnerXML, "publicationName"), childTagText(item.InnerXML, "source"), doc.Channel.Title))
 		doi := entryDOI(childTagText(item.InnerXML, "doi"), childTagText(item.InnerXML, "identifier"), item.GUID, link)
 		raw := map[string]any{}
@@ -361,7 +444,7 @@ func chooseBestAbstract(candidates []string) (string, string, []store.AbstractIm
 	bestImages := []store.AbstractImage{}
 	for _, candidate := range candidates {
 		text, htmlValue, images := normalizeAbstractCandidate(candidate)
-		if text == "" {
+		if text == "" && len(images) == 0 && strings.TrimSpace(htmlValue) == "" {
 			continue
 		}
 		if len(text) > len(bestText) || (len(text) == len(bestText) && len(images) > len(bestImages)) {
@@ -375,15 +458,21 @@ func chooseBestAbstract(candidates []string) (string, string, []store.AbstractIm
 
 func normalizeAbstractCandidate(value string) (string, string, []store.AbstractImage) {
 	rawHTML := cleanCDATA(strings.TrimSpace(html.UnescapeString(value)))
+	images := extractImages(rawHTML)
 	plain := normalizeText(stripTags(rawHTML))
 	if plain == "" {
+		if len(images) > 0 {
+			return "", rawHTML, images
+		}
 		return "", "", nil
 	}
 	plain = stripKnownPrefixes(stripAbstractHeading(plain))
 	if looksLikeMetadata(plain) {
+		if len(images) > 0 {
+			return "", rawHTML, images
+		}
 		return "", "", nil
 	}
-	images := extractImages(rawHTML)
 	if rawHTML == "" {
 		return plain, "", images
 	}
@@ -546,7 +635,7 @@ func childTagTexts(rawXML string, localName string) []string {
 		if len(match) < 2 {
 			continue
 		}
-		value := normalizeText(stripTags(match[1]))
+		value := normalizeText(stripTags(cleanCDATA(match[1])))
 		if value == "" {
 			continue
 		}
@@ -566,6 +655,148 @@ func childTagInnerXML(rawXML string, localName string) string {
 		return ""
 	}
 	return strings.TrimSpace(match[1])
+}
+
+func collectRSSAuthors(item rssItem) []string {
+	authors := make([]string, 0, 1)
+	for _, creator := range childTagTexts(item.InnerXML, "creator") {
+		authors = appendUniqueAuthors(authors, creator)
+	}
+	if author := normalizeText(item.Author); author != "" {
+		authors = appendUniqueAuthors(authors, author)
+	}
+	return authors
+}
+
+func appendUniqueAuthors(authors []string, raw string) []string {
+	for _, author := range splitAuthorList(raw) {
+		if !containsString(authors, author) {
+			authors = append(authors, author)
+		}
+	}
+	return authors
+}
+
+func splitAuthorList(raw string) []string {
+	clean := normalizeText(raw)
+	if clean == "" {
+		return nil
+	}
+	if segments, ok := splitCommaPairAuthors(clean); ok {
+		return segments
+	}
+	if segments, ok := splitDelimitedAuthors(clean, ";"); ok {
+		return segments
+	}
+	if segments, ok := splitDelimitedAuthors(clean, " and "); ok {
+		return segments
+	}
+	if segments, ok := splitCommaSeparatedAuthors(clean); ok {
+		return segments
+	}
+	return []string{clean}
+}
+
+func splitCommaPairAuthors(value string) ([]string, bool) {
+	parts := strings.Split(value, ",")
+	if len(parts) < 4 || len(parts)%2 != 0 {
+		return nil, false
+	}
+	authors := make([]string, 0, len(parts)/2)
+	for i := 0; i < len(parts); i += 2 {
+		family := normalizeText(parts[i])
+		given := normalizeText(parts[i+1])
+		if family == "" || given == "" || !looksLikeFamilyName(family) || !looksLikeGivenName(given) {
+			return nil, false
+		}
+		authors = append(authors, family+", "+given)
+	}
+	return authors, len(authors) > 1
+}
+
+func splitDelimitedAuthors(value string, delimiter string) ([]string, bool) {
+	if !strings.Contains(value, delimiter) {
+		return nil, false
+	}
+	parts := strings.Split(value, delimiter)
+	authors := make([]string, 0, len(parts))
+	for _, part := range parts {
+		name := normalizeText(part)
+		if name == "" || !looksLikeAuthorName(name) {
+			return nil, false
+		}
+		authors = append(authors, name)
+	}
+	return authors, len(authors) > 1
+}
+
+func splitCommaSeparatedAuthors(value string) ([]string, bool) {
+	if strings.Count(value, ",") == 0 {
+		return nil, false
+	}
+	parts := strings.Split(value, ",")
+	if len(parts) < 2 {
+		return nil, false
+	}
+	authors := make([]string, 0, len(parts))
+	for _, part := range parts {
+		name := normalizeText(part)
+		if name == "" || !looksLikeAuthorName(name) {
+			return nil, false
+		}
+		authors = append(authors, name)
+	}
+	return authors, len(authors) > 1
+}
+
+func looksLikeAuthorName(value string) bool {
+	fields := strings.Fields(value)
+	if len(fields) < 2 || len(fields) > 8 {
+		return false
+	}
+	hasLetter := false
+	for _, field := range fields {
+		token := strings.Trim(field, ".,")
+		if token == "" {
+			continue
+		}
+		if strings.IndexFunc(token, func(r rune) bool { return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') }) >= 0 {
+			hasLetter = true
+		}
+	}
+	return hasLetter
+}
+
+func looksLikeFamilyName(value string) bool {
+	fields := strings.Fields(value)
+	if len(fields) == 0 || len(fields) > 5 {
+		return false
+	}
+	for _, field := range fields {
+		token := strings.Trim(field, ".,")
+		if token == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func looksLikeGivenName(value string) bool {
+	fields := strings.Fields(value)
+	if len(fields) == 0 || len(fields) > 4 {
+		return false
+	}
+	hasLetter := false
+	for _, field := range fields {
+		token := strings.Trim(field, ".,")
+		if token == "" {
+			return false
+		}
+		if strings.IndexFunc(token, func(r rune) bool { return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') }) >= 0 {
+			hasLetter = true
+		}
+	}
+	return hasLetter
 }
 
 func firstNonEmpty(values ...string) string {

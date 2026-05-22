@@ -84,5 +84,9 @@ func NormalizeSubscription(feed Subscription) (Subscription, error) {
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return Subscription{}, fmt.Errorf("feed url must start with http:// or https://")
 	}
+	if strings.EqualFold(parsed.Host, "www.cell.com") && parsed.Path == "/cell/current.rss" {
+		parsed.Scheme = "https"
+		feedURL = parsed.String()
+	}
 	return Subscription{Journal: journal, URL: feedURL}, nil
 }
