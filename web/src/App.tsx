@@ -422,6 +422,10 @@ export function App() {
       ),
     [filteredBase, relevance],
   );
+  const lastUpdateLabel = React.useMemo(
+    () => report.last_updated_at?.slice(0, 10) ?? "Never",
+    [report.last_updated_at],
+  );
 
   const needsFeedSetup = Boolean(profile && feedsLoaded && feeds.length === 0);
   const hasNoFetchedPapers = !needsFeedSetup && feeds.length > 0 && report.papers.length === 0;
@@ -888,6 +892,7 @@ export function App() {
           dateFilter={dateFilter}
           journal={journal}
           journalOptions={journalOptions}
+          lastUpdateLabel={lastUpdateLabel}
           onDateFilterChange={setDateFilter}
           onJournalChange={setJournal}
           onReadFilterChange={setReadFilter}
@@ -895,7 +900,6 @@ export function App() {
           profileName={profile.meta.name}
           profileVersion={profile.meta.version}
           readFilter={readFilter}
-          reportDate={report.report_date}
           shownCount={visibleList.length}
           totalCount={needsFeedSetup ? 0 : report.papers.length}
           visibleTotals={visibleTotals}

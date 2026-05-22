@@ -89,6 +89,12 @@ type atomLink struct {
 	Href string `xml:"href,attr"`
 }
 
+type feedRootProbe struct {
+	XMLName xml.Name
+	Channel *struct{}  `xml:"channel"`
+	Items   []struct{} `xml:"item"`
+}
+
 // FetchAll reads configured feeds, fetches them, and normalizes entries into paper candidates.
 func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 	subscriptions, err := ReadSubscriptions(feedsPath)
@@ -178,17 +184,15 @@ func fetchFeed(url string) ([]store.Paper, error) {
 		defer response.Body.Close()
 		return nil, fmt.Errorf("request failed with %s", response.Status)
 	}
-	var root struct {
-		XMLName xml.Name
-	}
 	body, err := ioReadAll(response)
 	if err != nil {
 		return nil, err
 	}
-	if err := xml.Unmarshal(body, &root); err != nil {
+	format, rootName, err := detectFeedFormat(body)
+	if err != nil {
 		return nil, err
 	}
-	switch strings.ToLower(root.XMLName.Local) {
+	switch format {
 	case "rss":
 		var doc rssDoc
 		if err := xml.Unmarshal(body, &doc); err != nil {
@@ -200,10 +204,10 @@ func fetchFeed(url string) ([]store.Paper, error) {
 			Component: "feeds",
 			Action:    "feed_parsed",
 			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), url),
-			Data:      map[string]any{"url": url, "format": "rss"},
+			Data:      map[string]any{"url": url, "format": "rss", "root": rootName},
 		})
 		return papers, nil
-	case "feed":
+	case "atom":
 		var doc atomDoc
 		if err := xml.Unmarshal(body, &doc); err != nil {
 			return nil, err
@@ -222,11 +226,29 @@ func fetchFeed(url string) ([]store.Paper, error) {
 			Level:     "warning",
 			Component: "feeds",
 			Action:    "feed_unknown_root",
-			Message:   fmt.Sprintf("Feed returned unsupported XML root %q", root.XMLName.Local),
-			Data:      map[string]any{"url": url},
+			Message:   fmt.Sprintf("Feed returned unsupported XML root %q", rootName),
+			Data:      map[string]any{"url": url, "root": rootName},
 		})
 		return []store.Paper{}, nil
 	}
+}
+
+func detectFeedFormat(body []byte) (string, string, error) {
+	var probe feedRootProbe
+	if err := xml.Unmarshal(body, &probe); err != nil {
+		return "", "", err
+	}
+	rootName := strings.ToLower(probe.XMLName.Local)
+	switch rootName {
+	case "rss", "rdf":
+		return "rss", rootName, nil
+	case "feed":
+		return "atom", rootName, nil
+	}
+	if probe.Channel != nil || len(probe.Items) > 0 {
+		return "rss", rootName, nil
+	}
+	return "", rootName, nil
 }
 
 func parseRSS(doc rssDoc, sourceURL string) []store.Paper {
@@ -247,9 +269,11 @@ func parseRSS(doc rssDoc, sourceURL string) []store.Paper {
 			childTagText(item.InnerXML, "description"),
 			childTagText(item.InnerXML, "description"),
 		})
-		authors := []string{}
-		if creator := normalizeText(childTagText(item.InnerXML, "creator")); creator != "" {
-			authors = append(authors, creator)
+		authors := make([]string, 0, 1)
+		for _, creator := range childTagTexts(item.InnerXML, "creator") {
+			if !containsString(authors, creator) {
+				authors = append(authors, creator)
+			}
 		}
 		if author := normalizeText(item.Author); author != "" && !containsString(authors, author) {
 			authors = append(authors, author)
@@ -506,12 +530,33 @@ func abstractSourceForContent(text string, htmlValue string, images []store.Abst
 }
 
 func childTagText(rawXML string, localName string) string {
-	re := regexp.MustCompile(fmt.Sprintf(`(?is)<(?:[\w-]+:)?%s\b[^>]*>(.*?)</(?:[\w-]+:)?%s>`, regexp.QuoteMeta(localName), regexp.QuoteMeta(localName)))
-	match := re.FindStringSubmatch(rawXML)
-	if len(match) < 2 {
+	values := childTagTexts(rawXML, localName)
+	if len(values) == 0 {
 		return ""
 	}
-	return normalizeText(stripTags(match[1]))
+	return values[0]
+}
+
+func childTagTexts(rawXML string, localName string) []string {
+	re := regexp.MustCompile(fmt.Sprintf(`(?is)<(?:[\w-]+:)?%s\b[^>]*>(.*?)</(?:[\w-]+:)?%s>`, regexp.QuoteMeta(localName), regexp.QuoteMeta(localName)))
+	matches := re.FindAllStringSubmatch(rawXML, -1)
+	values := make([]string, 0, len(matches))
+	seen := map[string]struct{}{}
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		value := normalizeText(stripTags(match[1]))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
 }
 
 func childTagInnerXML(rawXML string, localName string) string {
