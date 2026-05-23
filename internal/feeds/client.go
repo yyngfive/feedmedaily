@@ -55,15 +55,15 @@ func looksLikeChallengeResponse(body []byte) bool {
 	return feedChallengeMarkerRE.MatchString(sample)
 }
 
-func shouldRequireFeedVerification(feedURL string, statusCode int, challenge bool) bool {
+func shouldRequireFeedVerification(feedURL string, response *http.Response, challenge bool) bool {
 	target := verificationTargetForURL(feedURL)
-	if target == "" {
+	if target == "" || response == nil {
 		return false
 	}
 	if challenge {
 		return true
 	}
-	return statusCode == http.StatusForbidden
+	return response.StatusCode == http.StatusForbidden && responseAppearsToBeCloudflare(response)
 }
 
 func verificationTargetForURL(feedURL string) string {
@@ -71,11 +71,35 @@ func verificationTargetForURL(feedURL string) string {
 	if err != nil {
 		return ""
 	}
-	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
-	if host == "chemrxiv.org" {
-		return "chemrxiv"
+	if strings.TrimSpace(parsed.Scheme) == "" || strings.TrimSpace(parsed.Hostname()) == "" {
+		return ""
 	}
-	return ""
+	switch strings.ToLower(strings.TrimSpace(parsed.Scheme)) {
+	case "http", "https":
+		return "cloudflare"
+	default:
+		return ""
+	}
+}
+
+func responseAppearsToBeCloudflare(response *http.Response) bool {
+	if response == nil {
+		return false
+	}
+	if strings.Contains(strings.ToLower(strings.TrimSpace(response.Header.Get("Server"))), "cloudflare") {
+		return true
+	}
+	if strings.TrimSpace(response.Header.Get("CF-Ray")) != "" {
+		return true
+	}
+	if strings.TrimSpace(response.Header.Get("CF-Cache-Status")) != "" {
+		return true
+	}
+	if strings.TrimSpace(response.Header.Get("CF-Mitigated")) != "" {
+		return true
+	}
+	serverTiming := strings.ToLower(strings.TrimSpace(response.Header.Get("Server-Timing")))
+	return strings.Contains(serverTiming, "cfedge") || strings.Contains(serverTiming, "cforigin")
 }
 
 func ioReadAll(response *http.Response) ([]byte, error) {

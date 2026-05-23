@@ -242,7 +242,7 @@ func TestRunOnceReturnsVerificationRequiredWhenFeedNeedsManualCheck(t *testing.T
 		return feeds.FetchResult{
 			VerificationRequests: []feeds.VerificationRequest{{
 				URL:    "https://chemrxiv.org/action/showFeed?type=latest&format=rss",
-				Target: "chemrxiv",
+				Target: "cloudflare",
 				Reason: "challenge",
 			}},
 		}, nil
@@ -253,7 +253,7 @@ func TestRunOnceReturnsVerificationRequiredWhenFeedNeedsManualCheck(t *testing.T
 	if !errors.As(err, &verificationErr) {
 		t.Fatalf("expected verification error, got %v", err)
 	}
-	if len(verificationErr.Requests) != 1 || verificationErr.Requests[0].Target != "chemrxiv" {
+	if len(verificationErr.Requests) != 1 || verificationErr.Requests[0].Target != "cloudflare" {
 		t.Fatalf("unexpected verification requests: %#v", verificationErr.Requests)
 	}
 }

@@ -35,7 +35,8 @@ const catalog = {
   "profile.current.save.succeeded": {text: "Classification profile saved.", tone: "success"},
   "job.started": {text: "Job started.", tone: "info"},
   "job.reclassify.started": {text: "Reclassification job started.", tone: "info"},
-  "job.verification.started": {text: "Opened the ChemRxiv verification window.", tone: "info"},
+  "job.verification.started": {text: "Opened the feed verification window.", tone: "info"},
+  "job.verification.completed": {text: "Trying the captured feed XML again.", tone: "info"},
   "job.completed": {text: "Completed.", tone: "success"},
   "job.failed": {text: "Job failed.", tone: "danger"},
   "pipeline.feeds.fetching": {text: "Fetching RSS feeds.", tone: "info"},
@@ -43,7 +44,7 @@ const catalog = {
   "pipeline.classifier.classifying": {text: "Classifying papers.", tone: "info"},
   "pipeline.report.refreshing": {text: "Refreshing report from SQLite.", tone: "info"},
   "pipeline.feeds.verification_required": {
-    text: "ChemRxiv needs manual verification before the sync can continue.",
+    text: "A protected feed needs Cloudflare verification before the sync can continue.",
     tone: "warning",
   },
   "profile.proposal.collecting_feedback": {
@@ -77,9 +78,10 @@ export function messageFromJob(job: JobInfo): UiMessage {
     return {...message, ttlMs: JOB_FINAL_TTL_MS};
   }
   if (job.status === "completed") {
+    const warningCount = job.warning_count ?? 0;
     const message = createUiMessage(job.message_key ?? "job.completed", {
       text: job.message ?? "Completed.",
-      tone: "success",
+      tone: warningCount > 0 ? "warning" : "success",
     });
     return {...message, ttlMs: JOB_FINAL_TTL_MS};
   }

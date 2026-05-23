@@ -9,6 +9,7 @@ FeedMeDaily is the public Windows release name for this single-user literature t
 - `src/scirssagent/`: Python reference pipeline, API, storage, and CLI helpers
 - `cmd/feedmedailyd/`: Go backend service entrypoint
 - `cmd/feedmedaily-tray/`: first-stage Go tray entrypoint for Windows runtime management
+- `cmd/feedmedaily-verifier/`: Windows-only Wails verification window used for Cloudflare-protected feeds
 - `internal/api/`: Go HTTP compatibility layer for app/report metadata, tray-facing control routes, migrated storage-backed APIs, background jobs, and static UI serving
 - `internal/classifier/`: Go-side OpenAI-compatible batch classifier with title-translation fallback and automatic thinking-disable retry on provider timeout/reasoning failures
 - `internal/config/`: early Go settings and path resolution layer
@@ -85,6 +86,7 @@ It currently owns the compatibility boundary, local-state write paths, and the f
 - `/api/admin/jobs`
 - `/api/feeds/verification/start`
 - `/api/feeds/verification/callback`
+- `/api/feeds/verification/complete`
 - React static asset serving and SPA fallback from `web/dist`
 
 The Go service now owns `Run Sync Now` end-to-end, including feed fetching/parsing, SQLite ingest, conditional metadata enrich, classifier execution, report refresh, and Zotero collection/save integration. Python remains as a reference implementation and compatibility shell for regression comparison.
@@ -97,15 +99,15 @@ The Go feed path is intentionally layered:
 
 External metadata requests are not part of feed parsing. OpenAlex and Crossref remain in the metadata layer and are only consulted when fetched feed content is still missing core fields.
 
-For ChemRxiv specifically, the Go runtime now has a Windows-only manual verification path:
+For Cloudflare-protected feeds, the Go runtime now has a Windows-only manual verification path:
 
-- when feed fetching encounters a ChemRxiv challenge page, the current `run` job moves to `waiting_for_user`
-- the UI can launch a dedicated WebView2 verification window
-- the user completes the Cloudflare check inside that controlled WebView session
-- the helper captures the resulting RDF/XML response from the same verified session and posts it back to the local backend
-- the backend resumes the paused run using the injected feed XML instead of asking the generic HTTP client to fetch ChemRxiv again
+- when feed fetching encounters a Cloudflare challenge or Cloudflare-backed `403`, the current `run` job moves to `waiting_for_user`
+- the UI can open a dedicated Wails verification window
+- that verifier window hosts its own WebView2 session, loads the protected feed URL, and keeps probing the page until RDF/XML becomes available
+- once the page resolves to RSS/Atom/RDF content, the verifier window POSTs the captured XML back to `/api/feeds/verification/callback`
+- the user then confirms completion in the main app, and the backend resumes the paused run by injecting the returned XML into the existing feed parser
 
-This verification flow is intentionally session-local and non-persistent. Clearance cookies are not stored on disk or reused across future runs.
+This verification flow is intentionally session-local and non-persistent. The verifier window uses its own temporary WebView2 user-data directory for the current verification step only, and removes that directory when the verifier exits.
 
 ### CLI
 

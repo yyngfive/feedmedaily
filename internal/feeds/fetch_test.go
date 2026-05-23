@@ -393,7 +393,58 @@ func TestFetchAllRetriesAfterForbiddenAndParsesRDFRSS(t *testing.T) {
 	}
 }
 
-func TestFetchAllRetriesAfterChallengePageThenParsesRSS(t *testing.T) {
+func TestFetchAllStopsAfterFirstCloudflare403VerificationRequest(t *testing.T) {
+	oldBackoffs := fetchRetryBackoffs
+	fetchRetryBackoffs = []time.Duration{0}
+	defer func() { fetchRetryBackoffs = oldBackoffs }()
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Server", "cloudflare")
+		w.Header().Set("CF-Ray", "test-ray")
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer server.Close()
+	targetURL, err := neturl.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousClient := fetchHTTPClient
+	fetchHTTPClient = &http.Client{
+		Timeout: previousClient.Timeout,
+		Transport: rewriteFeedTestTransport{
+			target: targetURL,
+			base:   http.DefaultTransport,
+		},
+	}
+	defer func() { fetchHTTPClient = previousClient }()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[{"journal":"Cell","url":"https://www.cell.com/cell/current.rss"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d", requests)
+	}
+	if len(result.Errors) != 0 {
+		t.Fatalf("errors = %#v", result.Errors)
+	}
+	if len(result.VerificationRequests) != 1 || result.VerificationRequests[0].Target != "cloudflare" {
+		t.Fatalf("unexpected verification requests: %#v", result.VerificationRequests)
+	}
+}
+
+func TestFetchAllMarksChallengePageAsVerificationRequired(t *testing.T) {
 	oldBackoffs := fetchRetryBackoffs
 	fetchRetryBackoffs = []time.Duration{0}
 	defer func() { fetchRetryBackoffs = oldBackoffs }()
@@ -437,14 +488,14 @@ func TestFetchAllRetriesAfterChallengePageThenParsesRSS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requests != 2 {
+	if requests != 1 {
 		t.Fatalf("requests = %d", requests)
 	}
-	if len(result.Errors) != 0 || len(result.Papers) != 1 {
+	if len(result.Errors) != 0 {
 		t.Fatalf("result = %#v", result)
 	}
-	if result.Papers[0].Title != "Challenge retry sample" {
-		t.Fatalf("unexpected title: %#v", result.Papers[0].Title)
+	if len(result.VerificationRequests) != 1 || result.VerificationRequests[0].Target != "cloudflare" {
+		t.Fatalf("unexpected verification requests: %#v", result.VerificationRequests)
 	}
 }
 
@@ -550,7 +601,7 @@ func TestFetchAllStopsAfterRetryableFailuresAndContinues(t *testing.T) {
 	}
 }
 
-func TestFetchAllMarksChemRxivChallengeAsVerificationRequired(t *testing.T) {
+func TestFetchAllMarksCloudflareChallengeAsVerificationRequired(t *testing.T) {
 	oldBackoffs := fetchRetryBackoffs
 	fetchRetryBackoffs = []time.Duration{0}
 	defer func() { fetchRetryBackoffs = oldBackoffs }()
@@ -589,13 +640,13 @@ func TestFetchAllMarksChemRxivChallengeAsVerificationRequired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requests != 2 {
+	if requests != 1 {
 		t.Fatalf("requests = %d", requests)
 	}
 	if len(result.Errors) != 0 {
 		t.Fatalf("errors = %#v", result.Errors)
 	}
-	if len(result.VerificationRequests) != 1 || result.VerificationRequests[0].Target != "chemrxiv" {
+	if len(result.VerificationRequests) != 1 || result.VerificationRequests[0].Target != "cloudflare" {
 		t.Fatalf("unexpected verification requests: %#v", result.VerificationRequests)
 	}
 }

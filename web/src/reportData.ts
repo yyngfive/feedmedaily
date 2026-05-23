@@ -344,3 +344,18 @@ export async function startFeedVerification(input: {
   }
   return (await response.json()) as {ok: boolean; verification_id: string};
 }
+
+export async function completeFeedVerification(input: {
+  job_id: string;
+  feed_url: string;
+}): Promise<{ok: boolean; verification_id: string}> {
+  const response = await fetch("/api/feeds/verification/complete", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as {ok: boolean; verification_id: string};
+}

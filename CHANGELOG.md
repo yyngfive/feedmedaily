@@ -10,7 +10,7 @@ Changes since `0.2.1`:
 
 ### Added
 
-- Added a Windows-only ChemRxiv recovery flow that pauses a sync job for manual verification, opens a dedicated WebView2 window, and resumes the same job after the verified RDF/XML feed is returned to the local backend.
+- Added a Windows-only Wails verification window for Cloudflare-protected feeds. Protected RSS jobs can now pause for manual verification, capture RDF/XML directly inside that dedicated WebView2 session, and resume the same run after the verifier posts the captured feed back to the local backend.
 
 ### Fixed
 
@@ -23,7 +23,8 @@ Changes since `0.2.1`:
 
 - Refactored the Go feed pipeline into layered fetch client, generic parser, and small publisher-extractor stages, and moved OpenAlex/Crossref back to a dedicated metadata-enrich layer.
 - Changed metadata enrichment so already-complete RSS entries no longer trigger routine OpenAlex/Crossref lookups; external metadata is now requested only when DOI, authors, journal, or usable abstract content is missing.
-- Changed admin run-job behavior so protected feeds such as ChemRxiv can move into a `waiting_for_user` state instead of failing immediately when manual verification is required.
+- Changed admin run-job behavior so Cloudflare-protected feeds can move into a `waiting_for_user` state instead of failing immediately when manual verification is required.
+- Replaced the earlier experimental Edge/C# verification helpers with a single Go-built verifier binary, and wired source builds, release packaging, and installer output to include `FeedMeDailyVerifier.exe`.
 
 ## 0.2.1 (2026-05-21)
 

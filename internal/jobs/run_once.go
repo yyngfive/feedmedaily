@@ -18,6 +18,7 @@ type RunOptions struct {
 	MaxPapers         int
 	Reclassify        bool
 	FeedBodyOverrides map[string][]byte
+	SkippedFeeds      map[string]string
 }
 
 type RunSummary struct {
@@ -50,6 +51,7 @@ func RunOnce(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 	fetchResult, err := fetchAllFeedsFunc(settings.FeedsPath, feeds.FetchOptions{
 		MaxPapers:      opts.MaxPapers,
 		OverrideBodies: opts.FeedBodyOverrides,
+		SkippedFeeds:   opts.SkippedFeeds,
 	})
 	if err != nil {
 		return RunSummary{}, err

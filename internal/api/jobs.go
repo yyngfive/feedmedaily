@@ -23,6 +23,7 @@ type jobInfo struct {
 	VerificationRequired bool           `json:"verification_required,omitempty"`
 	VerificationTarget   string         `json:"verification_target,omitempty"`
 	VerificationFeedURL  string         `json:"verification_feed_url,omitempty"`
+	VerificationJournal  string         `json:"verification_journal,omitempty"`
 	Result               map[string]any `json:"result,omitempty"`
 	LogPath              string         `json:"log_path,omitempty"`
 	WarningCount         int            `json:"warning_count,omitempty"`
@@ -197,13 +198,19 @@ func countWarnings(result map[string]any) int {
 func summarizeResult(jobType string, result map[string]any) string {
 	switch jobType {
 	case "run":
+		warnings := countWarnings(result)
+		message := "Run completed."
+		if warnings > 0 {
+			message = fmt.Sprintf("Run completed with %d fetch warning(s).", warnings)
+		}
 		return fmt.Sprintf(
-			"Run completed. fetched=%v inserted=%v updated=%v classified=%v warnings=%d.",
+			"%s fetched=%v inserted=%v updated=%v classified=%v warnings=%d.",
+			message,
 			result["fetched"],
 			result["inserted"],
 			result["updated"],
 			result["classified"],
-			countWarnings(result),
+			warnings,
 		)
 	case "report":
 		return fmt.Sprintf("Report refresh completed. papers=%v.", result["report_papers"])

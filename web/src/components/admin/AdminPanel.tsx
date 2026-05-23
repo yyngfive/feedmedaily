@@ -112,8 +112,7 @@ export function AdminPanel({
     jobs.find(
       (job) =>
         job.status === "waiting_for_user" &&
-        job.verification_required &&
-        job.verification_target === "chemrxiv",
+        job.verification_required,
     ) ?? null;
   const [schedulerTime, setSchedulerTime] = React.useState("10:00");
 
@@ -189,13 +188,15 @@ export function AdminPanel({
               </div>
               {verificationJob ? (
                 <div className="mt-4 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-3 text-sm text-amber-950">
-                  <p className="font-semibold">ChemRxiv needs manual verification</p>
+                  <p className="font-semibold">
+                    {(verificationJob.verification_journal?.trim() || "This feed")} needs manual verification
+                  </p>
                   <p className="mt-1 leading-6">
-                    This sync is paused until you finish the Cloudflare check in a dedicated verification window.
+                    A verification window should already be open. Finish the Cloudflare check there and wait for the feed XML to appear. This sync will resume automatically once the XML is captured. If you close the window first, this run will continue without that feed and record a warning.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button size="sm" variant="secondary" onPress={() => onStartVerification(verificationJob)}>
-                      Open ChemRxiv Verification
+                      Reopen Verification Window
                     </Button>
                     {verificationJob.verification_feed_url ? (
                       <code className="self-center break-all text-xs text-amber-900/80">

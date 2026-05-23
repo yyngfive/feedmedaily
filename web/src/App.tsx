@@ -773,7 +773,7 @@ export function App() {
     try {
       await startFeedVerification({job_id: job.id, feed_url: job.verification_feed_url});
       pushMessage("job.verification.started", {
-        text: "Opened the ChemRxiv verification window.",
+        text: "Opened the feed verification window.",
         tone: "info",
       });
     } catch (error) {
@@ -870,9 +870,9 @@ export function App() {
         onSaveScheduler={handleSaveScheduler}
         onSaveFeeds={() => void handleSaveFeeds()}
         onTabChange={setAdminTab}
-        onDeleteScheduler={handleDeleteScheduler}
-        onGenerateProposal={() => void handleGenerateProposal()}
-        onStartVerification={(job) => void handleStartVerification(job)}
+          onDeleteScheduler={handleDeleteScheduler}
+          onGenerateProposal={() => void handleGenerateProposal()}
+          onStartVerification={(job) => void handleStartVerification(job)}
         onApplyProposal={(id) => void handleApplyProposal(id)}
         onRejectProposal={(id) => void handleRejectProposal(id)}
         onRunFeedSync={() => void handleRunAdminJob("/api/admin/run")}

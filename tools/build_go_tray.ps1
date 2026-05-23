@@ -1,6 +1,7 @@
 param(
   [string]$TrayOutput = ".\\build\\feedmedaily-tray.exe",
   [string]$DaemonOutput = ".\\build\\feedmedailyd.exe",
+  [string]$VerifierOutput = ".\\build\\FeedMeDailyVerifier.exe",
   [string]$Version = ""
 )
 
@@ -12,9 +13,11 @@ if (-not $go) {
 $root = Split-Path -Parent $PSScriptRoot
 $trayOutputPath = Join-Path $root $TrayOutput
 $daemonOutputPath = Join-Path $root $DaemonOutput
+$verifierOutputPath = Join-Path $root $VerifierOutput
 $outputDirs = @(
   (Split-Path -Parent $trayOutputPath),
-  (Split-Path -Parent $daemonOutputPath)
+  (Split-Path -Parent $daemonOutputPath),
+  (Split-Path -Parent $verifierOutputPath)
 )
 $goCacheDir = Join-Path $root ".tmp\\go-build-cache"
 $goModCacheDir = Join-Path $root ".tmp\\go-mod-cache"
@@ -39,11 +42,18 @@ try {
   }
   $env:GOCACHE = $goCacheDir
   $env:GOMODCACHE = $goModCacheDir
+  if (-not $env:GOPROXY) {
+    $env:GOPROXY = "https://goproxy.cn,direct"
+  }
   & go build -ldflags "-H=windowsgui -X github.com/yyngfive/scirssagent/internal/runtime.buildVersion=$Version" -o $trayOutputPath .\cmd\feedmedaily-tray
   if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
   }
   & go build -ldflags "-H=windowsgui -X github.com/yyngfive/scirssagent/internal/runtime.buildVersion=$Version" -o $daemonOutputPath .\cmd\feedmedailyd
+  if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+  }
+  & go build -tags production -ldflags "-H=windowsgui -X github.com/yyngfive/scirssagent/internal/runtime.buildVersion=$Version" -o $verifierOutputPath .\cmd\feedmedaily-verifier
 }
 finally {
   Pop-Location

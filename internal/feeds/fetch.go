@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/yyngfive/scirssagent/internal/logging"
@@ -14,6 +15,7 @@ import (
 type FetchOptions struct {
 	MaxPapers      int
 	OverrideBodies map[string][]byte
+	SkippedFeeds   map[string]string
 }
 
 type FetchResult struct {
@@ -157,6 +159,17 @@ func feedOverrideBody(url string, overrides map[string][]byte) ([]byte, bool) {
 	return body, true
 }
 
+func skippedFeedReason(url string, skipped map[string]string) (string, bool) {
+	if len(skipped) == 0 {
+		return "", false
+	}
+	reason, ok := skipped[url]
+	if !ok || strings.TrimSpace(reason) == "" {
+		return "", false
+	}
+	return strings.TrimSpace(reason), true
+}
+
 // FetchAll reads configured feeds, fetches them, and normalizes entries into paper candidates.
 func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 	subscriptions, err := ReadSubscriptions(feedsPath)
@@ -178,6 +191,10 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 	}
 	for _, subscription := range subscriptions {
 		result.FeedURLs = append(result.FeedURLs, subscription.URL)
+		if reason, ok := skippedFeedReason(subscription.URL, opts.SkippedFeeds); ok {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", subscription.URL, reason))
+			continue
+		}
 		papers, err := fetchFeed(subscription.URL, opts)
 		if err != nil {
 			var verificationErr *FeedVerificationRequiredError
@@ -223,10 +240,12 @@ func fetchFeed(url string, opts FetchOptions) ([]store.Paper, error) {
 		return parseFeedBody(url, 0, body)
 	}
 	attemptCount := len(fetchRetryBackoffs) + 1
+	attempted := 0
 	lastStatusCode := 0
 	lastChallenge := false
 	var lastErr error
 	for attempt := 1; attempt <= attemptCount; attempt++ {
+		attempted = attempt
 		papers, statusCode, challenge, retryable, err := fetchFeedAttempt(url, attempt)
 		if err == nil {
 			return papers, nil
@@ -234,6 +253,10 @@ func fetchFeed(url string, opts FetchOptions) ([]store.Paper, error) {
 		lastStatusCode = statusCode
 		lastChallenge = challenge
 		lastErr = err
+		var verificationErr *FeedVerificationRequiredError
+		if errors.As(err, &verificationErr) {
+			break
+		}
 		if !retryable || attempt == attemptCount {
 			break
 		}
@@ -243,11 +266,11 @@ func fetchFeed(url string, opts FetchOptions) ([]store.Paper, error) {
 		Level:     "warning",
 		Component: "feeds",
 		Action:    "feed_fetch_failed",
-		Message:   fmt.Sprintf("Failed to fetch feed after %d attempt(s): %s", attemptCount, url),
+		Message:   fmt.Sprintf("Failed to fetch feed after %d attempt(s): %s", attempted, url),
 		Error:     lastErr.Error(),
 		Data: map[string]any{
 			"url":                 url,
-			"attempts":            attemptCount,
+			"attempts":            attempted,
 			"last_status_code":    lastStatusCode,
 			"challenge_suspected": lastChallenge,
 		},
@@ -298,7 +321,7 @@ func fetchFeedAttempt(url string, attempt int) ([]store.Paper, int, bool, bool, 
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		retryable := isRetryableFeedStatus(response.StatusCode)
-		if shouldRequireFeedVerification(url, response.StatusCode, false) {
+		if shouldRequireFeedVerification(url, response, false) {
 			return nil, response.StatusCode, false, retryable, &FeedVerificationRequiredError{
 				URL:    url,
 				Target: verificationTargetForURL(url),
@@ -320,7 +343,7 @@ func fetchFeedAttempt(url string, attempt int) ([]store.Paper, int, bool, bool, 
 				"challenge_suspected": true,
 			},
 		})
-		if shouldRequireFeedVerification(url, response.StatusCode, true) {
+		if shouldRequireFeedVerification(url, response, true) {
 			return nil, response.StatusCode, true, true, &FeedVerificationRequiredError{
 				URL:    url,
 				Target: verificationTargetForURL(url),

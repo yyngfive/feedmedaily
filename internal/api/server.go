@@ -80,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/jobs", s.handleAdminJobs)
 	mux.HandleFunc("/api/feeds/verification/start", s.handleFeedVerificationStart)
 	mux.HandleFunc("/api/feeds/verification/callback", s.handleFeedVerificationCallback)
+	mux.HandleFunc("/api/feeds/verification/complete", s.handleFeedVerificationComplete)
 	mux.HandleFunc("/", s.handleStatic)
 	return withCORS(mux)
 }
@@ -894,9 +895,10 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 	}
 	job := launchVerificationAwareRunJob(
 		s.settings,
-		func(progress func(string, string), overrides map[string][]byte) (map[string]any, error) {
+		func(progress func(string, string), overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error) {
 			summary, err := runOnceFunc(s.settings, jobruntime.RunOptions{
 				FeedBodyOverrides: overrides,
+				SkippedFeeds:      skippedFeeds,
 			}, progress)
 			if err != nil {
 				return nil, err
@@ -939,14 +941,72 @@ func (s *Server) handleFeedVerificationStart(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusNotFound, "Verification request not found.")
 		return
 	}
-	if err := launchVerificationHelperFunc(s.settings, pending.ID, requestBaseURL(r)+"/api/feeds/verification/callback", pending.FeedURL); err != nil {
+	if err := startVerificationFlowFunc(s.settings, pending); err != nil {
+		logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "warning", "verification_start_failed", "pipeline.feeds.verification_required", "", err.Error(), map[string]any{
+			"verification_id":       pending.ID,
+			"verification_feed_url": pending.FeedURL,
+			"verification_journal":  pending.Journal,
+		})
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_started", "pipeline.feeds.verification_required", "Opened the feed verification window.", "", map[string]any{
+		"verification_id":       pending.ID,
+		"verification_feed_url": pending.FeedURL,
+		"verification_journal":  pending.Journal,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":              true,
 		"verification_id": pending.ID,
 	})
+}
+
+func (s *Server) handleFeedVerificationComplete(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var payload struct {
+		JobID   string `json:"job_id"`
+		FeedURL string `json:"feed_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid JSON body.")
+		return
+	}
+	job, ok := jobByID(payload.JobID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Job not found.")
+		return
+	}
+	if job.Status != "waiting_for_user" || !job.VerificationRequired {
+		writeError(w, http.StatusBadRequest, "Job is not waiting for manual verification.")
+		return
+	}
+	pending, ok := pendingVerificationForJob(payload.JobID, payload.FeedURL)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Verification request not found.")
+		return
+	}
+	result, err := completeVerificationFlowFunc(s.settings, pending)
+	logData := map[string]any{
+		"verification_id":       pending.ID,
+		"verification_feed_url": pending.FeedURL,
+		"verification_journal":  pending.Journal,
+	}
+	if err != nil {
+		logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "warning", "verification_retry_failed", "pipeline.feeds.verification_required", "", err.Error(), logData)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(result.ContentType) != "" {
+		logData["content_type"] = result.ContentType
+	}
+	logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification data captured. Resuming RSS fetch.", "", logData)
+	select {
+	case pending.Result <- result:
+	default:
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "verification_id": pending.ID})
 }
 
 func (s *Server) handleFeedVerificationCallback(w http.ResponseWriter, r *http.Request) {
@@ -958,6 +1018,7 @@ func (s *Server) handleFeedVerificationCallback(w http.ResponseWriter, r *http.R
 		Status         string `json:"status"`
 		ContentType    string `json:"content_type"`
 		FeedXML        string `json:"feed_xml"`
+		Error          string `json:"error"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid JSON body.")
@@ -968,23 +1029,72 @@ func (s *Server) handleFeedVerificationCallback(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusNotFound, "Verification request not found.")
 		return
 	}
+
 	result := verificationResult{
-		Status:      payload.Status,
-		ContentType: payload.ContentType,
+		Status:      strings.TrimSpace(payload.Status),
+		ContentType: strings.TrimSpace(payload.ContentType),
+		FeedXML:     []byte(payload.FeedXML),
 	}
-	switch payload.Status {
+	switch result.Status {
 	case "success":
-		result.FeedXML = []byte(payload.FeedXML)
+		if len(result.FeedXML) == 0 {
+			result.Err = fmt.Errorf("verification callback did not include RSS XML")
+			result.Warning = result.Err.Error()
+		}
 	case "aborted":
-		result.Err = fmt.Errorf("verification aborted by user")
+		if strings.TrimSpace(payload.Error) == "" {
+			result.Warning = "the verification window was closed before RSS XML was captured"
+		} else {
+			result.Warning = strings.TrimSpace(payload.Error)
+		}
+	case "failed":
+		if strings.TrimSpace(payload.Error) == "" {
+			result.Warning = "the verification window failed before it could capture RSS XML"
+		} else {
+			result.Warning = strings.TrimSpace(payload.Error)
+		}
 	default:
-		result.Err = fmt.Errorf("verification failed")
+		writeError(w, http.StatusBadRequest, "verification status must be success, failed, or aborted.")
+		return
 	}
-	select {
-	case pending.Result <- result:
-	default:
+
+	var stored bool
+	pending, ok, stored = storeVerificationCallbackResult(payload.VerificationID, result)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Verification request not found.")
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if !stored {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "verification_id": pending.ID, "duplicate": true})
+		return
+	}
+
+	logData := map[string]any{
+		"verification_id":       pending.ID,
+		"verification_feed_url": pending.FeedURL,
+		"verification_journal":  pending.Journal,
+		"verification_status":   result.Status,
+	}
+	if result.ContentType != "" {
+		logData["content_type"] = result.ContentType
+	}
+	if result.Status == "success" {
+		logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_callback_received", "pipeline.feeds.verification_required", "Verification window captured protected feed XML.", "", logData)
+	} else {
+		logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "warning", "verification_callback_failed", "pipeline.feeds.verification_required", "", result.Warning, logData)
+	}
+
+	if markVerificationDelivered(pending.ID) {
+		if result.Status == "success" {
+			logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification data captured. Resuming RSS fetch.", "", logData)
+		}
+		select {
+		case pending.Result <- result:
+		default:
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "verification_id": pending.ID})
 }
 
 func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {

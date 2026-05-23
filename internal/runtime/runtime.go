@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
@@ -144,14 +145,14 @@ func EnsureSourceBinary(root string, packagePath string, outputName string) (str
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return "", fmt.Errorf("create runtime build directory: %w", err)
 	}
-	args := []string{
-		"build",
-		"-ldflags",
-		sourceBinaryLdflags(root, outputName),
-		"-o",
-		outputPath,
-		packagePath,
+	rebuild, err := sourceBinaryNeedsRebuild(root, packagePath, outputPath)
+	if err != nil {
+		return "", err
 	}
+	if !rebuild {
+		return outputPath, nil
+	}
+	args := sourceBinaryBuildArgs(root, packagePath, outputName, outputPath)
 	cmd := exec.Command(goPath, args...)
 	cmd.Dir = root
 	cmd.SysProcAttr = hiddenBuildSysProcAttr()
@@ -165,6 +166,88 @@ func EnsureSourceBinary(root string, packagePath string, outputName string) (str
 		return "", fmt.Errorf("build %s: %s", outputName, detail)
 	}
 	return outputPath, nil
+}
+
+func sourceBinaryNeedsRebuild(root string, packagePath string, outputPath string) (bool, error) {
+	outputInfo, err := os.Stat(outputPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return true, nil
+		}
+		return false, fmt.Errorf("stat %s: %w", outputPath, err)
+	}
+	latestSourceTime, err := sourceBinaryLatestSourceTime(root, packagePath)
+	if err != nil {
+		return false, err
+	}
+	return outputInfo.ModTime().Before(latestSourceTime), nil
+}
+
+func sourceBinaryLatestSourceTime(root string, packagePath string) (time.Time, error) {
+	candidates := []string{
+		filepath.Join(root, "go.mod"),
+		filepath.Join(root, "go.sum"),
+		filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(packagePath, "./"))),
+	}
+	latest := time.Time{}
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return time.Time{}, fmt.Errorf("stat source dependency %s: %w", candidate, err)
+		}
+		if !info.IsDir() {
+			if info.ModTime().After(latest) {
+				latest = info.ModTime()
+			}
+			continue
+		}
+		err = filepath.WalkDir(candidate, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			fileInfo, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if fileInfo.ModTime().After(latest) {
+				latest = fileInfo.ModTime()
+			}
+			return nil
+		})
+		if err != nil {
+			return time.Time{}, fmt.Errorf("scan source dependency %s: %w", candidate, err)
+		}
+	}
+	if latest.IsZero() {
+		return time.Now().UTC(), nil
+	}
+	return latest, nil
+}
+
+func sourceBinaryBuildArgs(root string, packagePath string, outputName string, outputPath string) []string {
+	args := []string{
+		"build",
+	}
+	// Wails verifier binaries need the production tag even in source mode, otherwise
+	// the fallback "use wails build" stub is compiled in and the window never starts.
+	if packagePath == "./cmd/feedmedaily-verifier" {
+		args = append(args, "-tags", "production")
+	}
+	args = append(
+		args,
+		"-ldflags",
+		sourceBinaryLdflags(root, outputName),
+		"-o",
+		outputPath,
+		packagePath,
+	)
+	return args
 }
 
 func sourceBinaryLdflags(root string, outputName string) string {

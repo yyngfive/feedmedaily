@@ -10,6 +10,7 @@ $iconPath = Join-Path $root "assets\branding\feedmedaily.ico"
 $trayBuildScript = Join-Path $root "tools\build_go_tray.ps1"
 $trayBuildOutput = Join-Path $root "build\feedmedaily-tray.exe"
 $daemonBuildOutput = Join-Path $root "build\feedmedailyd.exe"
+$verifierBuildOutput = Join-Path $root "build\FeedMeDailyVerifier.exe"
 
 function Invoke-NativeStep {
   param(
@@ -135,6 +136,9 @@ try {
   }
   if (Test-Path $daemonBuildOutput) {
     Copy-Item -Force $daemonBuildOutput (Join-Path $appDist "feedmedailyd.exe")
+  }
+  if (Test-Path $verifierBuildOutput) {
+    Copy-Item -Force $verifierBuildOutput (Join-Path $appDist "FeedMeDailyVerifier.exe")
   }
   Write-UpdateManifest -Version $projectVersion
 

@@ -1,15 +1,9 @@
 package api
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	neturl "net/url"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -18,16 +12,19 @@ import (
 	"github.com/yyngfive/scirssagent/internal/feeds"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
 	"github.com/yyngfive/scirssagent/internal/logging"
-	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 )
 
 type pendingVerification struct {
-	ID      string
-	JobID   string
-	FeedURL string
-	Target  string
-	Reason  string
-	Result  chan verificationResult
+	ID               string
+	JobID            string
+	FeedURL          string
+	Journal          string
+	Target           string
+	Reason           string
+	Result           chan verificationResult
+	Delivered        bool
+	CallbackReceived bool
+	CallbackResult   verificationResult
 }
 
 type verificationResult struct {
@@ -35,6 +32,7 @@ type verificationResult struct {
 	ContentType string
 	FeedXML     []byte
 	Err         error
+	Warning     string
 }
 
 type verificationRegistry struct {
@@ -44,10 +42,11 @@ type verificationRegistry struct {
 
 var (
 	apiVerifications             = verificationRegistry{items: map[string]*pendingVerification{}}
-	launchVerificationHelperFunc = launchVerificationHelper
+	startVerificationFlowFunc    = startVerificationFlow
+	completeVerificationFlowFunc = completeVerificationFlow
 )
 
-func launchVerificationAwareRunJob(settings config.Settings, run func(progress func(string, string), overrides map[string][]byte) (map[string]any, error)) jobInfo {
+func launchVerificationAwareRunJob(settings config.Settings, run func(progress func(string, string), overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error)) jobInfo {
 	job := jobInfo{
 		ID:         nextJobID(),
 		JobType:    "run",
@@ -71,6 +70,7 @@ func launchVerificationAwareRunJob(settings config.Settings, run func(progress f
 	go func() {
 		started := nowFunc().UTC()
 		overrideBodies := map[string][]byte{}
+		skippedFeeds := map[string]string{}
 		logJobEvent(settings.LogsDir, &job, "info", "started", "pipeline.feeds.fetching", "Fetching RSS feeds.", "", nil)
 		updateJob(job.ID, func(current *jobInfo) {
 			current.Status = "running"
@@ -88,7 +88,7 @@ func launchVerificationAwareRunJob(settings config.Settings, run func(progress f
 		}
 
 		for {
-			result, err := run(progress, overrideBodies)
+			result, err := run(progress, overrideBodies, skippedFeeds)
 			if err == nil {
 				warningCount := countWarnings(result)
 				finished := nowFunc().UTC()
@@ -103,6 +103,7 @@ func launchVerificationAwareRunJob(settings config.Settings, run func(progress f
 					current.VerificationRequired = false
 					current.VerificationTarget = ""
 					current.VerificationFeedURL = ""
+					current.VerificationJournal = ""
 				})
 				return
 			}
@@ -111,39 +112,71 @@ func launchVerificationAwareRunJob(settings config.Settings, run func(progress f
 			if errors.As(err, &verificationErr) && len(verificationErr.Requests) > 0 {
 				request := verificationErr.Requests[0]
 				pending := storePendingVerification(job.ID, request)
-				logJobEvent(settings.LogsDir, &job, "warning", "waiting_for_user", "pipeline.feeds.verification_required", "ChemRxiv requires manual verification.", "", map[string]any{
+				logJobEvent(settings.LogsDir, &job, "warning", "waiting_for_user", "pipeline.feeds.verification_required", "A protected feed requires manual verification.", "", map[string]any{
 					"verification_target":   pending.Target,
 					"verification_feed_url": pending.FeedURL,
+					"verification_journal":  pending.Journal,
 				})
 				updateJob(job.ID, func(current *jobInfo) {
 					current.Status = "waiting_for_user"
 					current.MessageKey = "pipeline.feeds.verification_required"
-					current.Message = "ChemRxiv requires manual verification before this run can continue."
+					current.Message = "A protected feed needs Cloudflare verification. A verification window should open automatically."
 					current.Result = map[string]any{
 						"verification_required": true,
 						"verification_target":   pending.Target,
 						"verification_feed_url": pending.FeedURL,
+						"verification_journal":  pending.Journal,
 					}
 					current.VerificationRequired = true
 					current.VerificationTarget = pending.Target
 					current.VerificationFeedURL = pending.FeedURL
+					current.VerificationJournal = pending.Journal
 				})
 
-				resumeResult, waitErr := waitForVerification(pending, 20*time.Minute)
-				deletePendingVerification(pending.ID)
-				if waitErr != nil {
-					finished := nowFunc().UTC()
-					logJobEvent(settings.LogsDir, &job, "error", "failed", "run.failed", "", waitErr.Error(), nil)
+				if err := startVerificationFlowFunc(settings, pending); err != nil {
+					deletePendingVerification(pending.ID)
+					skippedFeeds[pending.FeedURL] = err.Error()
+					logJobEvent(settings.LogsDir, &job, "warning", "verification_start_failed", "pipeline.feeds.verification_required", "", err.Error(), map[string]any{
+						"verification_feed_url": pending.FeedURL,
+						"verification_journal":  pending.Journal,
+						"verification_target":   pending.Target,
+					})
 					updateJob(job.ID, func(current *jobInfo) {
-						current.Status = "failed"
-						current.MessageKey = "run.failed"
-						current.Error = waitErr.Error()
-						current.FinishedAt = &finished
+						current.Status = "running"
+						current.MessageKey = "pipeline.feeds.fetching"
+						current.Message = "Verification window could not be opened. Skipping that protected feed for this run."
 						current.VerificationRequired = false
 						current.VerificationTarget = ""
 						current.VerificationFeedURL = ""
+						current.VerificationJournal = ""
 					})
-					return
+					continue
+				}
+				logJobEvent(settings.LogsDir, &job, "info", "verification_started", "pipeline.feeds.verification_required", "Opened the feed verification window.", "", map[string]any{
+					"verification_id":       pending.ID,
+					"verification_feed_url": pending.FeedURL,
+					"verification_journal":  pending.Journal,
+				})
+
+				resumeResult := waitForVerification(pending, 20*time.Minute)
+				deletePendingVerification(pending.ID)
+				if strings.TrimSpace(resumeResult.Warning) != "" {
+					skippedFeeds[pending.FeedURL] = resumeResult.Warning
+					logJobEvent(settings.LogsDir, &job, "warning", "verification_skipped", "pipeline.feeds.fetching", "Verification did not return feed XML. Continuing this run without that feed.", resumeResult.Warning, map[string]any{
+						"verification_feed_url": pending.FeedURL,
+						"verification_journal":  pending.Journal,
+						"verification_target":   pending.Target,
+					})
+					updateJob(job.ID, func(current *jobInfo) {
+						current.Status = "running"
+						current.MessageKey = "pipeline.feeds.fetching"
+						current.Message = "Verification was not completed. Continuing this run and recording a fetch warning."
+						current.VerificationRequired = false
+						current.VerificationTarget = ""
+						current.VerificationFeedURL = ""
+						current.VerificationJournal = ""
+					})
+					continue
 				}
 				overrideBodies[pending.FeedURL] = resumeResult.FeedXML
 				logJobEvent(settings.LogsDir, &job, "info", "verification_resumed", "pipeline.feeds.fetching", "Verification received. Resuming RSS fetch.", "", nil)
@@ -154,6 +187,7 @@ func launchVerificationAwareRunJob(settings config.Settings, run func(progress f
 					current.VerificationRequired = false
 					current.VerificationTarget = ""
 					current.VerificationFeedURL = ""
+					current.VerificationJournal = ""
 				})
 				continue
 			}
@@ -168,6 +202,7 @@ func launchVerificationAwareRunJob(settings config.Settings, run func(progress f
 				current.VerificationRequired = false
 				current.VerificationTarget = ""
 				current.VerificationFeedURL = ""
+				current.VerificationJournal = ""
 			})
 			return
 		}
@@ -181,6 +216,7 @@ func storePendingVerification(jobID string, request feeds.VerificationRequest) *
 		ID:      nextJobID(),
 		JobID:   jobID,
 		FeedURL: request.URL,
+		Journal: request.Journal,
 		Target:  request.Target,
 		Reason:  request.Reason,
 		Result:  make(chan verificationResult, 1),
@@ -215,63 +251,51 @@ func deletePendingVerification(id string) {
 	delete(apiVerifications.items, id)
 }
 
-func waitForVerification(pending *pendingVerification, timeout time.Duration) (verificationResult, error) {
+func waitForVerification(pending *pendingVerification, timeout time.Duration) verificationResult {
 	select {
 	case result := <-pending.Result:
-		if result.Err != nil {
-			return verificationResult{}, result.Err
-		}
-		if len(result.FeedXML) == 0 {
-			return verificationResult{}, fmt.Errorf("verification completed without returning RSS XML")
-		}
-		return result, nil
+		return result
 	case <-time.After(timeout):
-		return verificationResult{}, fmt.Errorf("verification timed out")
+		return verificationResult{
+			Status:  "timeout",
+			Warning: "the verification window timed out before RSS XML was captured",
+		}
 	}
 }
 
-func launchVerificationHelper(settings config.Settings, verificationID string, callbackURL string, feedURL string) error {
-	if verificationTargetForFeedURL(feedURL) != "chemrxiv" {
+func startVerificationFlow(settings config.Settings, pending *pendingVerification) error {
+	if pending == nil {
+		return fmt.Errorf("verification request not found")
+	}
+	if verificationTargetForFeedURL(pending.FeedURL) != "cloudflare" {
 		return fmt.Errorf("unsupported verification target")
 	}
-	if strings.TrimSpace(callbackURL) == "" {
-		return fmt.Errorf("verification callback URL is required")
+	pending.Delivered = false
+	pending.CallbackReceived = false
+	pending.CallbackResult = verificationResult{}
+	return startVerificationWindowFlow(settings, pending)
+}
+
+func completeVerificationFlow(settings config.Settings, pending *pendingVerification) (verificationResult, error) {
+	if pending == nil {
+		return verificationResult{}, fmt.Errorf("verification request not found")
 	}
-	if !isWindowsRuntime() {
-		return fmt.Errorf("manual ChemRxiv verification is only supported on Windows")
+	if verificationTargetForFeedURL(pending.FeedURL) != "cloudflare" {
+		return verificationResult{}, fmt.Errorf("unsupported verification target")
 	}
-	if settings.Mode != appruntime.ModeSource {
-		return fmt.Errorf("manual ChemRxiv verification currently requires source mode")
+	if !pending.CallbackReceived {
+		return verificationResult{}, fmt.Errorf("the verification window has not returned RSS XML yet; finish the Cloudflare check there first")
 	}
-	if _, err := exec.LookPath("dotnet"); err != nil {
-		return fmt.Errorf("dotnet SDK/runtime is required to launch the WebView2 verifier")
+	if strings.TrimSpace(pending.CallbackResult.Warning) != "" {
+		return verificationResult{}, fmt.Errorf("%s", pending.CallbackResult.Warning)
 	}
-	projectPath := filepath.Join(settings.RootDir, "tools", "ChemRxivVerifier", "ChemRxivVerifier.csproj")
-	args := []string{
-		"run",
-		"--project",
-		projectPath,
-		"--configuration",
-		"Release",
-		"--no-launch-profile",
-		"--",
-		"--verification-id", verificationID,
-		"--feed-url", feedURL,
-		"--callback-url", callbackURL,
+	if pending.CallbackResult.Err != nil {
+		return verificationResult{}, pending.CallbackResult.Err
 	}
-	cmd := exec.Command("dotnet", args...)
-	cmd.Dir = settings.RootDir
-	hideVerificationLauncherWindow(cmd)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if detail != "" {
-			return fmt.Errorf("%s: %w", detail, err)
-		}
-		return err
+	if len(pending.CallbackResult.FeedXML) == 0 {
+		return verificationResult{}, fmt.Errorf("verification completed without returning RSS XML")
 	}
-	return nil
+	return pending.CallbackResult, nil
 }
 
 func verificationTargetForFeedURL(feedURL string) string {
@@ -279,29 +303,50 @@ func verificationTargetForFeedURL(feedURL string) string {
 	if err != nil {
 		return ""
 	}
-	if strings.EqualFold(strings.TrimSpace(parsed.Hostname()), "chemrxiv.org") {
-		return "chemrxiv"
+	if strings.TrimSpace(parsed.Scheme) == "" || strings.TrimSpace(parsed.Hostname()) == "" {
+		return ""
 	}
-	return ""
+	switch strings.ToLower(strings.TrimSpace(parsed.Scheme)) {
+	case "http", "https":
+		return "cloudflare"
+	default:
+		return ""
+	}
 }
 
-func postVerificationResult(callbackURL string, payload map[string]any) error {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
+func storeVerificationCallbackResult(id string, result verificationResult) (*pendingVerification, bool, bool) {
+	apiVerifications.mu.Lock()
+	defer apiVerifications.mu.Unlock()
+
+	pending, ok := apiVerifications.items[id]
+	if !ok {
+		return nil, false, false
 	}
-	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, callbackURL, bytes.NewReader(body))
-	if err != nil {
-		return err
+	if pending.CallbackReceived {
+		if pending.CallbackResult.Status == "success" {
+			return pending, true, false
+		}
+		return pending, true, false
 	}
-	request.Header.Set("Content-Type", "application/json")
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		return err
+	pending.CallbackReceived = true
+	pending.CallbackResult = verificationResult{
+		Status:      result.Status,
+		ContentType: result.ContentType,
+		FeedXML:     append([]byte(nil), result.FeedXML...),
+		Err:         result.Err,
+		Warning:     result.Warning,
 	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("callback returned %s", response.Status)
+	return pending, true, true
+}
+
+func markVerificationDelivered(id string) bool {
+	apiVerifications.mu.Lock()
+	defer apiVerifications.mu.Unlock()
+
+	pending, ok := apiVerifications.items[id]
+	if !ok || pending.Delivered {
+		return false
 	}
-	return nil
+	pending.Delivered = true
+	return true
 }

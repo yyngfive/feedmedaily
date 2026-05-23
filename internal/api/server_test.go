@@ -725,7 +725,8 @@ func stubAPIGlobals(t *testing.T) func() {
 	previousReclassify := reclassifyPaperIDsFunc
 	previousRebuildLatestReport := rebuildLatestReportFunc
 	previousRunOnce := runOnceFunc
-	previousLaunchVerification := launchVerificationHelperFunc
+	previousStartVerification := startVerificationFlowFunc
+	previousCompleteVerification := completeVerificationFlowFunc
 	previousNow := nowFunc
 	previousJobs := apiJobs
 	previousVerifications := apiVerifications
@@ -743,14 +744,15 @@ func stubAPIGlobals(t *testing.T) func() {
 		reclassifyPaperIDsFunc = previousReclassify
 		rebuildLatestReportFunc = previousRebuildLatestReport
 		runOnceFunc = previousRunOnce
-		launchVerificationHelperFunc = previousLaunchVerification
+		startVerificationFlowFunc = previousStartVerification
+		completeVerificationFlowFunc = previousCompleteVerification
 		nowFunc = previousNow
 		apiJobs = previousJobs
 		apiVerifications = previousVerifications
 	}
 }
 
-func TestAdminRunWaitsForChemRxivVerificationAndResumes(t *testing.T) {
+func TestAdminRunWaitsForCloudflareVerificationAndResumes(t *testing.T) {
 	root := t.TempDir()
 	restore := stubAPIGlobals(t)
 	defer restore()
@@ -762,7 +764,7 @@ func TestAdminRunWaitsForChemRxivVerificationAndResumes(t *testing.T) {
 			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
 				Requests: []feeds.VerificationRequest{{
 					URL:    "https://chemrxiv.org/action/showFeed?type=latest&format=rss",
-					Target: "chemrxiv",
+					Target: "cloudflare",
 					Reason: "challenge",
 				}},
 			}
@@ -779,15 +781,164 @@ func TestAdminRunWaitsForChemRxivVerificationAndResumes(t *testing.T) {
 		}, nil
 	}
 
-	launchedVerificationID := ""
-	launchVerificationHelperFunc = func(_ config.Settings, verificationID string, callbackURL string, feedURL string) error {
-		launchedVerificationID = verificationID
-		if callbackURL == "" || !strings.Contains(callbackURL, "/api/feeds/verification/callback") {
-			t.Fatalf("unexpected callback url: %q", callbackURL)
+	startVerificationFlowFunc = func(_ config.Settings, pending *pendingVerification) error {
+		if pending == nil {
+			t.Fatalf("expected pending verification")
 		}
-		if feedURL != "https://chemrxiv.org/action/showFeed?type=latest&format=rss" {
-			t.Fatalf("unexpected feed url: %q", feedURL)
+		if pending.FeedURL != "https://chemrxiv.org/action/showFeed?type=latest&format=rss" {
+			t.Fatalf("unexpected feed url: %q", pending.FeedURL)
 		}
+		return nil
+	}
+	handler := NewServer(testSettings(root), nil).Handler()
+
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run launch = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	var runPayload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(runRecorder.Body.Bytes(), &runPayload); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
+
+	job, ok := jobByID(runPayload.Job.ID)
+	if !ok || !job.VerificationRequired || job.VerificationTarget != "cloudflare" {
+		t.Fatalf("unexpected waiting job: %#v", job)
+	}
+	pending, ok := pendingVerificationForJob(runPayload.Job.ID, "https://chemrxiv.org/action/showFeed?type=latest&format=rss")
+	if !ok {
+		t.Fatalf("expected pending verification")
+	}
+
+	startBody := `{"job_id":"` + runPayload.Job.ID + `","feed_url":"https://chemrxiv.org/action/showFeed?type=latest&format=rss"}`
+	startRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(startRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/start", strings.NewReader(startBody)))
+	if startRecorder.Code != http.StatusOK {
+		t.Fatalf("verification start = %d %s", startRecorder.Code, startRecorder.Body.String())
+	}
+	callbackBody := `{"verification_id":"` + pending.ID + `","status":"success","content_type":"application/xml","feed_xml":"<rdf:RDF />","error":""}`
+	callbackRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/callback", strings.NewReader(callbackBody)))
+	if callbackRecorder.Code != http.StatusOK {
+		t.Fatalf("verification callback = %d %s", callbackRecorder.Code, callbackRecorder.Body.String())
+	}
+
+	waitForJobCompletion(t, runPayload.Job.ID)
+	completedJob, ok := jobByID(runPayload.Job.ID)
+	if !ok || completedJob.Status != "completed" {
+		t.Fatalf("unexpected completed job: %#v", completedJob)
+	}
+	if runCalls != 2 {
+		t.Fatalf("runCalls = %d", runCalls)
+	}
+}
+
+func TestAdminRunContinuesWithWarningWhenVerificationRetryFails(t *testing.T) {
+	root := t.TempDir()
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	runOnceFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		if got := opts.SkippedFeeds["https://www.cell.com/cell/current.rss"]; contains(got, "Cloudflare challenge was not completed before the window closed.") {
+			return jobruntime.RunSummary{
+				Fetched:    0,
+				Inserted:   0,
+				Updated:    0,
+				Classified: 0,
+				Errors:     []string{"https://www.cell.com/cell/current.rss skipped: " + got},
+			}, nil
+		}
+		if len(opts.FeedBodyOverrides) == 0 {
+			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
+				Requests: []feeds.VerificationRequest{{
+					URL:     "https://www.cell.com/cell/current.rss",
+					Target:  "cloudflare",
+					Reason:  "challenge",
+					Journal: "Cell",
+				}},
+			}
+		}
+		t.Fatalf("did not expect resumed run with feed overrides after verification warning")
+		return jobruntime.RunSummary{}, nil
+	}
+
+	startVerificationFlowFunc = func(_ config.Settings, pending *pendingVerification) error {
+		if pending == nil {
+			t.Fatalf("expected pending verification")
+		}
+		if pending.FeedURL != "https://www.cell.com/cell/current.rss" {
+			t.Fatalf("unexpected feed url: %q", pending.FeedURL)
+		}
+		return nil
+	}
+	handler := NewServer(testSettings(root), nil).Handler()
+
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run launch = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	var runPayload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(runRecorder.Body.Bytes(), &runPayload); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
+	pending, ok := pendingVerificationForJob(runPayload.Job.ID, "https://www.cell.com/cell/current.rss")
+	if !ok {
+		t.Fatalf("expected pending verification")
+	}
+
+	startBody := `{"job_id":"` + runPayload.Job.ID + `","feed_url":"https://www.cell.com/cell/current.rss"}`
+	startRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(startRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/start", strings.NewReader(startBody)))
+	if startRecorder.Code != http.StatusOK {
+		t.Fatalf("verification start = %d %s", startRecorder.Code, startRecorder.Body.String())
+	}
+	callbackBody := `{"verification_id":"` + pending.ID + `","status":"aborted","content_type":"","feed_xml":"","error":"Cloudflare challenge was not completed before the window closed."}`
+	callbackRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/callback", strings.NewReader(callbackBody)))
+	if callbackRecorder.Code != http.StatusOK {
+		t.Fatalf("verification callback = %d %s", callbackRecorder.Code, callbackRecorder.Body.String())
+	}
+	waitForJobCompletion(t, runPayload.Job.ID)
+	completedJob, ok := jobByID(runPayload.Job.ID)
+	if !ok {
+		t.Fatalf("job not found")
+	}
+	if completedJob.Status != "completed" {
+		t.Fatalf("unexpected job status: %#v", completedJob)
+	}
+	if completedJob.WarningCount == 0 {
+		t.Fatalf("expected warning count on completed job: %#v", completedJob)
+	}
+}
+
+func TestVerificationCompleteRequiresCallbackXML(t *testing.T) {
+	root := t.TempDir()
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	runOnceFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		if len(opts.FeedBodyOverrides) == 0 {
+			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
+				Requests: []feeds.VerificationRequest{{
+					URL:     "https://www.cell.com/cell/current.rss",
+					Target:  "cloudflare",
+					Reason:  "challenge",
+					Journal: "Cell",
+				}},
+			}
+		}
+		t.Fatalf("did not expect resumed run without callback data")
+		return jobruntime.RunSummary{}, nil
+	}
+	startVerificationFlowFunc = func(_ config.Settings, _ *pendingVerification) error {
 		return nil
 	}
 
@@ -806,36 +957,23 @@ func TestAdminRunWaitsForChemRxivVerificationAndResumes(t *testing.T) {
 	}
 	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
 
-	job, ok := jobByID(runPayload.Job.ID)
-	if !ok || !job.VerificationRequired || job.VerificationTarget != "chemrxiv" {
-		t.Fatalf("unexpected waiting job: %#v", job)
-	}
-
-	startBody := `{"job_id":"` + runPayload.Job.ID + `","feed_url":"https://chemrxiv.org/action/showFeed?type=latest&format=rss"}`
+	startBody := `{"job_id":"` + runPayload.Job.ID + `","feed_url":"https://www.cell.com/cell/current.rss"}`
 	startRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(startRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/start", strings.NewReader(startBody)))
 	if startRecorder.Code != http.StatusOK {
 		t.Fatalf("verification start = %d %s", startRecorder.Code, startRecorder.Body.String())
 	}
-	if launchedVerificationID == "" {
-		t.Fatalf("expected verification helper launch")
-	}
 
-	callbackBody := `{"verification_id":"` + launchedVerificationID + `","status":"success","content_type":"application/xml","feed_xml":"<rdf:RDF />"}`
-	callbackRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(callbackRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/callback", strings.NewReader(callbackBody)))
-	if callbackRecorder.Code != http.StatusOK {
-		t.Fatalf("verification callback = %d %s", callbackRecorder.Code, callbackRecorder.Body.String())
+	completeBody := `{"job_id":"` + runPayload.Job.ID + `","feed_url":"https://www.cell.com/cell/current.rss"}`
+	completeRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(completeRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/complete", strings.NewReader(completeBody)))
+	if completeRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("verification complete = %d %s", completeRecorder.Code, completeRecorder.Body.String())
 	}
-
-	waitForJobCompletion(t, runPayload.Job.ID)
-	completedJob, ok := jobByID(runPayload.Job.ID)
-	if !ok || completedJob.Status != "completed" {
-		t.Fatalf("unexpected completed job: %#v", completedJob)
+	if !contains(completeRecorder.Body.String(), "has not returned RSS XML yet") {
+		t.Fatalf("unexpected verification complete error: %s", completeRecorder.Body.String())
 	}
-	if runCalls != 2 {
-		t.Fatalf("runCalls = %d", runCalls)
-	}
+	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
 }
 
 func waitForJobCompletion(t *testing.T, jobID string) {
@@ -852,6 +990,20 @@ func waitForJobCompletion(t *testing.T, jobID string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("job %s did not complete in time", jobID)
+}
+
+func waitForJobTerminalStatus(t *testing.T, jobID string) jobInfo {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		job, ok := jobByID(jobID)
+		if ok && (job.Status == "completed" || job.Status == "failed") {
+			return job
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("job %s did not reach a terminal status in time", jobID)
+	return jobInfo{}
 }
 
 func waitForJobStatus(t *testing.T, jobID string, status string) {
