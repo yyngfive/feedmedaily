@@ -12,8 +12,11 @@ import (
 
 type verifierConfig struct {
 	VerificationID string
+	JobID          string
 	FeedURL        string
 	CallbackURL    string
+	LogsDir        string
+	AppVersion     string
 	UserDataDir    string
 }
 
@@ -23,15 +26,21 @@ func parseArgs(args []string) (verifierConfig, error) {
 
 	var cfg verifierConfig
 	fs.StringVar(&cfg.VerificationID, "verification-id", "", "Pending verification request ID.")
+	fs.StringVar(&cfg.JobID, "job-id", "", "Owning job ID for log correlation.")
 	fs.StringVar(&cfg.FeedURL, "feed-url", "", "Protected feed URL that needs manual verification.")
 	fs.StringVar(&cfg.CallbackURL, "callback-url", "", "Local callback endpoint that receives RSS XML.")
+	fs.StringVar(&cfg.LogsDir, "logs-dir", "", "Base logs directory for verifier-local diagnostics.")
+	fs.StringVar(&cfg.AppVersion, "app-version", "", "FeedMeDaily version string for diagnostics.")
 	if err := fs.Parse(args); err != nil {
 		return verifierConfig{}, err
 	}
 
 	cfg.VerificationID = strings.TrimSpace(cfg.VerificationID)
+	cfg.JobID = strings.TrimSpace(cfg.JobID)
 	cfg.FeedURL = strings.TrimSpace(cfg.FeedURL)
 	cfg.CallbackURL = strings.TrimSpace(cfg.CallbackURL)
+	cfg.LogsDir = strings.TrimSpace(cfg.LogsDir)
+	cfg.AppVersion = strings.TrimSpace(cfg.AppVersion)
 	if cfg.VerificationID == "" {
 		return verifierConfig{}, fmt.Errorf("--verification-id is required")
 	}

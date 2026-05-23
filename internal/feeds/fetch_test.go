@@ -931,3 +931,34 @@ func TestFetchAllLeavesScienceDirectPaperWithoutDOIForLaterEnrichment(t *testing
 		t.Fatalf("unexpected abstract: %#v", paper)
 	}
 }
+
+func TestParseFeedBodyUnwrapsHTMLWrappedRDFPreview(t *testing.T) {
+	body := []byte(`<!doctype html>
+<html>
+  <body>
+    &lt;?xml version="1.0" encoding="UTF-8"?&gt;
+    &lt;rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"&gt;
+      &lt;channel&gt;
+        &lt;title&gt;ChemRxiv&lt;/title&gt;
+      &lt;/channel&gt;
+      &lt;item&gt;
+        &lt;title&gt;Wrapped Feed Item&lt;/title&gt;
+        &lt;link&gt;https://chemrxiv.org/engage/chemrxiv/article-details/123&lt;/link&gt;
+        &lt;dc:identifier xmlns:dc="http://purl.org/dc/elements/1.1/"&gt;10.26434/chemrxiv-123&lt;/dc:identifier&gt;
+        &lt;dc:date xmlns:dc="http://purl.org/dc/elements/1.1/"&gt;2026-05-23&lt;/dc:date&gt;
+      &lt;/item&gt;
+    &lt;/rdf:RDF&gt;
+  </body>
+</html>`)
+
+	papers, err := parseFeedBody("https://chemrxiv.org/action/showFeed?type=latest&format=rss", 0, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(papers) != 1 {
+		t.Fatalf("papers = %d", len(papers))
+	}
+	if papers[0].Title != "Wrapped Feed Item" {
+		t.Fatalf("unexpected paper: %#v", papers[0])
+	}
+}

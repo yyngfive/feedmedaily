@@ -24,6 +24,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
+	app.logger.info("startup", "Starting the Wails verifier window process.", nil)
 
 	runErr := wails.Run(&options.App{
 		Title:         "Feed Verification",
@@ -46,8 +47,15 @@ func main() {
 		},
 	})
 	if runErr != nil {
+		app.logger.error("run_failed", "The verifier window process failed before it could finish.", runErr.Error(), nil)
 		_ = app.reportFailure(fmt.Sprintf("verification window failed to start: %v", runErr))
+		app.logger.info("process_exiting", "The verifier process is exiting after a Wails startup failure.", map[string]any{
+			"success": false,
+		})
 		fmt.Fprintln(os.Stderr, runErr.Error())
 		os.Exit(1)
 	}
+	app.logger.info("process_exiting", "The verifier process is exiting after the Wails app returned.", map[string]any{
+		"success": true,
+	})
 }

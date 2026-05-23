@@ -11,6 +11,7 @@ Changes since `0.2.1`:
 ### Added
 
 - Added a Windows-only Wails verification window for Cloudflare-protected feeds. Protected RSS jobs can now pause for manual verification, capture RDF/XML directly inside that dedicated WebView2 session, and resume the same run after the verifier posts the captured feed back to the local backend.
+- Added dedicated verifier-side local logging for protected-feed verification sessions, so release builds now record verifier startup, XML capture, backend callback, close-phase, and process-exit diagnostics in the user log directory.
 
 ### Fixed
 
@@ -18,6 +19,7 @@ Changes since `0.2.1`:
 - Fixed the review sidebar `Last Update` label so it no longer changes on page refresh or job polling. The UI now shows the latest real feed refresh timestamp derived from stored paper fetch metadata, rather than the time when `/api/report/latest` was read.
 - Hardened RSS fetching against intermittent upstream blocking by adding richer request headers, limited retry handling for `403`/`429`/`5xx`, and challenge-page detection without relying on the old Windows-only platform fetch fallback.
 - Improved RSS metadata extraction across publisher-specific feeds, including bioRxiv author parsing, ACS TOC graphic fallback, and detailed Elsevier/ScienceDirect `description` parsing for author/date/source metadata.
+- Fixed protected-feed verifier callback handling so duplicate XML callbacks are ignored cleanly, HTML-wrapped XML previews no longer fall through as unsupported `html` roots, and release-mode verifier windows now close reliably even when WebView2 does not perform a clean shutdown on its own.
 
 ### Changed
 
@@ -25,6 +27,7 @@ Changes since `0.2.1`:
 - Changed metadata enrichment so already-complete RSS entries no longer trigger routine OpenAlex/Crossref lookups; external metadata is now requested only when DOI, authors, journal, or usable abstract content is missing.
 - Changed admin run-job behavior so Cloudflare-protected feeds can move into a `waiting_for_user` state instead of failing immediately when manual verification is required.
 - Replaced the earlier experimental Edge/C# verification helpers with a single Go-built verifier binary, and wired source builds, release packaging, and installer output to include `FeedMeDailyVerifier.exe`.
+- Changed the protected-feed recovery flow so the verifier window now opens automatically, captures feed XML automatically when the protected page resolves, and lets the run continue with a fetch warning if verification never returns usable XML instead of forcing the whole job to fail.
 
 ## 0.2.1 (2026-05-21)
 

@@ -1065,7 +1065,13 @@ func (s *Server) handleFeedVerificationCallback(w http.ResponseWriter, r *http.R
 		return
 	}
 	if !stored {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "verification_id": pending.ID, "duplicate": true})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":              true,
+			"verification_id": pending.ID,
+			"acknowledged":    true,
+			"close_window":    result.Status == "success",
+			"duplicate":       true,
+		})
 		return
 	}
 
@@ -1087,6 +1093,20 @@ func (s *Server) handleFeedVerificationCallback(w http.ResponseWriter, r *http.R
 	if markVerificationDelivered(pending.ID) {
 		if result.Status == "success" {
 			logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification data captured. Resuming RSS fetch.", "", logData)
+			go func(logsDir string, jobID string, verificationID string, feedURL string, journal string) {
+				time.Sleep(2 * time.Second)
+				process, ok := snapshotVerifierProcess(verificationID)
+				if !ok || process.Exited {
+					return
+				}
+				logJobEvent(logsDir, &jobInfo{ID: jobID}, "warning", "verification_process_still_running", "pipeline.feeds.verification_required", "Verifier window is still running after the backend acknowledged the XML callback.", "", map[string]any{
+					"verification_id":         verificationID,
+					"verification_feed_url":   feedURL,
+					"verification_journal":    journal,
+					"verification_pid":        process.PID,
+					"verification_started_at": process.StartedAt.Format(time.RFC3339Nano),
+				})
+			}(s.settings.LogsDir, pending.JobID, pending.ID, pending.FeedURL, pending.Journal)
 		}
 		select {
 		case pending.Result <- result:
@@ -1094,7 +1114,12 @@ func (s *Server) handleFeedVerificationCallback(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "verification_id": pending.ID})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":              true,
+		"verification_id": pending.ID,
+		"acknowledged":    true,
+		"close_window":    result.Status == "success",
+	})
 }
 
 func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {

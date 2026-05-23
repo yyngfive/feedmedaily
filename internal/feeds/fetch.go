@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"strings"
 	"time"
@@ -103,6 +104,7 @@ type feedRootProbe struct {
 }
 
 func parseFeedBody(sourceURL string, attempt int, body []byte) ([]store.Paper, error) {
+	body = normalizeFeedBody(body)
 	format, rootName, err := detectFeedFormat(body)
 	if err != nil {
 		return nil, err
@@ -146,6 +148,51 @@ func parseFeedBody(sourceURL string, attempt int, body []byte) ([]store.Paper, e
 		})
 		return []store.Paper{}, nil
 	}
+}
+
+func normalizeFeedBody(body []byte) []byte {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return body
+	}
+	if snippet := extractEmbeddedFeedXML(trimmed); snippet != "" {
+		return []byte(snippet)
+	}
+	return body
+}
+
+func extractEmbeddedFeedXML(raw string) string {
+	candidates := []string{raw, html.UnescapeString(raw)}
+	prefixes := []string{"<?xml", "<rss", "<feed", "<rdf:rdf"}
+	for _, candidate := range candidates {
+		trimmed := strings.TrimSpace(candidate)
+		if trimmed == "" {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		start := -1
+		for _, prefix := range prefixes {
+			idx := strings.Index(lower, prefix)
+			if idx >= 0 && (start == -1 || idx < start) {
+				start = idx
+			}
+		}
+		if start < 0 {
+			continue
+		}
+		snippet := strings.TrimSpace(trimmed[start:])
+		if len(snippet) < 32 {
+			continue
+		}
+		snippetLower := strings.ToLower(snippet)
+		if strings.Contains(snippetLower, "<item") ||
+			strings.Contains(snippetLower, "<entry") ||
+			strings.Contains(snippetLower, "<channel") ||
+			strings.Contains(snippetLower, "<rdf:rdf") {
+			return snippet
+		}
+	}
+	return ""
 }
 
 func feedOverrideBody(url string, overrides map[string][]byte) ([]byte, bool) {

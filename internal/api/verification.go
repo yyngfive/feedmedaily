@@ -350,3 +350,14 @@ func markVerificationDelivered(id string) bool {
 	pending.Delivered = true
 	return true
 }
+
+func verificationDeliveryState(id string) (callbackReceived bool, delivered bool) {
+	apiVerifications.mu.Lock()
+	defer apiVerifications.mu.Unlock()
+
+	pending, ok := apiVerifications.items[id]
+	if !ok {
+		return false, false
+	}
+	return pending.CallbackReceived, pending.Delivered
+}
