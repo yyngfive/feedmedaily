@@ -12,7 +12,7 @@ export function PaperListSection({
   needsFeedSetup,
   onOpenAdmin,
   onResetFilters,
-  onRunFetchAndClassify,
+  onRunSync,
   onSelectPaper,
   onStartFeedSetup,
   papers,
@@ -29,7 +29,7 @@ export function PaperListSection({
   needsFeedSetup: boolean;
   onOpenAdmin: () => void;
   onResetFilters: () => void;
-  onRunFetchAndClassify: () => void;
+  onRunSync: () => void;
   onSelectPaper: (paper: Paper) => void;
   onStartFeedSetup: () => void;
   papers: Paper[];
@@ -90,7 +90,7 @@ export function PaperListSection({
         <EmptyStateCard
           eyebrow="Feed setup"
           title="Add RSS feeds before reviewing papers"
-          body="No RSS feed subscriptions are saved yet. Open Admin, add one or more journal feeds, save them, and then run fetch manually or wait for your scheduled job."
+          body="No RSS feed subscriptions are saved yet. Open Admin, add one or more journal feeds, save them, and then run a sync manually or wait for your scheduled job."
           actions={
             <>
               <Button size="sm" variant="secondary" onPress={onStartFeedSetup}>
@@ -106,11 +106,11 @@ export function PaperListSection({
         <EmptyStateCard
           eyebrow="Waiting for fetch"
           title="Feeds are ready, but no papers have been fetched yet"
-          body="Save is complete. You can run a manual fetch right now, or let your scheduled task populate the library automatically."
+          body="Save is complete. You can run a sync right now, or let your scheduled task populate the library automatically."
           actions={
             <>
-              <Button size="sm" variant="secondary" onPress={onRunFetchAndClassify}>
-                Run fetch + classify
+              <Button size="sm" variant="secondary" onPress={onRunSync}>
+                Sync now
               </Button>
               <Button size="sm" variant="outline" onPress={onOpenAdmin}>
                 Open admin

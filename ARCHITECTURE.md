@@ -2,166 +2,79 @@
 
 ## Overview
 
-FeedMeDaily is the public Windows release name for this single-user literature triage application. The internal Python package name remains `scirssagent`. The app is built around a local SQLite database, a profile-driven paper classifier, a Go tray manager for runtime control, and a Go backend that owns the production web/API surface. The Python package remains as a reference implementation and regression baseline.
+FeedMeDaily is a local-first literature triage app for journal RSS feeds. The current product is built around a Go backend service, a Windows tray runtime, a React review UI, a local SQLite database, and profile-driven LLM classification.
 
 ## Repository Structure
 
-- `src/scirssagent/`: Python reference pipeline, API, storage, and CLI helpers
-- `cmd/feedmedailyd/`: Go backend service entrypoint
-- `cmd/feedmedaily-tray/`: first-stage Go tray entrypoint for Windows runtime management
-- `cmd/feedmedaily-verifier/`: Windows-only Wails verification window used for Cloudflare-protected feeds
-- `internal/api/`: Go HTTP compatibility layer for app/report metadata, tray-facing control routes, migrated storage-backed APIs, background jobs, and static UI serving
-- `internal/classifier/`: Go-side OpenAI-compatible batch classifier with title-translation fallback and automatic thinking-disable retry on provider timeout/reasoning failures
-- `internal/config/`: early Go settings and path resolution layer
-- `internal/jobs/`: Go-side run-once orchestration, reclassify orchestration, and background-job helpers
-- `internal/metadata/`: Go-side metadata enrich logic for DOI/OpenAlex/Crossref lookups during reclassify, now used as a field-completion layer instead of a default second-pass lookup for already-complete RSS entries
-- `internal/profile/`: Go-side profile JSON validation, load, and persisted write helpers
-- `internal/runtime/`: shared Go runtime helpers for app mode, paths, version, ports, and runtime state
-- `internal/store/sqlite/`: Go-side SQLite access for reports, feedback, profile proposals, paper read-state, and local Zotero status writes
-- `internal/trayapp/`: Go tray runtime, command orchestration, scheduling, and autostart code
-- `tests/`: backend tests
-- `web/`: Vite + React + TypeScript UI
-- `data/rss_feeds.json`: structured RSS feed subscriptions used by the app
-- `data/literature.sqlite`: local paper database
-- `data/classification_profile.json`: active user classification profile (local only, Git-ignored)
-- `logs/YYYY-MM-DD.log`: daily run logs in the legacy readable text format
+- `cmd/feedmedailyd/`: production Go backend entrypoint
+- `cmd/feedmedaily-tray/`: Windows tray runtime entrypoint
+- `cmd/feedmedaily-verifier/`: Windows-only protected-feed verifier window
+- `internal/api/`: HTTP API handlers, job endpoints, verification endpoints, and static asset serving
+- `internal/classifier/`: Go classifier client, prompt shaping, and thinking-fallback handling
+- `internal/config/`: settings schema, local config editing, and path resolution
+- `internal/feeds/`: feed fetch client, generic RSS/Atom/RDF parser, and publisher-specific extractors
+- `internal/jobs/`: sync pipeline, reclassify flows, and background job orchestration
+- `internal/metadata/`: conditional metadata enrichment via DOI/OpenAlex/Crossref lookups
+- `internal/profile/`: profile validation, generation, and persistence helpers
+- `internal/runtime/`: shared runtime paths, version, mode, process, and app metadata helpers
+- `internal/store/sqlite/`: SQLite persistence for papers, classifications, feedback, proposals, and Zotero status
+- `internal/trayapp/`: tray lifecycle, scheduling, backend supervision, and autostart
+- `internal/zotero/`: Zotero Web API integration
+- `web/`: Vite + React + TypeScript frontend
 
-The production path is:
+Legacy reference files still remain in the repository for comparison and regression work, but they are not part of the current product workflow.
 
-1. RSS feed subscriptions are stored in `data/rss_feeds.json`.
-2. The backend fetches feed entries through a layered feed pipeline: generic HTTP client, generic RSS/Atom/RDF parser, and a small set of publisher-specific local extractors.
+## Production Flow
+
+1. Feed subscriptions are stored in `data/rss_feeds.json`.
+2. `feedmedailyd` fetches feed content through a layered Go pipeline: HTTP client, generic RSS/Atom/RDF parser, and publisher-specific extractors.
 3. Papers are deduplicated and upserted into `data/literature.sqlite`.
-4. Papers that need classification are enriched with metadata only when core fields such as DOI, authors, journal, or usable abstract content are missing.
-5. The classifier model scores papers against the active `data/classification_profile.json`.
-6. Classifications, feedback, profile proposals, and Zotero save state are persisted in SQLite.
-7. `feedmedailyd` serves the built React app from `web/dist` and exposes JSON APIs for the UI.
-8. The latest report is assembled from SQLite through `/api/report/latest`.
-9. On the Go migration path, read-only report/profile/feedback/proposal APIs can now be rebuilt directly from SQLite and the profile JSON instead of replaying disk report snapshots.
-10. On the current Go migration branch, report/profile/feedback/proposal reads, local-state writes, feed fetching/parsing, full `run --once`, reclassify/classifier execution, profile bootstrap/proposal generation, and Zotero collection/save flows all run inside Go.
+4. Metadata enrichment runs only when core fields such as DOI, authors, journal, or usable abstract content are missing.
+5. The classifier evaluates papers against the active `data/classification_profile.json`.
+6. Classifications, feedback, profile proposals, and Zotero save status are persisted in SQLite.
+7. `feedmedailyd` serves `web/dist` and exposes the local JSON API surface.
+8. The UI reads the latest report through `/api/report/latest`, rebuilt from SQLite-backed state rather than replayed from disk report snapshots.
 
 ## Runtime Surfaces
 
-### Python reference app
-
-`src/scirssagent/server.py` is retained as a legacy/reference local application surface.
-
-It is still useful for:
-
-- regression comparison against the Go service
-- preserving the old Python behavior as a readable reference implementation
-- targeted debugging when comparing Go and Python outputs
-
-It is no longer the supported production backend for this branch.
-
 ### Go backend service
 
-`cmd/feedmedailyd/` is the production Go backend entrypoint.
+`cmd/feedmedailyd/` is the supported local backend for source mode and packaged builds. It owns:
 
-It currently owns the compatibility boundary, local-state write paths, and the first native decision-engine migration slice:
+- app/runtime endpoints such as `/api/app/health`, `/api/app/meta`, `/api/app/update`, `/api/app/open`, and `/api/app/exit`
+- settings endpoints for config, feeds, and scheduler
+- report, feedback, paper-read, and profile proposal APIs
+- profile bootstrap, proposal generation, proposal apply/reject, and reclassify flows
+- Zotero collection listing and save flows
+- admin job endpoints including sync and reclassify
+- protected-feed verification start, callback, and completion endpoints
+- static React asset serving and SPA fallback
 
-- `/api/report/latest` via Go-side live SQLite reads
-- `/api/app/health`
-- `/api/app/meta`
-- `/api/app/update`
-- `/api/app/open`
-- `/api/app/exit`
-- `/api/settings/config`
-- `/api/settings/feeds`
-- `/api/settings/scheduler`
-- `/api/profile/current` via Go-side profile JSON validation and load
-- `/api/profile/bootstrap` via Go-side profile generation and proposal persistence
-- `/api/feedback` via Go-side SQLite read/write access
-- `/api/feedback/{id}` via Go-side SQLite delete
-- `/api/papers/{id}/read` via Go-side SQLite write
-- `/api/profile/proposals` via Go-side SQLite read access
-- `/api/profile/proposals/generate` via Go-side feedback-context collection and profile proposal generation
-- `/api/profile/proposals/{id}` via Go-side SQLite read access
-- `/api/profile/proposals/{id}/apply` via Go-side profile/SQLite writes plus Go-side reclassify/report rebuild
-- `/api/profile/proposals/{id}/reject` via Go-side SQLite write
-- `/api/zotero/collections` via Go-side Zotero Web API integration
-- `/api/zotero/save/{paper_id}` via Go-side Zotero Web API integration plus SQLite status writes
-- `/api/admin/run` via Go-side fetch -> ingest -> metadata -> classifier -> report refresh pipeline
-- `/api/admin/reclassify` via Go-side metadata enrich + classifier + report refresh
-- `/api/admin/report/latest`
-- `/api/admin/jobs`
-- `/api/feeds/verification/start`
-- `/api/feeds/verification/callback`
-- `/api/feeds/verification/complete`
-- React static asset serving and SPA fallback from `web/dist`
+`Run Sync Now` is fully owned by Go end-to-end: feed fetch, ingest, conditional metadata enrichment, classification, report refresh, and background job state all run through `feedmedailyd`.
 
-The Go service now owns `Run Sync Now` end-to-end, including feed fetching/parsing, SQLite ingest, conditional metadata enrich, classifier execution, report refresh, and Zotero collection/save integration. Python remains as a reference implementation and compatibility shell for regression comparison.
+### Protected-feed verification
 
-The Go feed path is intentionally layered:
+Cloudflare-protected or challenge-gated feeds use a Windows-only verification assist flow:
 
-- feed client: request headers, retry policy, and challenge-page detection
-- generic parser: RSS 2.0, Atom, and RDF-backed RSS normalization into `Paper`
-- publisher extractors: a small set of feed-local rules such as Nature prefix cleanup, RSS author normalization, Elsevier `description` extraction, and ACS TOC graphic retention
+- a fetch job can move to `waiting_for_user` when the backend detects a challenge page or a Cloudflare-style `403`
+- the UI opens `feedmedaily-verifier`, a dedicated verifier window with its own temporary WebView2 session
+- once the protected page resolves to RSS/Atom/RDF content, the verifier POSTs the captured XML back to `/api/feeds/verification/callback`
+- the backend resumes the paused job by injecting that XML into the normal Go feed parser
 
-External metadata requests are not part of feed parsing. OpenAlex and Crossref remain in the metadata layer and are only consulted when fetched feed content is still missing core fields.
+This verifier session is intentionally temporary and non-persistent. Its WebView2 user-data directory is scoped to the current verification step and removed on exit.
 
-For Cloudflare-protected feeds, the Go runtime now has a Windows-only manual verification path:
+### Windows tray runtime
 
-- when feed fetching encounters a Cloudflare challenge or Cloudflare-backed `403`, the current `run` job moves to `waiting_for_user`
-- the UI can open a dedicated Wails verification window
-- that verifier window hosts its own WebView2 session, loads the protected feed URL, and keeps probing the page until RDF/XML becomes available
-- once the page resolves to RSS/Atom/RDF content, the verifier window POSTs the captured XML back to `/api/feeds/verification/callback`
-- the user then confirms completion in the main app, and the backend resumes the paused run by injecting the returned XML into the existing feed parser
-
-This verification flow is intentionally session-local and non-persistent. The verifier window uses its own temporary WebView2 user-data directory for the current verification step only, and removes that directory when the verifier exits.
-
-### CLI
-
-`src/scirssagent/cli.py` is a thin operational entrypoint for:
-
-- `run --once`
-- `report latest`
-- `zotero collections`
-- `zotero save`
-- `serve` as a legacy Python reference server
-- scheduler commands
-- `reclassify`
-
-The CLI is intentionally kept smaller than the app surface and should only contain operational commands that are part of the maintained product workflow.
-
-### Go tray manager
-
-`cmd/feedmedaily-tray/` is the phase-1 Windows runtime shell.
-
-It is responsible for:
+`cmd/feedmedaily-tray/` is the Windows app shell. It is responsible for:
 
 - single-instance tray lifecycle
-- ensuring the local backend service is available while the tray is active
+- ensuring the local backend is available while the tray is active
 - opening the browser UI
 - triggering `Run Sync Now`
 - launch-at-login
-- a tray-owned local daily timer
+- tray-owned local daily scheduling
 
-On the Go migration branch, the tray is wired directly to the Go backend path. It expects `feedmedailyd.exe` in release builds and builds a local cached backend binary in source mode.
-
-The Windows release packaging path includes the tray executable and points installer shortcuts at it. The Go service is the supported backend runtime for release and source-mode product use.
-
-## Core Backend Modules
-
-- `src/scirssagent/config.py`
-  Loads environment-based settings, resolves project-local paths, and manages editable local `.env` fields with source-aware precedence (`system environment` over project `.env` over built-in defaults).
-- `src/scirssagent/feeds.py`
-  Legacy reference implementation for feed subscriptions, RSS/Atom fetching, and feed-item normalization. The production `run --once` path is now owned by Go.
-- `src/scirssagent/metadata.py`
-  Enriches papers with DOI and metadata lookups.
-- `src/scirssagent/profiles.py`
-  Reads, validates, and writes the active classification profile.
-- `src/scirssagent/classifier.py`
-  Builds prompts from the profile and classifies papers with the classifier model.
-- `src/scirssagent/services.py`
-  Handles the Python-side reference implementations for profile-generation prompts and Zotero Web API integration.
-- `src/scirssagent/storage.py`
-  Owns SQLite persistence for papers, classifications, feedback, proposals, and Zotero status.
-- `src/scirssagent/pipeline.py`
-  Legacy reference implementation for the old Python pipeline. The production `run --once` path is now owned by Go-side jobs and report refresh.
-- `src/scirssagent/reporting.py`
-  Builds report payloads, writes JSON outputs, and publishes the static report bundle.
-- `src/scirssagent/models.py`
-  Defines shared Pydantic/domain models used across API, pipeline, and storage boundaries.
+Packaged builds ship the tray executable as the primary desktop entrypoint. In source mode, the tray builds or launches the local Go backend as needed.
 
 ## Data Model And State
 
@@ -186,17 +99,19 @@ Each role can use its own API key and base URL:
 - `SCIRSS_CLASSIFIER_API_KEY` / `SCIRSS_CLASSIFIER_BASE_URL`
 - `SCIRSS_PROFILE_API_KEY` / `SCIRSS_PROFILE_BASE_URL`
 
-The code owns the task shell and response schema. User interest boundaries, taxonomy, notes, and few-shot guidance live in the profile file.
+The code owns the prompt shell and response schema. User interest boundaries, topic taxonomy, notes, and few-shot guidance live in the profile file.
 
-The current Go classifier path does not emit paper-level topic tags. It stores relevance, confidence, reason, recommended action, and translated title, while the profile file may still retain taxonomy metadata for future use.
+The current classification path stores relevance, confidence, reason, recommended action, and translated title. It does not emit paper-level topic tags.
 
-Both configurable LLM roles can request provider thinking mode. If a request fails with timeout, reasoning-mode, or gateway-style errors, the Go path retries once with `thinking=disabled`.
+Both model roles can request provider thinking mode. If a request fails with timeout, gateway-style, or reasoning-mode errors, the runtime retries once with `thinking=disabled`.
 
-Editable configuration is exposed in the UI, but secret values are still handled as local-only state:
+### Configuration handling
 
-- secret fields are written only to the local project `.env`
-- secret fields are never echoed back to the frontend in plain text
-- the UI shows whether a value comes from the project `.env`, the system environment, or a built-in default
+Editable local configuration is exposed through the UI:
+
+- secret values are written only to local config storage
+- secrets are never echoed back to the frontend in plain text
+- each field reports whether its value comes from local config, the system environment, or a built-in default
 
 ## UI Architecture
 
@@ -208,23 +123,22 @@ The main app uses a three-column layout:
 
 Behavioral baseline:
 
-- if no profile exists, onboarding is shown first and also includes local configuration editing
-- if a profile exists but no feeds exist, the app opens the feed-initialization empty state
+- if no profile exists, onboarding is shown first and includes local configuration editing
+- if a profile exists but no feeds exist, the app switches into a feed-initialization empty state
 - the default review view is `Unread + Last 30 days`
-- paper cards remain summary-only
+- paper cards stay summary-only
 - paper actions live in the detail panel
-- admin owns local configuration editing, feed editing, manual jobs, feedback review, and profile proposal review
-- the settings/admin surface is split into tabs for configuration, feeds, and profile-plus-feedback review
+- admin owns configuration editing, feed editing, manual jobs, feedback review, and profile proposal review
 
 ## Profile Lifecycle
 
 1. The user describes research interests during onboarding.
-2. The profile model creates an initial profile proposal.
+2. The profile model generates an initial profile proposal.
 3. The user applies the proposal.
 4. The applied profile is written to `data/classification_profile.json`.
 5. Future classifications use that profile.
-6. User feedback can trigger new full-profile proposals.
-7. Applying a proposal reclassifies only papers linked to the proposal feedback.
+6. User feedback can generate new full-profile proposals.
+7. Applying a proposal reclassifies only papers linked to that proposal feedback.
 
 Supported admin reclassification scopes:
 
@@ -234,10 +148,10 @@ Supported admin reclassification scopes:
 
 ## Reporting
 
-The supported report read path is the live `/api/report/latest` API backed by SQLite.
+The supported report read path is the live `/api/report/latest` API backed by SQLite and current profile state.
 
-Legacy disk report artifacts under `reports/` are now compatibility/export leftovers from the Python era and are no longer the primary source of truth for the app UI or runtime verification.
+Legacy disk report artifacts under `reports/` remain compatibility or export leftovers. They are no longer the primary source of truth for the app UI or runtime verification.
 
 ## Maintenance Rule
 
-When architecture, runtime boundaries, primary workflows, or ownership between modules changes, update this file in the same change.
+When runtime boundaries, ownership between modules, or primary user workflows change, update this file in the same change.

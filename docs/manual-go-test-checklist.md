@@ -51,7 +51,6 @@ pnpm --dir web build
 - `/api/app/*`
 - `/api/settings/feeds`
 - `/api/settings/scheduler`
-- `/api/admin/report/latest`
 - 无 profile 时的 onboarding UI
 
 #### B. 需要分类/画像模型配置
@@ -69,9 +68,8 @@ pnpm --dir web build
 
 - `Generate initial profile`
 - `Generate profile proposal`
-- `Run fetch + classify`
+- `Sync now`
 - `Reclassify recent / feedback / all`
-- `--run-once`
 
 #### C. 需要 Zotero 配置
 
@@ -85,8 +83,6 @@ pnpm --dir web build
 
 - `/api/zotero/collections`
 - `/api/zotero/save/{paper_id}`
-- `--zotero-collections`
-- `--zotero-save`
 
 ## 3. 建议的测试顺序
 
@@ -98,7 +94,7 @@ pnpm --dir web build
 4. 配置模型设置
 5. 添加 RSS feeds
 6. 生成初始 profile
-7. 跑一次 `Run fetch + classify`
+7. 跑一次 `Sync now`
 8. 在右侧详情区测试 `Mark as read` / `Mark wrong`
 9. 在 Admin 里测试 `Generate proposal`
 10. 测试 `Apply` 或 `Reject`
@@ -188,79 +184,21 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 - `runtime.json` 被写入
 - `/api/app/meta` 返回 `process_running = true`
 
-### 6.1.2 重新组装最新报告摘要
+### 6.1.2 daemon 只负责服务启动
 
 ```powershell
-go run .\cmd\feedmedailyd --root . --report-latest
+go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 ```
 
 预期结果：
 
-- 命令退出
-- 输出 JSON，类似：
+- 进程保持运行，不会执行一次性 sync 后立即退出
+- `Sync now`、托盘 `Run Sync Now`、以及 Linux helper script 都会通过 `/api/admin/run` 触发后台 job
+- Web UI 可以看到统一的 job 状态
 
-```json
-{"report_papers": 0}
-```
+### 6.1.3 Zotero 相关能力改走 HTTP API
 
-### 6.1.3 跑一次完整同步
-
-```powershell
-go run .\cmd\feedmedailyd --root . --run-once
-```
-
-如果只想小规模测试：
-
-```powershell
-go run .\cmd\feedmedailyd --root . --run-once --max-papers 10
-```
-
-如果想强制重分类 touched papers：
-
-```powershell
-go run .\cmd\feedmedailyd --root . --run-once --max-papers 10 --reclassify
-```
-
-预期结果：
-
-- 输出 JSON summary
-- 包含：
-  - `fetched`
-  - `inserted`
-  - `updated`
-  - `classified`
-  - `errors`
-  - 不再包含任何 report 磁盘路径
-
-### 6.1.4 Zotero collections
-
-```powershell
-go run .\cmd\feedmedailyd --root . --zotero-collections
-```
-
-预期结果：
-
-- 返回 JSON
-- 至少包含：
-  - `collections`
-  - `default_collection_key`
-
-### 6.1.5 Zotero save
-
-```powershell
-go run .\cmd\feedmedailyd --root . --zotero-save --paper-id 1
-```
-
-可选指定 collection：
-
-```powershell
-go run .\cmd\feedmedailyd --root . --zotero-save --paper-id 1 --collection-key ABC123
-```
-
-预期结果：
-
-- 成功时返回 `saved = true`
-- 失败时返回状态 JSON，通常含 `last_error`
+请改用下面第 7.4 节的 `/api/zotero/*` 接口验证，不再通过 `feedmedailyd` 一次性命令参数测试。
 
 ## 6.2 托盘命令和菜单手测
 
@@ -294,7 +232,7 @@ go run .\cmd\feedmedaily-tray --root .
 预期结果：
 
 - 托盘出现提示
-- UI 的 Jobs 区能看到新的 `run` job
+- UI 的 Jobs 区能看到新的 `sync` job
 
 ### 6.2.3 `Quit Tray And Stop Service`
 
@@ -684,7 +622,7 @@ Invoke-RestMethod "$base/api/admin/jobs/$($job.id)"
 
 预期结果：
 
-- job `job_type = run`
+- job `job_type = sync`
 - `status` 会经历 `queued -> running -> completed/failed`
 
 ### 7.5.2 `POST /api/admin/reclassify`
@@ -704,20 +642,13 @@ $job
 - `scope = "feedback"`
 - `scope = "all"`
 
-### 7.5.3 `POST /api/admin/report/latest`
-
-```powershell
-$job = (Invoke-RestMethod "$base/api/admin/report/latest" -Method Post).job
-$job
-```
-
-### 7.5.4 `GET /api/admin/jobs`
+### 7.5.3 `GET /api/admin/jobs`
 
 ```powershell
 Invoke-RestMethod "$base/api/admin/jobs"
 ```
 
-### 7.5.5 `GET /api/admin/jobs/{id}`
+### 7.5.4 `GET /api/admin/jobs/{id}`
 
 ```powershell
 Invoke-RestMethod "$base/api/admin/jobs/$($job.id)"
@@ -791,16 +722,16 @@ Invoke-RestMethod "$base/api/admin/jobs/$($job.id)"
 - UI 显示启用状态
 - 再删除后恢复为未启用
 
-## 8.5 `Run fetch + classify`
+## 8.5 `Sync now`
 
 步骤：
 
 1. 打开 Admin
-2. 点击 `Run fetch + classify`
+2. 点击 `Sync now`
 
 预期结果：
 
-- Jobs 区出现 `run` job
+- Jobs 区出现 `sync` job
 - 依次出现进度：
   - fetching
   - metadata
@@ -964,7 +895,7 @@ Invoke-RestMethod "$base/api/admin/jobs/$($job.id)"
 
 - `/api/app/health`
 - `/api/report/latest`
-- 是否还没跑过 `Run fetch + classify`
+- 是否还没跑过 `Sync now`
 
 ### 10.2 profile 相关按钮报错
 
@@ -1006,7 +937,7 @@ Invoke-RestMethod "$base/api/admin/jobs/$($job.id)"
 4. 设置保存：通过 / 失败
 5. feeds 保存：通过 / 失败
 6. profile bootstrap：通过 / 失败
-7. run fetch + classify：通过 / 失败
+7. Sync now：通过 / 失败
 8. mark as read：通过 / 失败
 9. mark wrong / feedback：通过 / 失败
 10. proposal generate：通过 / 失败

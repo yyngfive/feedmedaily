@@ -263,7 +263,7 @@
 步骤：
 
 1. 打开 `Settings`
-2. 在 `Config` tab 点击 `Run fetch + classify`
+2. 在 `Config` tab 点击 `Sync now`
 
 预期：
 

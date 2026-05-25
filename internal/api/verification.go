@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"fmt"
 	neturl "net/url"
 	"strings"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/yyngfive/scirssagent/internal/config"
 	"github.com/yyngfive/scirssagent/internal/feeds"
-	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
 	"github.com/yyngfive/scirssagent/internal/logging"
 )
 
@@ -21,6 +19,7 @@ type pendingVerification struct {
 	Journal          string
 	Target           string
 	Reason           string
+	CallbackURL      string
 	Result           chan verificationResult
 	Delivered        bool
 	CallbackReceived bool
@@ -46,10 +45,10 @@ var (
 	completeVerificationFlowFunc = completeVerificationFlow
 )
 
-func launchVerificationAwareRunJob(settings config.Settings, run func(progress func(string, string), overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error)) jobInfo {
+func launchVerificationAwareSyncJob(settings config.Settings, run func(progress func(string, string), overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error)) jobInfo {
 	job := jobInfo{
 		ID:         nextJobID(),
-		JobType:    "run",
+		JobType:    "sync",
 		Status:     "queued",
 		MessageKey: "job.started",
 		Message:    "Job queued.",
@@ -69,8 +68,6 @@ func launchVerificationAwareRunJob(settings config.Settings, run func(progress f
 
 	go func() {
 		started := nowFunc().UTC()
-		overrideBodies := map[string][]byte{}
-		skippedFeeds := map[string]string{}
 		logJobEvent(settings.LogsDir, &job, "info", "started", "pipeline.feeds.fetching", "Fetching RSS feeds.", "", nil)
 		updateJob(job.ID, func(current *jobInfo) {
 			current.Status = "running"
@@ -87,31 +84,8 @@ func launchVerificationAwareRunJob(settings config.Settings, run func(progress f
 			})
 		}
 
-		for {
-			result, err := run(progress, overrideBodies, skippedFeeds)
-			if err == nil {
-				warningCount := countWarnings(result)
-				finished := nowFunc().UTC()
-				logJobEvent(settings.LogsDir, &job, "info", "completed", "run.completed", "Completed.", "", result)
-				updateJob(job.ID, func(current *jobInfo) {
-					current.Status = "completed"
-					current.MessageKey = "run.completed"
-					current.Message = summarizeResult("run", result)
-					current.Result = result
-					current.WarningCount = warningCount
-					current.FinishedAt = &finished
-					current.VerificationRequired = false
-					current.VerificationTarget = ""
-					current.VerificationFeedURL = ""
-					current.VerificationJournal = ""
-				})
-				return
-			}
-
-			var verificationErr *jobruntime.VerificationRequiredError
-			if errors.As(err, &verificationErr) && len(verificationErr.Requests) > 0 {
-				request := verificationErr.Requests[0]
-				pending := storePendingVerification(job.ID, request)
+		result, err := runVerificationAwareSync(settings, job.ID, "", progress, run, verificationAwareSyncCallbacks{
+			OnWaiting: func(pending *pendingVerification) {
 				logJobEvent(settings.LogsDir, &job, "warning", "waiting_for_user", "pipeline.feeds.verification_required", "A protected feed requires manual verification.", "", map[string]any{
 					"verification_target":   pending.Target,
 					"verification_feed_url": pending.FeedURL,
@@ -132,53 +106,47 @@ func launchVerificationAwareRunJob(settings config.Settings, run func(progress f
 					current.VerificationFeedURL = pending.FeedURL
 					current.VerificationJournal = pending.Journal
 				})
-
-				if err := startVerificationFlowFunc(settings, pending); err != nil {
-					deletePendingVerification(pending.ID)
-					skippedFeeds[pending.FeedURL] = err.Error()
-					logJobEvent(settings.LogsDir, &job, "warning", "verification_start_failed", "pipeline.feeds.verification_required", "", err.Error(), map[string]any{
-						"verification_feed_url": pending.FeedURL,
-						"verification_journal":  pending.Journal,
-						"verification_target":   pending.Target,
-					})
-					updateJob(job.ID, func(current *jobInfo) {
-						current.Status = "running"
-						current.MessageKey = "pipeline.feeds.fetching"
-						current.Message = "Verification window could not be opened. Skipping that protected feed for this run."
-						current.VerificationRequired = false
-						current.VerificationTarget = ""
-						current.VerificationFeedURL = ""
-						current.VerificationJournal = ""
-					})
-					continue
-				}
+			},
+			OnVerificationStartFailed: func(pending *pendingVerification, err error) {
+				logJobEvent(settings.LogsDir, &job, "warning", "verification_start_failed", "pipeline.feeds.verification_required", "", err.Error(), map[string]any{
+					"verification_feed_url": pending.FeedURL,
+					"verification_journal":  pending.Journal,
+					"verification_target":   pending.Target,
+				})
+				updateJob(job.ID, func(current *jobInfo) {
+					current.Status = "running"
+					current.MessageKey = "pipeline.feeds.fetching"
+					current.Message = "Verification window could not be opened. Skipping that protected feed for this sync."
+					current.VerificationRequired = false
+					current.VerificationTarget = ""
+					current.VerificationFeedURL = ""
+					current.VerificationJournal = ""
+				})
+			},
+			OnVerificationStarted: func(pending *pendingVerification) {
 				logJobEvent(settings.LogsDir, &job, "info", "verification_started", "pipeline.feeds.verification_required", "Opened the feed verification window.", "", map[string]any{
 					"verification_id":       pending.ID,
 					"verification_feed_url": pending.FeedURL,
 					"verification_journal":  pending.Journal,
 				})
-
-				resumeResult := waitForVerification(pending, 20*time.Minute)
-				deletePendingVerification(pending.ID)
-				if strings.TrimSpace(resumeResult.Warning) != "" {
-					skippedFeeds[pending.FeedURL] = resumeResult.Warning
-					logJobEvent(settings.LogsDir, &job, "warning", "verification_skipped", "pipeline.feeds.fetching", "Verification did not return feed XML. Continuing this run without that feed.", resumeResult.Warning, map[string]any{
-						"verification_feed_url": pending.FeedURL,
-						"verification_journal":  pending.Journal,
-						"verification_target":   pending.Target,
-					})
-					updateJob(job.ID, func(current *jobInfo) {
-						current.Status = "running"
-						current.MessageKey = "pipeline.feeds.fetching"
-						current.Message = "Verification was not completed. Continuing this run and recording a fetch warning."
-						current.VerificationRequired = false
-						current.VerificationTarget = ""
-						current.VerificationFeedURL = ""
-						current.VerificationJournal = ""
-					})
-					continue
-				}
-				overrideBodies[pending.FeedURL] = resumeResult.FeedXML
+			},
+			OnVerificationSkipped: func(pending *pendingVerification, resumeResult verificationResult) {
+				logJobEvent(settings.LogsDir, &job, "warning", "verification_skipped", "pipeline.feeds.fetching", "Verification did not return feed XML. Continuing this sync without that feed.", resumeResult.Warning, map[string]any{
+					"verification_feed_url": pending.FeedURL,
+					"verification_journal":  pending.Journal,
+					"verification_target":   pending.Target,
+				})
+				updateJob(job.ID, func(current *jobInfo) {
+					current.Status = "running"
+					current.MessageKey = "pipeline.feeds.fetching"
+					current.Message = "Verification was not completed. Continuing this sync and recording a fetch warning."
+					current.VerificationRequired = false
+					current.VerificationTarget = ""
+					current.VerificationFeedURL = ""
+					current.VerificationJournal = ""
+				})
+			},
+			OnVerificationResumed: func(_ *pendingVerification) {
 				logJobEvent(settings.LogsDir, &job, "info", "verification_resumed", "pipeline.feeds.fetching", "Verification received. Resuming RSS fetch.", "", nil)
 				updateJob(job.ID, func(current *jobInfo) {
 					current.Status = "running"
@@ -189,15 +157,18 @@ func launchVerificationAwareRunJob(settings config.Settings, run func(progress f
 					current.VerificationFeedURL = ""
 					current.VerificationJournal = ""
 				})
-				continue
-			}
-
+			},
+		})
+		if err == nil {
+			warningCount := countWarnings(result)
 			finished := nowFunc().UTC()
-			logJobEvent(settings.LogsDir, &job, "error", "failed", "run.failed", "", err.Error(), nil)
+			logJobEvent(settings.LogsDir, &job, "info", "completed", "sync.completed", "Completed.", "", result)
 			updateJob(job.ID, func(current *jobInfo) {
-				current.Status = "failed"
-				current.MessageKey = "run.failed"
-				current.Error = err.Error()
+				current.Status = "completed"
+				current.MessageKey = "sync.completed"
+				current.Message = summarizeResult("sync", result)
+				current.Result = result
+				current.WarningCount = warningCount
 				current.FinishedAt = &finished
 				current.VerificationRequired = false
 				current.VerificationTarget = ""
@@ -206,20 +177,38 @@ func launchVerificationAwareRunJob(settings config.Settings, run func(progress f
 			})
 			return
 		}
+		finished := nowFunc().UTC()
+		logJobEvent(settings.LogsDir, &job, "error", "failed", "sync.failed", "", err.Error(), nil)
+		updateJob(job.ID, func(current *jobInfo) {
+			current.Status = "failed"
+			current.MessageKey = "sync.failed"
+			current.Error = err.Error()
+			current.FinishedAt = &finished
+			current.VerificationRequired = false
+			current.VerificationTarget = ""
+			current.VerificationFeedURL = ""
+			current.VerificationJournal = ""
+		})
+		return
 	}()
 
 	return job
 }
 
 func storePendingVerification(jobID string, request feeds.VerificationRequest) *pendingVerification {
+	return storePendingVerificationWithCallback(jobID, request, "")
+}
+
+func storePendingVerificationWithCallback(jobID string, request feeds.VerificationRequest, callbackURL string) *pendingVerification {
 	pending := &pendingVerification{
-		ID:      nextJobID(),
-		JobID:   jobID,
-		FeedURL: request.URL,
-		Journal: request.Journal,
-		Target:  request.Target,
-		Reason:  request.Reason,
-		Result:  make(chan verificationResult, 1),
+		ID:          nextJobID(),
+		JobID:       jobID,
+		FeedURL:     request.URL,
+		Journal:     request.Journal,
+		Target:      request.Target,
+		Reason:      request.Reason,
+		CallbackURL: strings.TrimSpace(callbackURL),
+		Result:      make(chan verificationResult, 1),
 	}
 	apiVerifications.mu.Lock()
 	defer apiVerifications.mu.Unlock()

@@ -288,7 +288,7 @@ export async function saveToZotero(
 }
 
 export async function launchAdminJob(
-  path: "/api/admin/run" | "/api/admin/report/latest",
+  path: "/api/admin/run",
 ): Promise<JobInfo> {
   const response = await fetch(path, {method: "POST"});
   if (!response.ok) {

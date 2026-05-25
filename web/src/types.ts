@@ -49,7 +49,6 @@ export type AppMeta = {
   config_dir?: string;
   data_dir: string;
   logs_dir: string;
-  reports_dir: string;
   static_dir: string;
   tray_settings_path?: string | null;
   server_url?: string | null;
@@ -80,7 +79,6 @@ export type AppUpdate = {
 export type AppControlTarget =
   | "data_dir"
   | "logs_dir"
-  | "reports_dir"
   | "install_dir"
   | "server_url"
   | "download_url"
@@ -98,6 +96,9 @@ export type SchedulerSettings = {
   task_name: string;
   mode: string;
   scheduler_backend?: string | null;
+  platform?: string | null;
+  automatic_supported?: boolean;
+  advisory?: string | null;
   scheduled_time?: string | null;
   settings_path?: string | null;
   state?: string | null;

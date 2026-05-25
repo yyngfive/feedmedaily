@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -34,7 +35,7 @@ var (
 	selectReclassifyPaperIDsFunc                                                                                    = jobruntime.SelectPaperIDsForScope
 	reclassifyPaperIDsFunc                                                                                          = jobruntime.ReclassifyPaperIDs
 	rebuildLatestReportFunc                                                                                         = jobruntime.RebuildLatestReport
-	runOnceFunc                                                                                                     = jobruntime.RunOnce
+	runSyncFunc                                                                                                     = jobruntime.RunSync
 	bootstrapProfileFunc                                                                                            = jobruntime.GenerateInitialProfileProposal
 	generateProfileProposalFunc                                                                                     = jobruntime.GenerateProfileProposal
 	listZoteroCollectionsFunc    func(config.Settings) (zoterosvc.CollectionsResponse, error)                       = zoterosvc.ListCollections
@@ -75,7 +76,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/zotero/save/", s.handleZoteroSave)
 	mux.HandleFunc("/api/admin/run", s.handleAdminRun)
 	mux.HandleFunc("/api/admin/reclassify", s.handleAdminReclassify)
-	mux.HandleFunc("/api/admin/report/latest", s.handleAdminReportLatest)
 	mux.HandleFunc("/api/admin/jobs/", s.handleAdminJobByID)
 	mux.HandleFunc("/api/admin/jobs", s.handleAdminJobs)
 	mux.HandleFunc("/api/feeds/verification/start", s.handleFeedVerificationStart)
@@ -144,7 +144,6 @@ func (s *Server) handleAppMeta(w http.ResponseWriter, r *http.Request) {
 		"config_dir":          s.settings.ConfigDir,
 		"data_dir":            s.settings.DataDir,
 		"logs_dir":            s.settings.LogsDir,
-		"reports_dir":         s.settings.ReportsDir,
 		"static_dir":          s.settings.WebDistDir,
 		"tray_settings_path":  filepath.Join(s.settings.ConfigDir, "tray-settings.json"),
 		"server_url":          requestBaseURL(r),
@@ -893,10 +892,10 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	job := launchVerificationAwareRunJob(
+	job := launchVerificationAwareSyncJob(
 		s.settings,
 		func(progress func(string, string), overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error) {
-			summary, err := runOnceFunc(s.settings, jobruntime.RunOptions{
+			summary, err := runSyncFunc(s.settings, jobruntime.RunOptions{
 				FeedBodyOverrides: overrides,
 				SkippedFeeds:      skippedFeeds,
 			}, progress)
@@ -1013,113 +1012,21 @@ func (s *Server) handleFeedVerificationCallback(w http.ResponseWriter, r *http.R
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var payload struct {
-		VerificationID string `json:"verification_id"`
-		Status         string `json:"status"`
-		ContentType    string `json:"content_type"`
-		FeedXML        string `json:"feed_xml"`
-		Error          string `json:"error"`
-	}
+	var payload verificationCallbackPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid JSON body.")
 		return
 	}
-	pending, ok := pendingVerificationByID(payload.VerificationID)
-	if !ok {
-		writeError(w, http.StatusNotFound, "Verification request not found.")
+	ack, err := processVerificationCallback(s.settings, payload)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err.Error())
 		return
 	}
-
-	result := verificationResult{
-		Status:      strings.TrimSpace(payload.Status),
-		ContentType: strings.TrimSpace(payload.ContentType),
-		FeedXML:     []byte(payload.FeedXML),
-	}
-	switch result.Status {
-	case "success":
-		if len(result.FeedXML) == 0 {
-			result.Err = fmt.Errorf("verification callback did not include RSS XML")
-			result.Warning = result.Err.Error()
-		}
-	case "aborted":
-		if strings.TrimSpace(payload.Error) == "" {
-			result.Warning = "the verification window was closed before RSS XML was captured"
-		} else {
-			result.Warning = strings.TrimSpace(payload.Error)
-		}
-	case "failed":
-		if strings.TrimSpace(payload.Error) == "" {
-			result.Warning = "the verification window failed before it could capture RSS XML"
-		} else {
-			result.Warning = strings.TrimSpace(payload.Error)
-		}
-	default:
-		writeError(w, http.StatusBadRequest, "verification status must be success, failed, or aborted.")
-		return
-	}
-
-	var stored bool
-	pending, ok, stored = storeVerificationCallbackResult(payload.VerificationID, result)
-	if !ok {
-		writeError(w, http.StatusNotFound, "Verification request not found.")
-		return
-	}
-	if !stored {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":              true,
-			"verification_id": pending.ID,
-			"acknowledged":    true,
-			"close_window":    result.Status == "success",
-			"duplicate":       true,
-		})
-		return
-	}
-
-	logData := map[string]any{
-		"verification_id":       pending.ID,
-		"verification_feed_url": pending.FeedURL,
-		"verification_journal":  pending.Journal,
-		"verification_status":   result.Status,
-	}
-	if result.ContentType != "" {
-		logData["content_type"] = result.ContentType
-	}
-	if result.Status == "success" {
-		logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_callback_received", "pipeline.feeds.verification_required", "Verification window captured protected feed XML.", "", logData)
-	} else {
-		logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "warning", "verification_callback_failed", "pipeline.feeds.verification_required", "", result.Warning, logData)
-	}
-
-	if markVerificationDelivered(pending.ID) {
-		if result.Status == "success" {
-			logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification data captured. Resuming RSS fetch.", "", logData)
-			go func(logsDir string, jobID string, verificationID string, feedURL string, journal string) {
-				time.Sleep(2 * time.Second)
-				process, ok := snapshotVerifierProcess(verificationID)
-				if !ok || process.Exited {
-					return
-				}
-				logJobEvent(logsDir, &jobInfo{ID: jobID}, "warning", "verification_process_still_running", "pipeline.feeds.verification_required", "Verifier window is still running after the backend acknowledged the XML callback.", "", map[string]any{
-					"verification_id":         verificationID,
-					"verification_feed_url":   feedURL,
-					"verification_journal":    journal,
-					"verification_pid":        process.PID,
-					"verification_started_at": process.StartedAt.Format(time.RFC3339Nano),
-				})
-			}(s.settings.LogsDir, pending.JobID, pending.ID, pending.FeedURL, pending.Journal)
-		}
-		select {
-		case pending.Result <- result:
-		default:
-		}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":              true,
-		"verification_id": pending.ID,
-		"acknowledged":    true,
-		"close_window":    result.Status == "success",
-	})
+	writeJSON(w, http.StatusOK, ack)
 }
 
 func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
@@ -1175,29 +1082,6 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 				"reclassified":  reclassified,
 				"report_papers": reportCount,
 			}, nil
-		},
-	)
-	writeJSON(w, http.StatusOK, map[string]any{"job": job})
-}
-
-func (s *Server) handleAdminReportLatest(w http.ResponseWriter, r *http.Request) {
-	// 从 SQLite 重新组装 latest report 摘要，不再写磁盘 report 产物。
-	if !requireMethod(w, r, http.MethodPost) {
-		return
-	}
-	job := launchLocalJob(
-		s.settings.LogsDir,
-		"report",
-		"job.started",
-		"Job queued.",
-		"pipeline.report.refreshing",
-		"Refreshing the latest report from SQLite.",
-		func(progress func(string, string)) (map[string]any, error) {
-			reportCount, err := rebuildLatestReportFunc(s.settings, progress)
-			if err != nil {
-				return nil, err
-			}
-			return map[string]any{"report_papers": reportCount}, nil
 		},
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})
@@ -1452,7 +1336,6 @@ func resolveAppOpenTarget(settings config.Settings, target string, serverURL str
 	mapping := map[string]string{
 		"data_dir":    settings.DataDir,
 		"logs_dir":    settings.LogsDir,
-		"reports_dir": settings.ReportsDir,
 		"install_dir": settings.AppDir,
 		"server_url":  serverURL,
 	}
@@ -1473,27 +1356,43 @@ func resolveAppOpenTarget(settings config.Settings, target string, serverURL str
 
 func schedulerResponse(settings appruntime.TraySchedulerSettings, mode string, settingsPath string, command string) map[string]any {
 	// 把托盘本地调度设置转成前端现有 scheduler API 的响应格式。
+	automaticSupported := goruntime.GOOS == "windows"
+	advisory := any(nil)
+	if !automaticSupported {
+		advisoryText := "This platform currently only saves the daily sync setting locally. Automatic runs are not started from the Web UI; use cron or another system scheduler instead."
+		if strings.TrimSpace(command) != "" {
+			advisoryText = "This platform currently only saves the daily sync setting locally. Automatic runs are not started from the Web UI; use cron or another system scheduler with the helper command below instead."
+		}
+		advisory = advisoryText
+	}
 	response := map[string]any{
-		"installed":         settings.ScheduleEnabled,
-		"task_name":         appruntime.SchedulerTaskName,
-		"mode":              mode,
-		"scheduler_backend": "tray_local",
-		"scheduled_time":    settings.DailyTime,
-		"settings_path":     settingsPath,
-		"command":           command,
-		"state":             nil,
-		"next_run_time":     nil,
-		"last_run_time":     nil,
-		"last_result":       nil,
+		"installed":           settings.ScheduleEnabled,
+		"task_name":           appruntime.SchedulerTaskName,
+		"mode":                mode,
+		"scheduler_backend":   "tray_local",
+		"scheduled_time":      settings.DailyTime,
+		"settings_path":       settingsPath,
+		"command":             command,
+		"state":               nil,
+		"next_run_time":       nil,
+		"last_run_time":       nil,
+		"last_result":         nil,
+		"platform":            goruntime.GOOS,
+		"automatic_supported": automaticSupported,
+		"advisory":            advisory,
 	}
 	if settings.ScheduleEnabled {
-		response["state"] = "Enabled"
-		if nextRun, ok := nextScheduledRun(settings.DailyTime, nowFunc()); ok {
-			response["next_run_time"] = nextRun.Format(time.RFC3339)
-		}
-		if lastRun, ok := lastScheduledRun(settings.LastRunDate, settings.DailyTime, nowFunc().Location()); ok {
-			response["last_run_time"] = lastRun.Format(time.RFC3339)
-			response["last_result"] = 0
+		if automaticSupported {
+			response["state"] = "Enabled"
+			if nextRun, ok := nextScheduledRun(settings.DailyTime, nowFunc()); ok {
+				response["next_run_time"] = nextRun.Format(time.RFC3339)
+			}
+			if lastRun, ok := lastScheduledRun(settings.LastRunDate, settings.DailyTime, nowFunc().Location()); ok {
+				response["last_run_time"] = lastRun.Format(time.RFC3339)
+				response["last_result"] = 0
+			}
+		} else {
+			response["state"] = "Saved only"
 		}
 	}
 	return response

@@ -47,10 +47,9 @@ export function AdminPanel({
   onReclassifyAll,
   onReclassifyFeedback,
   onReclassifyRecent,
-  onRefreshReport,
   onRejectProposal,
   onRemoveFeed,
-  onRunFeedSync,
+  onRunSync,
   onSaveConfig,
   onSaveProfile,
   onSaveScheduler,
@@ -85,10 +84,9 @@ export function AdminPanel({
   onReclassifyAll: () => void;
   onReclassifyFeedback: () => void;
   onReclassifyRecent: () => void;
-  onRefreshReport: () => void;
   onRejectProposal: (id: number) => void;
   onRemoveFeed: (index: number) => void;
-  onRunFeedSync: () => void;
+  onRunSync: () => void;
   onSaveConfig: (fields: Record<string, SettingsConfigUpdate>) => Promise<void>;
   onSaveProfile: (profile: ClassificationProfile) => Promise<void> | void;
   onSaveScheduler: (dailyTime: string) => Promise<void>;
@@ -115,6 +113,8 @@ export function AdminPanel({
         job.verification_required,
     ) ?? null;
   const [schedulerTime, setSchedulerTime] = React.useState("10:00");
+  const schedulerAdvisory = scheduler?.advisory?.trim() ?? "";
+  const showSchedulerAdvisory = schedulerAdvisory.length > 0;
 
   React.useEffect(() => {
     setSchedulerTime(scheduler?.scheduled_time ?? "10:00");
@@ -155,15 +155,12 @@ export function AdminPanel({
               <h3 className="text-sm font-semibold text-(--ink)">Actions</h3>
               {!hasFeeds ? (
                 <p className="mt-2 text-sm leading-6 text-muted">
-                  Add and save at least one RSS feed before running a manual fetch job.
+                  Add and save at least one RSS feed before running a manual sync.
                 </p>
               ) : null}
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button isDisabled={!hasFeeds} size="sm" onPress={onRunFeedSync}>
-                  Run fetch + classify
-                </Button>
-                <Button size="sm" variant="outline" onPress={onRefreshReport}>
-                  Refresh report
+                <Button isDisabled={!hasFeeds} size="sm" onPress={onRunSync}>
+                  Sync now
                 </Button>
                 <Button size="sm" variant="outline" onPress={onReclassifyRecent}>
                   Reclassify recent 50
@@ -325,6 +322,17 @@ export function AdminPanel({
                   </p>
                 </div>
               </div>
+              {showSchedulerAdvisory ? (
+                <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                  <p className="font-medium">Automatic scheduling is unavailable on this platform.</p>
+                  <p className="mt-1 leading-6">
+                    {schedulerAdvisory}
+                  </p>
+                  <p className="mt-1 leading-6">
+                    This control still saves your preferred daily time so you can keep it as a local reminder, but it does not register a real system task.
+                  </p>
+                </div>
+              ) : null}
               <div className="mt-3 grid gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
                 <label className="block">
                   <span className="text-sm font-medium text-(--ink)">Daily time</span>
@@ -351,7 +359,7 @@ export function AdminPanel({
                       <p className="mt-1 text-muted">Last result: {scheduler.last_result ?? "Unknown"}</p>
                       {scheduler.command ? (
                         <p className="mt-1 break-all text-muted">
-                          Command: <code>{scheduler.command}</code>
+                          Suggested command: <code>{scheduler.command}</code>
                         </p>
                       ) : null}
                     </>

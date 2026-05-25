@@ -13,7 +13,7 @@ import (
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
-func TestRunOnceBuildsSummaryWithoutDiskReportArtifacts(t *testing.T) {
+func TestRunSyncBuildsSummaryWithoutDiskReportArtifacts(t *testing.T) {
 	root := t.TempDir()
 	settings := testJobSettings(root)
 	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {
@@ -47,7 +47,7 @@ func TestRunOnceBuildsSummaryWithoutDiskReportArtifacts(t *testing.T) {
 					SourceURL:      "https://example.com/rss",
 					Title:          "Go migrated paper",
 					URL:            "https://example.com/paper-1",
-					DOI:            testStringPtr("10.1000/run-once"),
+					DOI:            testStringPtr("10.1000/sync"),
 					Journal:        testStringPtr("Nature"),
 					Abstract:       testStringPtr("Ready for classification."),
 					AbstractSource: "openalex",
@@ -70,7 +70,7 @@ func TestRunOnceBuildsSummaryWithoutDiskReportArtifacts(t *testing.T) {
 	defer server.Close()
 	settings.ClassifierBaseURL = server.URL
 
-	summary, err := RunOnce(settings, RunOptions{}, nil)
+	summary, err := RunSync(settings, RunOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestRunOnceBuildsSummaryWithoutDiskReportArtifacts(t *testing.T) {
 	}
 }
 
-func TestRunOnceDoesNotExpandProfileTaxonomyAndClearsTopicTags(t *testing.T) {
+func TestRunSyncDoesNotExpandProfileTaxonomyAndClearsTopicTags(t *testing.T) {
 	root := t.TempDir()
 	settings := testJobSettings(root)
 	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {
@@ -135,7 +135,7 @@ func TestRunOnceDoesNotExpandProfileTaxonomyAndClearsTopicTags(t *testing.T) {
 	defer server.Close()
 	settings.ClassifierBaseURL = server.URL
 
-	summary, err := RunOnce(settings, RunOptions{}, nil)
+	summary, err := RunSync(settings, RunOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestRunOnceDoesNotExpandProfileTaxonomyAndClearsTopicTags(t *testing.T) {
 	}
 }
 
-func TestRunOnceLeavesProfileUntouchedWhenClassifierReturnsNoTags(t *testing.T) {
+func TestRunSyncLeavesProfileUntouchedWhenClassifierReturnsNoTags(t *testing.T) {
 	root := t.TempDir()
 	settings := testJobSettings(root)
 	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {
@@ -212,7 +212,7 @@ func TestRunOnceLeavesProfileUntouchedWhenClassifierReturnsNoTags(t *testing.T) 
 	defer server.Close()
 	settings.ClassifierBaseURL = server.URL
 
-	if _, err := RunOnce(settings, RunOptions{}, nil); err != nil {
+	if _, err := RunSync(settings, RunOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -226,7 +226,7 @@ func TestRunOnceLeavesProfileUntouchedWhenClassifierReturnsNoTags(t *testing.T) 
 	}
 }
 
-func TestRunOnceReturnsVerificationRequiredWhenFeedNeedsManualCheck(t *testing.T) {
+func TestRunSyncReturnsVerificationRequiredWhenFeedNeedsManualCheck(t *testing.T) {
 	root := t.TempDir()
 	settings := testJobSettings(root)
 	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {
@@ -248,13 +248,46 @@ func TestRunOnceReturnsVerificationRequiredWhenFeedNeedsManualCheck(t *testing.T
 		}, nil
 	}
 
-	_, err := RunOnce(settings, RunOptions{}, nil)
+	_, err := RunSync(settings, RunOptions{}, nil)
 	var verificationErr *VerificationRequiredError
 	if !errors.As(err, &verificationErr) {
 		t.Fatalf("expected verification error, got %v", err)
 	}
 	if len(verificationErr.Requests) != 1 || verificationErr.Requests[0].Target != "cloudflare" {
 		t.Fatalf("unexpected verification requests: %#v", verificationErr.Requests)
+	}
+}
+
+func TestRunSyncTreatsSkippedVerificationWarningsAsNonFatal(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings.ProfilePath, []byte(`{"meta":{"name":"Test","version":1,"created_at":"2026-05-16T00:00:00Z","updated_at":"2026-05-16T00:00:00Z","source_description":"test"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	previousFetch := fetchAllFeedsFunc
+	defer func() { fetchAllFeedsFunc = previousFetch }()
+	fetchAllFeedsFunc = func(_ string, _ feeds.FetchOptions) (feeds.FetchResult, error) {
+		return feeds.FetchResult{
+			Errors: []string{
+				"https://chemrxiv.org/action/showFeed?type=latest&format=rss: manual Cloudflare feed verification is only supported on Windows",
+			},
+		}, nil
+	}
+
+	summary, err := RunSync(settings, RunOptions{
+		SkippedFeeds: map[string]string{
+			"https://chemrxiv.org/action/showFeed?type=latest&format=rss": "manual Cloudflare feed verification is only supported on Windows",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summary.Errors) != 1 {
+		t.Fatalf("expected one warning in summary, got %#v", summary)
 	}
 }
 

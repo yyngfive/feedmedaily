@@ -254,7 +254,7 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 		}, nil
 	}
 	backendRunCommandFunc = func(config.Settings) ([]string, error) {
-		return []string{"go", "run", "./cmd/feedmedailyd", "--run-once"}, nil
+		return []string{"bash", filepath.Join(root, "tools", "feedmedaily.sh"), "sync"}, nil
 	}
 	opened := ""
 	openExternalTargetFunc = func(target string) error {
@@ -295,12 +295,12 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 	}
 }
 
-func TestAdminRunAndReportJobs(t *testing.T) {
+func TestAdminSyncJob(t *testing.T) {
 	root := t.TempDir()
 	restore := stubAPIGlobals(t)
 	defer restore()
 
-	runOnceFunc = func(_ config.Settings, _ jobruntime.RunOptions, progress jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+	runSyncFunc = func(_ config.Settings, _ jobruntime.RunOptions, progress jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
 		if progress != nil {
 			progress("pipeline.feeds.fetching", "Fetching RSS feeds.")
 			progress("pipeline.metadata.enriching", "Getting metadata for 1 paper(s).")
@@ -315,13 +315,6 @@ func TestAdminRunAndReportJobs(t *testing.T) {
 			Errors:     []string{"https://bad.feed/: timeout"},
 		}, nil
 	}
-	rebuildLatestReportFunc = func(_ config.Settings, progress jobruntime.ProgressFunc) (int, error) {
-		if progress != nil {
-			progress("pipeline.report.refreshing", "Refreshing the latest report from SQLite.")
-		}
-		return 3, nil
-	}
-
 	handler := NewServer(testSettings(root), nil).Handler()
 
 	runRecorder := httptest.NewRecorder()
@@ -337,19 +330,6 @@ func TestAdminRunAndReportJobs(t *testing.T) {
 	}
 	waitForJobCompletion(t, runPayload.Job.ID)
 
-	reportRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(reportRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/report/latest", nil))
-	if reportRecorder.Code != http.StatusOK {
-		t.Fatalf("report launch = %d %s", reportRecorder.Code, reportRecorder.Body.String())
-	}
-	var reportPayload struct {
-		Job jobInfo `json:"job"`
-	}
-	if err := json.Unmarshal(reportRecorder.Body.Bytes(), &reportPayload); err != nil {
-		t.Fatal(err)
-	}
-	waitForJobCompletion(t, reportPayload.Job.ID)
-
 	jobRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(jobRecorder, httptest.NewRequest(http.MethodGet, "/api/admin/jobs/"+runPayload.Job.ID, nil))
 	if jobRecorder.Code != http.StatusOK || !contains(jobRecorder.Body.String(), `"status":"completed"`) || !contains(jobRecorder.Body.String(), `"fetched":2`) {
@@ -358,7 +338,7 @@ func TestAdminRunAndReportJobs(t *testing.T) {
 
 	listRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/admin/jobs", nil))
-	if listRecorder.Code != http.StatusOK || !contains(listRecorder.Body.String(), `"job_type":"run"`) || !contains(listRecorder.Body.String(), `"job_type":"report"`) {
+	if listRecorder.Code != http.StatusOK || !contains(listRecorder.Body.String(), `"job_type":"sync"`) {
 		t.Fatalf("job list = %d %s", listRecorder.Code, listRecorder.Body.String())
 	}
 }
@@ -724,7 +704,7 @@ func stubAPIGlobals(t *testing.T) func() {
 	previousSelectReclassify := selectReclassifyPaperIDsFunc
 	previousReclassify := reclassifyPaperIDsFunc
 	previousRebuildLatestReport := rebuildLatestReportFunc
-	previousRunOnce := runOnceFunc
+	previousRunSync := runSyncFunc
 	previousStartVerification := startVerificationFlowFunc
 	previousCompleteVerification := completeVerificationFlowFunc
 	previousNow := nowFunc
@@ -743,7 +723,7 @@ func stubAPIGlobals(t *testing.T) func() {
 		selectReclassifyPaperIDsFunc = previousSelectReclassify
 		reclassifyPaperIDsFunc = previousReclassify
 		rebuildLatestReportFunc = previousRebuildLatestReport
-		runOnceFunc = previousRunOnce
+		runSyncFunc = previousRunSync
 		startVerificationFlowFunc = previousStartVerification
 		completeVerificationFlowFunc = previousCompleteVerification
 		nowFunc = previousNow
@@ -758,7 +738,7 @@ func TestAdminRunWaitsForCloudflareVerificationAndResumes(t *testing.T) {
 	defer restore()
 
 	runCalls := 0
-	runOnceFunc = func(_ config.Settings, opts jobruntime.RunOptions, progress jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, progress jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
 		runCalls++
 		if len(opts.FeedBodyOverrides) == 0 {
 			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
@@ -842,7 +822,7 @@ func TestAdminRunContinuesWithWarningWhenVerificationRetryFails(t *testing.T) {
 	restore := stubAPIGlobals(t)
 	defer restore()
 
-	runOnceFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
 		if got := opts.SkippedFeeds["https://www.cell.com/cell/current.rss"]; contains(got, "Cloudflare challenge was not completed before the window closed.") {
 			return jobruntime.RunSummary{
 				Fetched:    0,
@@ -924,7 +904,7 @@ func TestVerificationCompleteRequiresCallbackXML(t *testing.T) {
 	restore := stubAPIGlobals(t)
 	defer restore()
 
-	runOnceFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
 		if len(opts.FeedBodyOverrides) == 0 {
 			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
 				Requests: []feeds.VerificationRequest{{

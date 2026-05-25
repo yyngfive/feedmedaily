@@ -39,6 +39,8 @@ var verifierProcesses = struct {
 	items: map[string]*verifierProcess{},
 }
 
+var ensureVerificationBinaryFunc = appruntime.EnsureSourceBinary
+
 func startVerificationWindowFlow(settings config.Settings, pending *pendingVerification) error {
 	if pending == nil {
 		return fmt.Errorf("verification request not found")
@@ -55,6 +57,9 @@ func startVerificationWindowFlow(settings config.Settings, pending *pendingVerif
 		return err
 	}
 	callbackURL := verificationCallbackURL(settings)
+	if strings.TrimSpace(pending.CallbackURL) != "" {
+		callbackURL = pending.CallbackURL
+	}
 	version := appruntime.PackageVersion(settings.RootDir)
 	commandArgs := []string{
 		"--verification-id", pending.ID,
@@ -132,23 +137,28 @@ func verificationBinaryPath(settings config.Settings) (string, error) {
 		}
 		return "", fmt.Errorf("verification helper not found: %s", binaryPath)
 	}
-	return ensureSourceBinaryFunc(settings.RootDir, "./cmd/feedmedaily-verifier", verificationBinaryName)
+	return ensureVerificationBinaryFunc(settings.RootDir, "./cmd/feedmedaily-verifier", verificationBinaryName)
 }
 
 func verificationCallbackURL(settings config.Settings) string {
-	host := strings.TrimSpace(settings.ServerHost)
-	switch host {
-	case "", "0.0.0.0", "::":
-		host = "127.0.0.1"
-	}
-	if parsedIP := net.ParseIP(host); parsedIP != nil && parsedIP.IsUnspecified() {
-		host = "127.0.0.1"
-	}
+	host := verificationCallbackHost(settings.ServerHost)
 	return (&url.URL{
 		Scheme: "http",
 		Host:   net.JoinHostPort(host, fmt.Sprintf("%d", settings.ServerPort)),
 		Path:   "/api/feeds/verification/callback",
 	}).String()
+}
+
+func verificationCallbackHost(host string) string {
+	clean := strings.TrimSpace(host)
+	switch clean {
+	case "", "0.0.0.0", "::":
+		clean = "127.0.0.1"
+	}
+	if parsedIP := net.ParseIP(clean); parsedIP != nil && parsedIP.IsUnspecified() {
+		return "127.0.0.1"
+	}
+	return clean
 }
 
 func verifierPID(cmd *exec.Cmd) int {

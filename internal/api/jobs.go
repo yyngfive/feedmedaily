@@ -2,8 +2,8 @@ package api
 
 import (
 	"fmt"
-	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,11 +38,10 @@ type jobRegistry struct {
 }
 
 var (
-	apiJobs                = jobRegistry{jobs: map[string]jobInfo{}}
-	nowFunc                = time.Now
-	backendRunCommandFunc  = backendRunCommand
-	ensureSourceBinaryFunc = appruntime.EnsureSourceBinary
-	jobCounter             atomic.Uint64
+	apiJobs               = jobRegistry{jobs: map[string]jobInfo{}}
+	nowFunc               = time.Now
+	backendRunCommandFunc = backendRunCommand
+	jobCounter            atomic.Uint64
 )
 
 type localJobFunc func(progress func(string, string)) (map[string]any, error)
@@ -197,11 +196,11 @@ func countWarnings(result map[string]any) int {
 
 func summarizeResult(jobType string, result map[string]any) string {
 	switch jobType {
-	case "run":
+	case "sync":
 		warnings := countWarnings(result)
-		message := "Run completed."
+		message := "Sync completed."
 		if warnings > 0 {
-			message = fmt.Sprintf("Run completed with %d fetch warning(s).", warnings)
+			message = fmt.Sprintf("Sync completed with %d fetch warning(s).", warnings)
 		}
 		return fmt.Sprintf(
 			"%s fetched=%v inserted=%v updated=%v classified=%v warnings=%d.",
@@ -212,8 +211,6 @@ func summarizeResult(jobType string, result map[string]any) string {
 			result["classified"],
 			warnings,
 		)
-	case "report":
-		return fmt.Sprintf("Report refresh completed. papers=%v.", result["report_papers"])
 	case "reclassify":
 		return fmt.Sprintf(
 			"Reclassify completed. scope=%v reclassified=%v report_papers=%v.",
@@ -242,26 +239,13 @@ func sortJobsDescending(jobs []jobInfo) {
 }
 
 func backendRunCommand(settings config.Settings) ([]string, error) {
-	// 返回当前正式生产后端的一次同步命令行，供调度说明和外部壳层复用。
-	return backendCommand(settings, []string{"--run-once"})
+	return backendRunCommandForPlatform(settings, goruntime.GOOS)
 }
 
-func backendCommand(settings config.Settings, args []string) ([]string, error) {
-	// 根据 source/release 模式解析出正式 Go 后端入口。
-	if settings.Mode == appruntime.ModeRelease {
-		return append([]string{filepath.Join(settings.AppDir, "feedmedailyd.exe")}, append(args, "--root", settings.RootDir)...), nil
+func backendRunCommandForPlatform(settings config.Settings, goos string) ([]string, error) {
+	// 在 Linux source mode 下给设置页返回推荐的 cron/helper 脚本命令。
+	if goos != "linux" || settings.Mode != appruntime.ModeSource {
+		return nil, nil
 	}
-
-	if _, err := exec.LookPath("go"); err == nil {
-		binaryPath, err := ensureSourceBinaryFunc(settings.RootDir, "./cmd/feedmedailyd", "feedmedailyd.exe")
-		if err != nil {
-			return nil, err
-		}
-		command := []string{binaryPath}
-		command = append(command, args...)
-		command = append(command, "--root", settings.RootDir)
-		return command, nil
-	}
-
-	return nil, fmt.Errorf("go command not found; install Go to run feedmedailyd from source")
+	return []string{"bash", filepath.Join(settings.RootDir, "tools", "feedmedaily.sh"), "sync"}, nil
 }

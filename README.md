@@ -2,106 +2,176 @@
 
 ![FeedMeDaily banner](./assets/branding/feedmedaily-icon.svg)
 
-FeedMeDaily is a local-first paper triage app for journal RSS feeds. It stores paper metadata in SQLite, classifies relevance with profile-driven LLM prompts, serves a local review UI, and lets you send selected papers to Zotero.
+FeedMeDaily 是一个面向科研 RSS 的本地论文筛选工具。它可以抓取期刊 RSS、按 Profile 规则调用 LLM 做相关性分类、提供本地 Web 界面进行阅读和反馈，并支持把选中的论文保存到 Zotero。
 
-Current system architecture is documented in [ARCHITECTURE.md](./ARCHITECTURE.md).
-Version history and upcoming release notes are tracked in [CHANGELOG.md](./CHANGELOG.md).
+- 当前架构说明见 [ARCHITECTURE.md](./ARCHITECTURE.md)
+- 版本更新记录见 [CHANGELOG.md](./CHANGELOG.md)
+- 开源协议为 [MIT](./LICENSE)
 
-## Source mode
+## 快速开始
 
-If you want to run FeedMeDaily from source:
+FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载最新版安装包：
 
-```powershell
-pnpm --dir web install
-pnpm --dir web build
-go run .\cmd\feedmedaily-tray --root .
+- [FeedMeDaily Releases](https://github.com/yyngfive/feedmedaily/releases/latest)
+
+安装完成后启动托盘程序，再从托盘打开 FeedMeDaily。首次使用时，建议先在应用内的 `Settings` / `Config` 页面填写以下参数并保存：
+
+```dotenv
+SCIRSS_CLASSIFIER_API_KEY=
+SCIRSS_CLASSIFIER_BASE_URL=https://api.deepseek.com
+SCIRSS_CLASSIFIER_MODEL=deepseek-v4-flash
+SCIRSS_CLASSIFIER_THINKING=disabled
+
+SCIRSS_PROFILE_API_KEY=
+SCIRSS_PROFILE_BASE_URL=https://api.deepseek.com
+SCIRSS_PROFILE_MODEL=deepseek-v4-pro
+SCIRSS_PROFILE_THINKING=enabled
+
+SCIRSS_ZOTERO_API_KEY=
+SCIRSS_ZOTERO_LIBRARY_TYPE=user
+SCIRSS_ZOTERO_LIBRARY_ID=
+SCIRSS_ZOTERO_COLLECTION_KEY=
 ```
 
-To build the experimental Windows tray and Go backend executables after Go is installed:
+说明：
 
-```powershell
-pwsh -File .\tools\build_go_tray.ps1
+- 默认推荐使用 DeepSeek，其他 OpenAI-compatible API 目前没有做系统兼容性测试
+- `SCIRSS_CLASSIFIER_*` 用于论文分类
+- `SCIRSS_PROFILE_*` 用于Profile 生成和 Profile 修订，可以和CLASSIFIER是同一个模型
+- `SCIRSS_ZOTERO_*` 用于 Zotero 保存
+- `FEEDMEDAILY_UPDATE_MANIFEST_URL` 一般不需要手动设置
+
+### DeepSeek 设置
+
+1. 在 [DeepSeek Platform](https://platform.deepseek.com/) 注册并登录
+2. 在 [API Keys](https://platform.deepseek.com/api_keys) 页面创建 API Key
+3. 将 API Key 填入 `SCIRSS_CLASSIFIER_API_KEY` 和 `SCIRSS_PROFILE_API_KEY`
+4. 保持默认 `BASE_URL` 为 `https://api.deepseek.com` 即可
+
+### Zotero 设置
+
+最小必填项：
+
+- `SCIRSS_ZOTERO_API_KEY`
+- `SCIRSS_ZOTERO_LIBRARY_TYPE`
+- `SCIRSS_ZOTERO_LIBRARY_ID`
+
+常见用法：
+
+- 个人库：`SCIRSS_ZOTERO_LIBRARY_TYPE=user`，`SCIRSS_ZOTERO_LIBRARY_ID` 填你的 Zotero `userID`
+- 群组库：`SCIRSS_ZOTERO_LIBRARY_TYPE=group`，`SCIRSS_ZOTERO_LIBRARY_ID` 填对应 `groupID`
+- `SCIRSS_ZOTERO_COLLECTION_KEY` 可留空，表示每次保存时在应用内选择 collection
+
+相关文档：
+
+- [Zotero Web API Basics](https://www.zotero.org/support/dev/web_api/v3/basics)
+- [Zotero API Keys](https://www.zotero.org/settings/keys)
+
+## Linux 用户
+
+Linux 目前可以直接使用源码模式运行后端和 Web UI，但当前不提供托盘程序。推荐使用仓库里的辅助脚本。
+
+- `feedmedailyd` 可以在 Linux 上直接运行
+- `feedmedaily-tray` 当前只支持 Windows
+- 对于需要Cloudflare人类验证的 RSS 地址，手动验证功能只支持 Windows，Linux使用会以Warning提示
+
+### 源码模式运行
+
+```bash
+git clone git@github.com:yyngfive/feedmedaily.git
+cd feedmedaily
+cp .env.example .env
+corepack pnpm --dir web install
+corepack pnpm --dir web build
+bash ./tools/feedmedaily.sh serve
 ```
 
-To run the Go backend service directly:
+常用命令：
 
-```powershell
-go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
+```bash
+bash ./tools/feedmedaily.sh open #打开Web UI
+bash ./tools/feedmedaily.sh sync #更新文献列表
+bash ./tools/feedmedaily.sh paths #输出日志地址
 ```
 
-The tray stores its local settings in `tray-settings.json` at the app config root. In source mode that file sits at the repository root. Backend command overrides are no longer part of the migration branch: the tray expects `feedmedailyd.exe` in release builds and builds a local cached backend binary in source mode.
+如果只是想直接启动后台服务，可以运行：
 
-Before the first run, create a local `.env` file:
+```bash
+go run ./cmd/feedmedailyd --root . --host 127.0.0.1 --port 8000
+```
+
+### 定时任务
+
+当前应用内定时更新功能依赖托盘程序，目前只支持Windows。Linux 上推荐使用 `cron` 调用辅助脚本：
+
+```cron
+0 8 * * * cd /path/to/feedmedaily && bash /path/to/feedmedaily/tools/feedmedaily.sh sync >> /path/to/feedmedaily/logs/cron.log 2>&1
+```
+
+## 开发者
+
+### 开发环境
+
+- Go
+- Node.js
+- pnpm
+- Windows（目前推荐）
+
+### 获取源码
+
+```powershell
+git clone git@github.com:yyngfive/feedmedaily.git
+cd feedmedaily
+```
+
+### 配置并运行 source mode
+
+先复制本地配置模板：
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-### Recommended configuration
+安装前端依赖并构建：
 
-```dotenv
-SCIRSS_CLASSIFIER_API_KEY=...
-SCIRSS_CLASSIFIER_BASE_URL=https://api.deepseek.com
-SCIRSS_CLASSIFIER_MODEL=deepseek-v4-flash
-SCIRSS_CLASSIFIER_THINKING=disabled
-SCIRSS_CLASSIFIER_BATCH_SIZE=10
-
-SCIRSS_PROFILE_API_KEY=...
-SCIRSS_PROFILE_BASE_URL=https://api.deepseek.com
-SCIRSS_PROFILE_MODEL=deepseek-v4-pro
-SCIRSS_PROFILE_THINKING=enabled
-SCIRSS_PROFILE_PATH=data/classification_profile.json
-
-SCIRSS_ZOTERO_API_KEY=...
-SCIRSS_ZOTERO_LIBRARY_TYPE=user
-SCIRSS_ZOTERO_LIBRARY_ID=1234567
-SCIRSS_ZOTERO_COLLECTION_KEY=
-
-SCIRSS_SERVER_HOST=127.0.0.1
-SCIRSS_SERVER_PORT=8000
-
-FEEDMEDAILY_UPDATE_MANIFEST_URL=
+```powershell
+pnpm --dir web install
+pnpm --dir web build
 ```
 
-Notes:
-
-- `SCIRSS_CLASSIFIER_*` is used for paper classification.
-- `SCIRSS_PROFILE_*` is used for onboarding, profile generation, and profile revision prompts.
-- `SCIRSS_ZOTERO_*` is used for Zotero export.
-- `FEEDMEDAILY_UPDATE_MANIFEST_URL` is optional and intended for packaged builds.
-- If a provider times out or fails in thinking mode, the Go classifier/profile flows retry once with `thinking=disabled`.
-
-## Commands
+启动托盘程序：
 
 ```powershell
 go run .\cmd\feedmedaily-tray --root .
+```
+
+直接启动后端服务可以自动拉起托盘程序：
+
+```powershell
 go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
-go run .\cmd\feedmedailyd --root . --run-once
-go run .\cmd\feedmedailyd --root . --report-latest
-go run .\cmd\feedmedailyd --root . --zotero-collections
-go run .\cmd\feedmedailyd --root . --zotero-save --paper-id 1
 ```
 
-## Zotero setup
+### 打包
 
-Minimum Zotero settings:
+构建安装版可执行文件与安装包：
 
-```dotenv
-SCIRSS_ZOTERO_API_KEY=...
-SCIRSS_ZOTERO_LIBRARY_TYPE=user
-SCIRSS_ZOTERO_LIBRARY_ID=1234567
+```powershell
+.\tools\build_release.ps1
 ```
 
-How to find the library ID:
+只构建 release 目录、不生成安装包：
 
-- Personal library: use your Zotero `userID` as `SCIRSS_ZOTERO_LIBRARY_ID`
-- Group library: set `SCIRSS_ZOTERO_LIBRARY_TYPE=group` and use the `groupID`
+```powershell
+.\tools\build_release.ps1 -SkipInstaller
+```
 
-Relevant Zotero docs:
+## 下一步更新计划
 
-- [Zotero Web API Basics](https://www.zotero.org/support/dev/web_api/v3/basics)
-- [Zotero API Keys](https://www.zotero.org/settings/keys)
+更详细的计划见 [docs/plans/current-roadmap.md](./docs/plans/current-roadmap.md)。当前优先方向是：
 
-## License
-
-MIT. See [LICENSE](./LICENSE).
+- 增强 Profile 后续维护体验，补充 AI 辅助简化与更易审阅的编辑流程
+- 增加内置 feed list 与 RSS discovery 引导，并继续优化抓取兼容性
+- 提供更清晰的 job 进度表达，而不只是状态文字
+- 补齐 review 页的筛选、排序与批量标记已读能力
+- 继续精简设置页和启动文案与布局
+- 修正 Zotero 剩余体验问题，并逐步完善打包与跨平台后续工作

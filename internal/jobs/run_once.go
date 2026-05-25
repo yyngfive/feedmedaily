@@ -42,8 +42,8 @@ func (e *VerificationRequiredError) Error() string {
 
 var fetchAllFeedsFunc = feeds.FetchAll
 
-// RunOnce executes the end-to-end fetch, ingest, classify, and report pipeline in Go.
-func RunOnce(settings config.Settings, opts RunOptions, progress ProgressFunc) (RunSummary, error) {
+// RunSync executes the end-to-end sync pipeline in Go.
+func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (RunSummary, error) {
 	logging.SetDefaultDir(settings.LogsDir)
 	if progress != nil {
 		progress("pipeline.feeds.fetching", "Fetching RSS feeds.")
@@ -59,8 +59,11 @@ func RunOnce(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 	if len(fetchResult.VerificationRequests) > 0 {
 		return RunSummary{}, &VerificationRequiredError{Requests: fetchResult.VerificationRequests}
 	}
-	if fetchResult.Fetched == 0 && len(fetchResult.Errors) > 0 {
-		return RunSummary{}, fmt.Errorf("%s", strings.Join(fetchResult.Errors, "\n"))
+	if fetchResult.Fetched == 0 {
+		nonSkippedErrors := filterNonSkippedErrors(fetchResult.Errors, opts.SkippedFeeds)
+		if len(nonSkippedErrors) > 0 {
+			return RunSummary{}, fmt.Errorf("%s", strings.Join(nonSkippedErrors, "\n"))
+		}
 	}
 
 	currentProfile, err := profile.ReadCurrent(settings.ProfilePath)
@@ -107,7 +110,7 @@ func RunOnce(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 	}
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "info",
-		Component: "jobs.run_once",
+		Component: "jobs.sync",
 		Action:    "ingest_completed",
 		Message:   fmt.Sprintf("Inserted %d new papers; %d papers need classification", inserted, len(pendingIDs)),
 		Data: map[string]any{
@@ -134,6 +137,26 @@ func RunOnce(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 		Classified: classified,
 		Errors:     fetchResult.Errors,
 	}, nil
+}
+
+func filterNonSkippedErrors(errors []string, skippedFeeds map[string]string) []string {
+	if len(errors) == 0 || len(skippedFeeds) == 0 {
+		return append([]string(nil), errors...)
+	}
+	filtered := make([]string, 0, len(errors))
+	for _, item := range errors {
+		skipped := false
+		for feedURL := range skippedFeeds {
+			if strings.HasPrefix(item, feedURL+": ") {
+				skipped = true
+				break
+			}
+		}
+		if !skipped {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
 func reclassifyExistingPapers(sqliteStore *store.Store, settings config.Settings, currentProfile map[string]any, cfg classifier.LLMConfig, paperIDs []int64, progress ProgressFunc) (int, error) {

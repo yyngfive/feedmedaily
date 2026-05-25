@@ -646,8 +646,16 @@ export function App() {
   const handleSaveScheduler = React.useCallback(async (dailyTime: string) => {
     try {
       setSchedulerSaving(true);
-      setScheduler(await saveSchedulerSettings(dailyTime));
-      pushMessage("scheduler.save.succeeded");
+      const saved = await saveSchedulerSettings(dailyTime);
+      setScheduler(saved);
+      if (saved.automatic_supported === false) {
+        pushMessage("scheduler.save.succeeded", {
+          text: "Daily sync time saved locally. Automatic runs are unavailable on this platform; use cron instead.",
+          tone: "warning",
+        });
+      } else {
+        pushMessage("scheduler.save.succeeded");
+      }
     } catch (error) {
       pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     } finally {
@@ -756,7 +764,7 @@ export function App() {
     }
   };
 
-  const handleRunAdminJob = async (path: "/api/admin/run" | "/api/admin/report/latest") => {
+  const handleRunAdminJob = async (path: "/api/admin/run") => {
     try {
       registerJob(await launchAdminJob(path));
       pushMessage("job.started");
@@ -875,12 +883,11 @@ export function App() {
           onStartVerification={(job) => void handleStartVerification(job)}
         onApplyProposal={(id) => void handleApplyProposal(id)}
         onRejectProposal={(id) => void handleRejectProposal(id)}
-        onRunFeedSync={() => void handleRunAdminJob("/api/admin/run")}
+        onRunSync={() => void handleRunAdminJob("/api/admin/run")}
         onReclassifyRecent={() => void handleReclassify("recent")}
         onReclassifyFeedback={() => void handleReclassify("feedback")}
         onReclassifyAll={() => void handleReclassify("all")}
         onDeleteFeedback={(id) => void handleDeleteFeedback(id)}
-        onRefreshReport={() => void handleRunAdminJob("/api/admin/report/latest")}
         scheduler={scheduler}
         schedulerSaving={schedulerSaving}
       />
@@ -928,7 +935,7 @@ export function App() {
           needsFeedSetup={needsFeedSetup}
           onOpenAdmin={() => setAdminOpen(true)}
           onResetFilters={resetFilters}
-          onRunFetchAndClassify={() => void handleRunAdminJob("/api/admin/run")}
+          onRunSync={() => void handleRunAdminJob("/api/admin/run")}
           onSelectPaper={(paper) => setSelectedId(paper.id)}
           onStartFeedSetup={() => {
             if (feeds.length === 0) {

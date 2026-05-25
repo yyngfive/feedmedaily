@@ -1,17 +1,18 @@
+# TODO
+
+当前较正式的实施路线见 [docs/plans/current-roadmap.md](/D:/Codes/Projects/SciRSSAgent/docs/plans/current-roadmap.md)。本文件保留为快速 backlog 和记事清单。
+
 # Front end
 
 ## Profile
 
-- [ ] 增加自己编辑Profile功能
+- [X] 增加自己编辑Profile功能
 - [ ] 增加AI自动简化Profile的功能，优化Profile更新逻辑
-- [ ] 如果要恢复 paper-level topic tags，需要先重新设计 tag 的生成、存储和展示方案
 
 ## Feed
 
 - [ ] 增加一个内置的Feed List以及官方RSS List跳转页
 - [ ] 增加获取feed、metadata、llm分类时的具体进度条
-- [ ] onboarding 成功 generate 后当前页面不会自动刷新出新的 profile
-- [ ] 页面刷新后看不到仍在运行中的 job 状态
 
 ## Initialization & Settings
 

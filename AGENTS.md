@@ -13,36 +13,28 @@ This file holds project-specific agent guidance that should stay out of the user
 
 ## Environment
 
-- Preferred Python workflow: `uv` with Python `3.12`.
+- Preferred backend workflow: Go from `go.mod`.
 - Preferred frontend workflow: `pnpm` with Node from `.nvmrc`.
-- If `python` is not on PATH, `uv` can manage Python directly:
+- Standard source-mode setup:
 
 ```powershell
-uv python install 3.12
-uv sync
+Copy-Item .env.example .env
+corepack pnpm --dir web install
+corepack pnpm --dir web build
+go run .\cmd\feedmedaily-tray --root .
 ```
 
-- If uv cannot access the default Windows cache locations, keep managed Python and cache inside the project:
+- To run the local backend service directly:
 
 ```powershell
-$env:UV_CACHE_DIR = ".uv-cache"
-$env:UV_PYTHON_INSTALL_DIR = ".uv-python"
-uv sync
+go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 ```
 
-- If uv warns that hardlinking failed, use copy mode:
-
-```powershell
-$env:UV_LINK_MODE = "copy"
-uv sync
-```
-
-- `mamba` is a fallback for future heavy scientific, GPU, or local-model dependencies. It is not the default workflow for v0.1.
 - `.env.example` documents the current recommended environment variables and should be kept in sync with README when configuration changes.
 
 ## Repository Conventions
 
-- README should stay focused on project structure and usage.
+- README should stay focused on product usage and developer setup.
 - `ARCHITECTURE.md` is the canonical current-architecture summary. If a change updates system boundaries, core flows, major modules, or UI ownership, update `ARCHITECTURE.md` in the same change.
 - Put internal workflow notes, safety guidance, and agent-facing conventions here.
 - Keep generated caches, databases, logs, and reports out of Git.
@@ -81,14 +73,14 @@ uv sync
   - `SCIRSS_CLASSIFIER_API_KEY` / `SCIRSS_CLASSIFIER_BASE_URL`
   - `SCIRSS_PROFILE_API_KEY` / `SCIRSS_PROFILE_BASE_URL`
 - The code owns the task shell and output schema, but user interest boundaries, topic taxonomy, few-shots, and classification notes come from the profile file.
-- FastAPI is now the primary local app surface:
+- The Go backend is the primary local app surface:
   - serves `web/dist`
   - exposes `/api/report/latest`
-  - exposes feedback, profile proposal, Zotero, and admin job APIs
+  - exposes feedback, profile proposal, Zotero, admin job, and protected-feed verification APIs
 - Profile lifecycle:
   1. User describes interests in onboarding
-  2. model B generates an initial profile proposal
-  3. user applies the proposal
+  2. the profile model generates an initial profile proposal
+  3. the user applies the proposal
   4. future classifications use the applied profile
   5. feedback can generate new full-profile proposals
   6. applying a proposal reclassifies linked feedback papers only
