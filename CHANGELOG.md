@@ -2,9 +2,15 @@
 
 This changelog is grouped by version number and records each version relative to the previous released version.
 
-The latest released version is `0.2.1`. The next planned release is `0.2.2`, so unreleased product changes should be added under `0.2.2` until that version ships.
+The latest released version is `0.3.0`. The next planned release is `0.3.1`, so unreleased product changes should be added under `0.3.1` until that version ships.
 
-## 0.2.2 (Unreleased)
+## 0.3.1 (Unreleased)
+
+Changes since `0.3.0`:
+
+- No unreleased entries yet.
+
+## 0.3.0 (2026-05-25)
 
 Changes since `0.2.1`:
 
@@ -28,6 +34,8 @@ Changes since `0.2.1`:
 - Changed admin run-job behavior so Cloudflare-protected feeds can move into a `waiting_for_user` state instead of failing immediately when manual verification is required.
 - Replaced the earlier experimental Edge/C# verification helpers with a single Go-built verifier binary, and wired source builds, release packaging, and installer output to include `FeedMeDailyVerifier.exe`.
 - Changed the protected-feed recovery flow so the verifier window now opens automatically, captures feed XML automatically when the protected page resolves, and lets the run continue with a fetch warning if verification never returns usable XML instead of forcing the whole job to fail.
+- Changed `feedmedailyd` back into a daemon-only service entrypoint. Manual sync now consistently runs through the daemon job API instead of mixing command-mode and background-job paths.
+- Added a Linux source-mode helper script for `serve`, `open`, `sync`, and `paths`, and aligned scheduler guidance around using that script with `cron` instead of direct daemon command flags.
 
 ## 0.2.1 (2026-05-21)
 
