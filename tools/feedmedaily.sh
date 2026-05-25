@@ -3,20 +3,78 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ACTION="${1:-}"
+SCRIPT_DISPLAY_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+ACTION="${1:-help}"
+TOPIC="${2:-}"
 NODE_BIN="${NODE_BIN:-node}"
 GO_BIN="${GO_BIN:-go}"
 
 usage() {
-  cat <<'EOF'
-Usage: tools/feedmedaily.sh <serve|open|sync|paths>
+  cat <<EOF
+Usage: tools/feedmedaily.sh <command> [args]
 
 Commands:
   serve   Start or reuse the local FeedMeDaily daemon.
   open    Start or reuse the daemon, then open the local Web UI.
   sync    Start or reuse the daemon, then trigger one sync job and stream its status.
   paths   Print the key source-mode paths and the recommended cron sync command.
+  help    Show general help or help for a specific command.
+
+Examples:
+  bash "$SCRIPT_DISPLAY_PATH" serve
+  bash "$SCRIPT_DISPLAY_PATH" open
+  bash "$SCRIPT_DISPLAY_PATH" sync
+  bash "$SCRIPT_DISPLAY_PATH" paths
+  bash "$SCRIPT_DISPLAY_PATH" help sync
+
+Requirements:
+  Common: bash, curl, node, go
+  open:   xdg-open on desktop Linux, or wslview/cmd.exe in WSL
 EOF
+}
+
+usage_topic() {
+  case "$1" in
+    serve)
+      cat <<'EOF'
+Usage: tools/feedmedaily.sh serve
+
+Start the local daemon if it is not already healthy, otherwise reuse the running one.
+Prints the final base URL and daemon log path.
+EOF
+      ;;
+    open)
+      cat <<'EOF'
+Usage: tools/feedmedaily.sh open
+
+Start or reuse the local daemon, then open the Web UI in a browser.
+On headless Linux, the script prints the URL if no graphical opener is available.
+EOF
+      ;;
+    sync)
+      cat <<'EOF'
+Usage: tools/feedmedaily.sh sync
+
+Start or reuse the local daemon, trigger one admin sync job,
+and poll until the job completes, fails, or requires user verification.
+EOF
+      ;;
+    paths)
+      cat <<'EOF'
+Usage: tools/feedmedaily.sh paths
+
+Print the main source-mode paths and a ready-to-copy sync command.
+EOF
+      ;;
+    help|"")
+      usage
+      ;;
+    *)
+      echo "Unknown help topic: $1" >&2
+      usage >&2
+      return 1
+      ;;
+  esac
 }
 
 require_command() {
@@ -134,7 +192,10 @@ discover_base_url() {
 start_daemon() {
   mkdir -p "$LOGS_DIR"
   echo "Starting FeedMeDaily daemon at $SERVER_URL" >&2
-  nohup "$GO_BIN" run ./cmd/feedmedailyd --root "$ROOT_DIR" --host "$HOST" --port "$PORT" >>"$DAEMON_LOG_PATH" 2>&1 &
+  (
+    cd "$ROOT_DIR"
+    exec nohup "$GO_BIN" run ./cmd/feedmedailyd --root "$ROOT_DIR" --host "$HOST" --port "$PORT"
+  ) >>"$DAEMON_LOG_PATH" 2>&1 &
   local daemon_launcher_pid=$!
   for _ in $(seq 1 60); do
     if healthcheck "$SERVER_URL"; then
@@ -223,8 +284,35 @@ Data: $DATA_DIR
 Logs: $LOGS_DIR
 Runtime state: $RUNTIME_STATE_PATH
 Preferred server URL: $SERVER_URL
-Recommended cron sync command: bash $SCRIPT_PATH sync
+Recommended cron sync command: bash "$SCRIPT_DISPLAY_PATH" sync
 EOF
+}
+
+is_wsl() {
+  [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft /proc/version 2>/dev/null
+}
+
+open_url() {
+  local target="$1"
+  if is_wsl; then
+    if command -v wslview >/dev/null 2>&1; then
+      if wslview "$target" >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+    if command -v cmd.exe >/dev/null 2>&1; then
+      if cmd.exe /C start "" "$target" >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+  fi
+  if command -v xdg-open >/dev/null 2>&1; then
+    if xdg-open "$target" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  echo "No working graphical URL opener was found. Open this URL manually: $target" >&2
+  return 0
 }
 
 require_command "$NODE_BIN"
@@ -249,9 +337,8 @@ case "$ACTION" in
     echo "Log file: $DAEMON_LOG_PATH"
     ;;
   open)
-    require_command xdg-open
     base_url="$(ensure_service)"
-    xdg-open "$base_url" >/dev/null 2>&1 &
+    open_url "$base_url"
     echo "Opened FeedMeDaily at $base_url"
     ;;
   sync)
@@ -263,7 +350,10 @@ case "$ACTION" in
   paths)
     print_paths
     ;;
-  ""|-h|--help|help)
+  help)
+    usage_topic "$TOPIC"
+    ;;
+  -h|--help)
     usage
     ;;
   *)
