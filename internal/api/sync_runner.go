@@ -10,7 +10,7 @@ import (
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
 )
 
-type syncExecuteFunc func(progress func(string, string), overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error)
+type syncExecuteFunc func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error)
 
 type verificationAwareSyncCallbacks struct {
 	OnWaiting                 func(*pendingVerification)
@@ -36,7 +36,7 @@ type verificationCallbackAck struct {
 	Duplicate      bool   `json:"duplicate,omitempty"`
 }
 
-func runVerificationAwareSync(settings config.Settings, jobID string, callbackURL string, progress func(string, string), run syncExecuteFunc, callbacks verificationAwareSyncCallbacks) (map[string]any, error) {
+func runVerificationAwareSync(settings config.Settings, jobID string, callbackURL string, progress jobruntime.ProgressFunc, run syncExecuteFunc, callbacks verificationAwareSyncCallbacks) (map[string]any, error) {
 	overrideBodies := map[string][]byte{}
 	skippedFeeds := map[string]string{}
 	if strings.TrimSpace(jobID) == "" {
@@ -154,7 +154,7 @@ func processVerificationCallback(settings config.Settings, payload verificationC
 
 	if markVerificationDelivered(pending.ID) {
 		if result.Status == "success" {
-			logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification data captured. Resuming RSS fetch.", "", logData)
+			logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification received. Re-running RSS fetch with verified XML.", "", logData)
 			go func(logsDir string, jobID string, verificationID string, feedURL string, journal string) {
 				time.Sleep(2 * time.Second)
 				process, ok := snapshotVerifierProcess(verificationID)

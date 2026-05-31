@@ -412,7 +412,7 @@ func (s *Server) handleProfileBootstrap(w http.ResponseWriter, r *http.Request) 
 		"Queued initial profile generation.",
 		"profile.bootstrap.generating",
 		"Generating the initial classification profile proposal.",
-		func(progress func(string, string)) (map[string]any, error) {
+		func(progress jobruntime.ProgressFunc) (map[string]any, error) {
 			return bootstrapProfileFunc(s.settings, payload.InterestDescription, payload.Name, progress)
 		},
 	)
@@ -525,7 +525,7 @@ func (s *Server) handleProfileProposalGenerate(w http.ResponseWriter, r *http.Re
 		"",
 		"profile.proposal.collecting_feedback",
 		"Collecting feedback for profile review.",
-		func(progress func(string, string)) (map[string]any, error) {
+		func(progress jobruntime.ProgressFunc) (map[string]any, error) {
 			return generateProfileProposalFunc(s.settings, progress)
 		},
 	)
@@ -937,7 +937,7 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 	}
 	job := launchVerificationAwareSyncJob(
 		s.settings,
-		func(progress func(string, string), overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error) {
+		func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error) {
 			summary, err := runSyncFunc(s.settings, jobruntime.RunOptions{
 				FeedBodyOverrides: overrides,
 				SkippedFeeds:      skippedFeeds,
@@ -1043,7 +1043,7 @@ func (s *Server) handleFeedVerificationComplete(w http.ResponseWriter, r *http.R
 	if strings.TrimSpace(result.ContentType) != "" {
 		logData["content_type"] = result.ContentType
 	}
-	logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification data captured. Resuming RSS fetch.", "", logData)
+	logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification received. Re-running RSS fetch with verified XML.", "", logData)
 	select {
 	case pending.Result <- result:
 	default:
@@ -1106,7 +1106,7 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 		"Job queued.",
 		"pipeline.metadata.enriching",
 		"Getting metadata for papers to reclassify.",
-		func(progress func(string, string)) (map[string]any, error) {
+		func(progress jobruntime.ProgressFunc) (map[string]any, error) {
 			paperIDs, err := selectReclassifyPaperIDsFunc(s.settings, payload.Scope, payload.Limit)
 			if err != nil {
 				return nil, err

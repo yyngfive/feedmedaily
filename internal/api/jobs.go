@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yyngfive/scirssagent/internal/config"
+	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
 	"github.com/yyngfive/scirssagent/internal/logging"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 )
@@ -27,6 +28,12 @@ type jobInfo struct {
 	Result               map[string]any `json:"result,omitempty"`
 	LogPath              string         `json:"log_path,omitempty"`
 	WarningCount         int            `json:"warning_count,omitempty"`
+	ProgressStage        string         `json:"progress_stage,omitempty"`
+	ProgressCurrent      *int           `json:"progress_current,omitempty"`
+	ProgressTotal        *int           `json:"progress_total,omitempty"`
+	ProgressPercent      *int           `json:"progress_percent,omitempty"`
+	ProgressLabel        string         `json:"progress_label,omitempty"`
+	ProgressMode         string         `json:"progress_mode,omitempty"`
 	CreatedAt            time.Time      `json:"created_at"`
 	StartedAt            *time.Time     `json:"started_at,omitempty"`
 	FinishedAt           *time.Time     `json:"finished_at,omitempty"`
@@ -44,7 +51,7 @@ var (
 	jobCounter            atomic.Uint64
 )
 
-type localJobFunc func(progress func(string, string)) (map[string]any, error)
+type localJobFunc func(progress jobruntime.ProgressFunc) (map[string]any, error)
 
 func listJobs() []jobInfo {
 	// 返回当前内存中的全部作业，并按创建时间倒序排列。
@@ -99,11 +106,17 @@ func launchLocalJob(logsDir string, jobType string, queuedMessageKey string, que
 			current.StartedAt = &started
 		})
 
-		progress := func(messageKey string, message string) {
-			logJobEvent(logsDir, &job, "info", "progress", messageKey, message, "", nil)
+		progress := func(update jobruntime.ProgressUpdate) {
+			logJobEvent(logsDir, &job, "info", "progress", update.MessageKey, update.Message, "", progressLogData(update))
 			updateJob(job.ID, func(current *jobInfo) {
-				current.MessageKey = messageKey
-				current.Message = message
+				current.MessageKey = update.MessageKey
+				current.Message = update.Message
+				current.ProgressStage = update.Stage
+				current.ProgressCurrent = update.Current
+				current.ProgressTotal = update.Total
+				current.ProgressPercent = update.Percent
+				current.ProgressLabel = update.Label
+				current.ProgressMode = string(update.Mode)
 			})
 		}
 		result, err := run(progress)
@@ -115,6 +128,7 @@ func launchLocalJob(logsDir string, jobType string, queuedMessageKey string, que
 				current.MessageKey = jobType + ".failed"
 				current.Message = ""
 				current.Error = err.Error()
+				clearJobProgress(current)
 				current.FinishedAt = &finished
 			})
 			return
@@ -128,6 +142,7 @@ func launchLocalJob(logsDir string, jobType string, queuedMessageKey string, que
 			current.Message = summarizeResult(jobType, result)
 			current.Result = result
 			current.WarningCount = warningCount
+			clearJobProgress(current)
 			current.FinishedAt = &finished
 		})
 	}()
@@ -176,6 +191,41 @@ func logJobEvent(logsDir string, job *jobInfo, level string, action string, mess
 			current.LogPath = path
 		})
 	}
+}
+
+func progressLogData(update jobruntime.ProgressUpdate) map[string]any {
+	data := map[string]any{}
+	if update.Stage != "" {
+		data["progress_stage"] = update.Stage
+	}
+	if update.Current != nil {
+		data["progress_current"] = *update.Current
+	}
+	if update.Total != nil {
+		data["progress_total"] = *update.Total
+	}
+	if update.Percent != nil {
+		data["progress_percent"] = *update.Percent
+	}
+	if update.Label != "" {
+		data["progress_label"] = update.Label
+	}
+	if update.Mode != "" {
+		data["progress_mode"] = string(update.Mode)
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	return data
+}
+
+func clearJobProgress(job *jobInfo) {
+	job.ProgressStage = ""
+	job.ProgressCurrent = nil
+	job.ProgressTotal = nil
+	job.ProgressPercent = nil
+	job.ProgressLabel = ""
+	job.ProgressMode = ""
 }
 
 func countWarnings(result map[string]any) int {

@@ -18,18 +18,43 @@ func GenerateInitialProfileProposal(settings config.Settings, interestDescriptio
 	if current != nil {
 		return nil, fmt.Errorf("A classification profile already exists.")
 	}
-	if progress != nil {
-		progress("profile.bootstrap.generating", "Generating the initial classification profile proposal.")
-	}
+	EmitProgress(progress, StepProgress(
+		"profile.bootstrap.preparing",
+		"profile-bootstrap",
+		1,
+		4,
+		FormatStepMessage(1, 4, "Preparing initial profile request."),
+	))
+	EmitProgress(progress, StepProgress(
+		"profile.bootstrap.generating",
+		"profile-bootstrap",
+		2,
+		4,
+		FormatStepMessage(2, 4, "Generating initial profile proposal."),
+	))
 	draft, err := profile.GenerateInitialProfileProposal(settings, interestDescription, name)
 	if err != nil {
 		return nil, err
 	}
+	EmitProgress(progress, StepProgress(
+		"profile.bootstrap.validating",
+		"profile-bootstrap",
+		3,
+		4,
+		FormatStepMessage(3, 4, "Validating generated profile."),
+	))
 	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
 	if err != nil {
 		return nil, err
 	}
 	defer sqliteStore.Close()
+	EmitProgress(progress, StepProgress(
+		"profile.bootstrap.saving",
+		"profile-bootstrap",
+		4,
+		4,
+		FormatStepMessage(4, 4, "Saving initial profile proposal."),
+	))
 	item, err := sqliteStore.SaveProfileProposal(
 		draft.Summary,
 		draft.BaseProfileVersion,
@@ -55,9 +80,13 @@ func GenerateProfileProposal(settings config.Settings, progress ProgressFunc) (m
 	if current == nil {
 		return nil, fmt.Errorf("No classification profile exists yet.")
 	}
-	if progress != nil {
-		progress("profile.proposal.collecting_feedback", "Collecting feedback and current profile context.")
-	}
+	EmitProgress(progress, StepProgress(
+		"profile.proposal.collecting_feedback",
+		"profile-proposal",
+		1,
+		4,
+		FormatStepMessage(1, 4, "Collecting feedback and current profile context."),
+	))
 	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
 	if err != nil {
 		return nil, err
@@ -80,13 +109,31 @@ func GenerateProfileProposal(settings config.Settings, progress ProgressFunc) (m
 			Note:               item.Note,
 		})
 	}
-	if progress != nil {
-		progress("profile.proposal.generating", "Generating profile proposal.")
-	}
+	EmitProgress(progress, StepProgress(
+		"profile.proposal.generating",
+		"profile-proposal",
+		2,
+		4,
+		FormatStepMessage(2, 4, "Generating profile proposal."),
+	))
 	draft, err := profile.GenerateProfileProposal(settings, current, feedbackItems)
 	if err != nil {
 		return nil, err
 	}
+	EmitProgress(progress, StepProgress(
+		"profile.proposal.validating",
+		"profile-proposal",
+		3,
+		4,
+		FormatStepMessage(3, 4, "Validating generated profile proposal."),
+	))
+	EmitProgress(progress, StepProgress(
+		"profile.proposal.saving",
+		"profile-proposal",
+		4,
+		4,
+		FormatStepMessage(4, 4, "Saving profile proposal."),
+	))
 	item, err := sqliteStore.SaveProfileProposal(
 		draft.Summary,
 		draft.BaseProfileVersion,

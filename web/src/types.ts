@@ -296,6 +296,12 @@ export type JobInfo = {
   message_key?: string | null;
   message?: string | null;
   error?: string | null;
+  progress_stage?: string | null;
+  progress_current?: number | null;
+  progress_total?: number | null;
+  progress_percent?: number | null;
+  progress_label?: string | null;
+  progress_mode?: "item" | "step" | null;
   verification_required?: boolean;
   verification_target?: string | null;
   verification_feed_url?: string | null;
