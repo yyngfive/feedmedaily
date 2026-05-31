@@ -1,18 +1,19 @@
 # TODO
 
 当前较正式的实施路线见 [docs/plans/current-roadmap.md](/D:/Codes/Projects/SciRSSAgent/docs/plans/current-roadmap.md)。本文件保留为快速 backlog 和记事清单。
+以下勾选状态按 `main` 分支当前实现校对；能明确从代码与已合并提交确认完成的项已标记为已完成，其余继续保留为未完成。
 
 # Front end
 
 ## Profile
 
 - [X] 增加自己编辑Profile功能
-- [ ] 增加AI自动简化Profile的功能，优化Profile更新逻辑
+- [X] 增加AI自动简化Profile的功能，优化Profile更新逻辑
 
 ## Feed
 
 - [ ] 增加一个内置的Feed List以及官方RSS List跳转页
-- [ ] 增加获取feed、metadata、llm分类时的具体进度条
+- [ ] 增加获取feed、metadata、llm分类时的具体进度条（当前已有状态消息提示，但还不是进度条）
 
 ## Initialization & Settings
 
@@ -37,17 +38,21 @@
 
 ## Update
 
-- [ ] 增加内置的manifest
+- [X] 增加内置的manifest
 
 # Server
 
+## Performance
+
+- [ ] [High] 每次打开应用读取数据库都要等待，且会随文献数量增长越来越慢；需要优化启动时/首页加载时的 SQLite 读取与 report 构建路径
+
 ## Feed
 
-- [ ] APSB等Elsevier期刊解析报错
-- [ ] NAR的RSS无法获取
+- [X] APSB等Elsevier期刊解析报错
+- [X] NAR的RSS无法获取
 - [ ] 避免数据更新时的终端弹窗
 - [ ] 托盘启动和双击打开应用时仍会闪烁命令行窗口
-- [ ] Last Update没有更新却自动增加
+- [X] Last Update没有更新却自动增加
 
 ## Scheduler
 
@@ -59,4 +64,4 @@
 
 ## 托盘
 
-- [ ] 后台服务检测到托盘程序未启动，自动打开托盘
+- [X] 后台服务检测到托盘程序未启动，自动打开托盘

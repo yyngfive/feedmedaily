@@ -9,6 +9,7 @@ import (
 
 	"github.com/yyngfive/scirssagent/internal/config"
 	"github.com/yyngfive/scirssagent/internal/feeds"
+	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
 	"github.com/yyngfive/scirssagent/internal/logging"
 )
 
@@ -45,7 +46,7 @@ var (
 	completeVerificationFlowFunc = completeVerificationFlow
 )
 
-func launchVerificationAwareSyncJob(settings config.Settings, run func(progress func(string, string), overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error)) jobInfo {
+func launchVerificationAwareSyncJob(settings config.Settings, run func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error)) jobInfo {
 	job := jobInfo{
 		ID:         nextJobID(),
 		JobType:    "sync",
@@ -76,11 +77,17 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 			current.StartedAt = &started
 		})
 
-		progress := func(messageKey string, message string) {
-			logJobEvent(settings.LogsDir, &job, "info", "progress", messageKey, message, "", nil)
+		progress := func(update jobruntime.ProgressUpdate) {
+			logJobEvent(settings.LogsDir, &job, "info", "progress", update.MessageKey, update.Message, "", progressLogData(update))
 			updateJob(job.ID, func(current *jobInfo) {
-				current.MessageKey = messageKey
-				current.Message = message
+				current.MessageKey = update.MessageKey
+				current.Message = update.Message
+				current.ProgressStage = update.Stage
+				current.ProgressCurrent = update.Current
+				current.ProgressTotal = update.Total
+				current.ProgressPercent = update.Percent
+				current.ProgressLabel = update.Label
+				current.ProgressMode = string(update.Mode)
 			})
 		}
 
@@ -95,6 +102,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					current.Status = "waiting_for_user"
 					current.MessageKey = "pipeline.feeds.verification_required"
 					current.Message = "A protected feed needs Cloudflare verification. A verification window should open automatically."
+					clearJobProgress(current)
 					current.Result = map[string]any{
 						"verification_required": true,
 						"verification_target":   pending.Target,
@@ -117,6 +125,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					current.Status = "running"
 					current.MessageKey = "pipeline.feeds.fetching"
 					current.Message = "Verification window could not be opened. Skipping that protected feed for this sync."
+					clearJobProgress(current)
 					current.VerificationRequired = false
 					current.VerificationTarget = ""
 					current.VerificationFeedURL = ""
@@ -140,6 +149,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					current.Status = "running"
 					current.MessageKey = "pipeline.feeds.fetching"
 					current.Message = "Verification was not completed. Continuing this sync and recording a fetch warning."
+					clearJobProgress(current)
 					current.VerificationRequired = false
 					current.VerificationTarget = ""
 					current.VerificationFeedURL = ""
@@ -147,11 +157,12 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 				})
 			},
 			OnVerificationResumed: func(_ *pendingVerification) {
-				logJobEvent(settings.LogsDir, &job, "info", "verification_resumed", "pipeline.feeds.fetching", "Verification received. Resuming RSS fetch.", "", nil)
+				logJobEvent(settings.LogsDir, &job, "info", "verification_resumed", "pipeline.feeds.fetching", "Verification received. Re-running RSS fetch with verified XML.", "", nil)
 				updateJob(job.ID, func(current *jobInfo) {
 					current.Status = "running"
 					current.MessageKey = "pipeline.feeds.fetching"
-					current.Message = "Verification received. Resuming RSS fetch."
+					current.Message = "Verification received. Re-running RSS fetch with verified XML."
+					clearJobProgress(current)
 					current.VerificationRequired = false
 					current.VerificationTarget = ""
 					current.VerificationFeedURL = ""
@@ -169,6 +180,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 				current.Message = summarizeResult("sync", result)
 				current.Result = result
 				current.WarningCount = warningCount
+				clearJobProgress(current)
 				current.FinishedAt = &finished
 				current.VerificationRequired = false
 				current.VerificationTarget = ""
@@ -183,6 +195,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 			current.Status = "failed"
 			current.MessageKey = "sync.failed"
 			current.Error = err.Error()
+			clearJobProgress(current)
 			current.FinishedAt = &finished
 			current.VerificationRequired = false
 			current.VerificationTarget = ""

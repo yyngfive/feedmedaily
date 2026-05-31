@@ -308,10 +308,10 @@ func TestAdminSyncJob(t *testing.T) {
 
 	runSyncFunc = func(_ config.Settings, _ jobruntime.RunOptions, progress jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
 		if progress != nil {
-			progress("pipeline.feeds.fetching", "Fetching RSS feeds.")
-			progress("pipeline.metadata.enriching", "Getting metadata for 1 paper(s).")
-			progress("pipeline.classifier.classifying", "Classifying 1 paper(s).")
-			progress("pipeline.report.refreshing", "Refreshing the latest report from SQLite.")
+			progress(jobruntime.ItemProgress("pipeline.feeds.fetching", "fetch", 1, 1, "Test Journal", "Fetching feed 1/1: Test Journal."))
+			progress(jobruntime.PercentProgress("pipeline.metadata.enriching", "metadata", 1, 1, "Getting metadata 1/1 (100%)."))
+			progress(jobruntime.PercentProgress("pipeline.classifier.classifying", "classification", 1, 1, "Classifying papers 1/1 (100%)."))
+			progress(jobruntime.ProgressUpdate{MessageKey: "pipeline.report.refreshing", Message: "Refreshing the latest report from SQLite.", Stage: "report"})
 		}
 		return jobruntime.RunSummary{
 			Fetched:    2,
@@ -389,7 +389,7 @@ func TestBootstrapProposalGenerateAndZoteroBridgeAPIs(t *testing.T) {
 
 	bootstrapProfileFunc = func(_ config.Settings, interestDescription string, name *string, progress jobruntime.ProgressFunc) (map[string]any, error) {
 		if progress != nil {
-			progress("profile.bootstrap.generating", "Generating the initial classification profile proposal.")
+			progress(jobruntime.StepProgress("profile.bootstrap.generating", "profile-bootstrap", 2, 4, "Step 2/4 (50%): Generating initial profile proposal."))
 		}
 		result := map[string]any{"proposal_id": 1}
 		if name != nil {
@@ -400,8 +400,8 @@ func TestBootstrapProposalGenerateAndZoteroBridgeAPIs(t *testing.T) {
 	}
 	generateProfileProposalFunc = func(_ config.Settings, progress jobruntime.ProgressFunc) (map[string]any, error) {
 		if progress != nil {
-			progress("profile.proposal.collecting_feedback", "Collecting feedback for profile review.")
-			progress("profile.proposal.generating", "Generating profile proposal.")
+			progress(jobruntime.StepProgress("profile.proposal.collecting_feedback", "profile-proposal", 1, 4, "Step 1/4 (25%): Collecting feedback and current profile context."))
+			progress(jobruntime.StepProgress("profile.proposal.generating", "profile-proposal", 2, 4, "Step 2/4 (50%): Generating profile proposal."))
 		}
 		return map[string]any{"proposal_id": 2, "state": "pending"}, nil
 	}
@@ -483,7 +483,7 @@ func TestProfileProposalApplyRejectAndReclassifyAPI(t *testing.T) {
 
 	reclassifyPaperIDsFunc = func(_ config.Settings, paperIDs []int64, progress jobruntime.ProgressFunc) (int, error) {
 		if progress != nil {
-			progress("pipeline.classifier.classifying", "Classifying 1 paper(s).")
+			progress(jobruntime.PercentProgress("pipeline.classifier.classifying", "classification", 1, 1, "Classifying papers 1/1 (100%)."))
 		}
 		if len(paperIDs) == 0 {
 			return 0, nil
@@ -495,7 +495,7 @@ func TestProfileProposalApplyRejectAndReclassifyAPI(t *testing.T) {
 	}
 	rebuildLatestReportFunc = func(_ config.Settings, progress jobruntime.ProgressFunc) (int, error) {
 		if progress != nil {
-			progress("pipeline.report.refreshing", "Refreshing the latest report from SQLite.")
+			progress(jobruntime.ProgressUpdate{MessageKey: "pipeline.report.refreshing", Message: "Refreshing the latest report from SQLite.", Stage: "report"})
 		}
 		return 1, nil
 	}

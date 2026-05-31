@@ -12,8 +12,6 @@ import (
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
-type ProgressFunc func(string, string)
-
 func SelectPaperIDsForScope(settings config.Settings, scope string, limit int) ([]int64, error) {
 	// 复刻 Python reclassify scope 到 paper ids 的选择逻辑。
 	sqliteStore, err := store.Open(settings.DatabasePath)
@@ -37,9 +35,7 @@ func SelectPaperIDsForScope(settings config.Settings, scope string, limit int) (
 func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress ProgressFunc) (int, error) {
 	// 用 Go 原生 metadata + classifier 重分类现有 papers。
 	logging.SetDefaultDir(settings.LogsDir)
-	if progress != nil {
-		progress("pipeline.metadata.enriching", fmt.Sprintf("Getting metadata for %d paper(s).", len(paperIDs)))
-	}
+	EmitProgress(progress, PercentProgress("pipeline.metadata.enriching", "metadata", 0, len(paperIDs), metadataProgressMessage(0, len(paperIDs))))
 	currentProfile, err := profile.ReadCurrent(settings.ProfilePath)
 	if err != nil {
 		return 0, err
@@ -79,13 +75,24 @@ func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress Pro
 			PaperID int64
 			Paper   store.Paper
 		}{PaperID: paperID, Paper: enriched})
+		EmitProgress(progress, PercentProgress(
+			"pipeline.metadata.enriching",
+			"metadata",
+			len(enrichedPairs),
+			len(paperIDs),
+			metadataProgressMessage(len(enrichedPairs), len(paperIDs)),
+		))
 	}
 	if len(enrichedPairs) == 0 {
 		return 0, nil
 	}
-	if progress != nil {
-		progress("pipeline.classifier.classifying", fmt.Sprintf("Classifying %d paper(s).", len(enrichedPairs)))
-	}
+	EmitProgress(progress, PercentProgress(
+		"pipeline.classifier.classifying",
+		"classification",
+		0,
+		len(enrichedPairs),
+		classificationProgressMessage(0, len(enrichedPairs)),
+	))
 	batchSize := settings.ClassifierBatchSize
 	if batchSize < 1 {
 		batchSize = 10
@@ -117,6 +124,13 @@ func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress Pro
 			}
 			classified++
 		}
+		EmitProgress(progress, PercentProgress(
+			"pipeline.classifier.classifying",
+			"classification",
+			classified,
+			len(enrichedPairs),
+			classificationProgressMessage(classified, len(enrichedPairs)),
+		))
 		_, _ = logging.WriteDefault(logging.Event{
 			Level:     "info",
 			Component: "jobs.reclassify",

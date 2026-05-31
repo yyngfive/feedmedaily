@@ -298,7 +298,7 @@ export function App() {
         let activeAnnouncement: JobInfo | null = null;
         const nextJobState = new Map<string, string>();
         for (const job of serverJobs) {
-          const signature = `${job.status}:${job.finished_at ?? job.started_at ?? ""}:${job.message_key ?? ""}:${job.message ?? ""}:${job.error ?? ""}`;
+          const signature = `${job.status}:${job.finished_at ?? job.started_at ?? ""}:${job.message_key ?? ""}:${job.message ?? ""}:${job.error ?? ""}:${job.progress_stage ?? ""}:${job.progress_current ?? ""}:${job.progress_total ?? ""}:${job.progress_percent ?? ""}:${job.progress_label ?? ""}:${job.progress_mode ?? ""}`;
           const previousSignature = knownJobStateRef.current.get(job.id);
           nextJobState.set(job.id, signature);
           if (
@@ -352,7 +352,7 @@ export function App() {
           activeJobMessageRef.current = null;
           setMessage(messageFromJob(announcement));
         } else if (!jobsHydratedRef.current && activeAnnouncement) {
-          const activeSignature = `${activeAnnouncement.id}:${activeAnnouncement.status}:${activeAnnouncement.message_key ?? ""}:${activeAnnouncement.message ?? ""}`;
+          const activeSignature = `${activeAnnouncement.id}:${activeAnnouncement.status}:${activeAnnouncement.message_key ?? ""}:${activeAnnouncement.message ?? ""}:${activeAnnouncement.progress_stage ?? ""}:${activeAnnouncement.progress_current ?? ""}:${activeAnnouncement.progress_total ?? ""}:${activeAnnouncement.progress_percent ?? ""}:${activeAnnouncement.progress_label ?? ""}:${activeAnnouncement.progress_mode ?? ""}`;
           if (activeJobMessageRef.current !== activeSignature) {
             activeJobMessageRef.current = activeSignature;
             setMessage(messageFromJob(activeAnnouncement));

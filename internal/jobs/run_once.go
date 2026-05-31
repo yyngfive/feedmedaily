@@ -45,13 +45,17 @@ var fetchAllFeedsFunc = feeds.FetchAll
 // RunSync executes the end-to-end sync pipeline in Go.
 func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (RunSummary, error) {
 	logging.SetDefaultDir(settings.LogsDir)
-	if progress != nil {
-		progress("pipeline.feeds.fetching", "Fetching RSS feeds.")
-	}
 	fetchResult, err := fetchAllFeedsFunc(settings.FeedsPath, feeds.FetchOptions{
 		MaxPapers:      opts.MaxPapers,
 		OverrideBodies: opts.FeedBodyOverrides,
 		SkippedFeeds:   opts.SkippedFeeds,
+		Progress: func(current int, total int, label string) {
+			message := fmt.Sprintf("Fetching feeds %d/%d.", current, total)
+			if current > 0 && label != "" {
+				message = fmt.Sprintf("Fetching feed %d/%d: %s.", current, total, label)
+			}
+			EmitProgress(progress, ItemProgress("pipeline.feeds.fetching", "fetch", current, total, label, message))
+		},
 	})
 	if err != nil {
 		return RunSummary{}, err
@@ -161,9 +165,7 @@ func filterNonSkippedErrors(errors []string, skippedFeeds map[string]string) []s
 
 func reclassifyExistingPapers(sqliteStore *store.Store, settings config.Settings, currentProfile map[string]any, cfg classifier.LLMConfig, paperIDs []int64, progress ProgressFunc) (int, error) {
 	logging.SetDefaultDir(settings.LogsDir)
-	if progress != nil {
-		progress("pipeline.metadata.enriching", fmt.Sprintf("Getting metadata for %d paper(s).", len(paperIDs)))
-	}
+	EmitProgress(progress, PercentProgress("pipeline.metadata.enriching", "metadata", 0, len(paperIDs), metadataProgressMessage(0, len(paperIDs))))
 	enrichedPairs := make([]struct {
 		PaperID int64
 		Paper   store.Paper
@@ -186,13 +188,24 @@ func reclassifyExistingPapers(sqliteStore *store.Store, settings config.Settings
 			PaperID int64
 			Paper   store.Paper
 		}{PaperID: paperID, Paper: enriched})
+		EmitProgress(progress, PercentProgress(
+			"pipeline.metadata.enriching",
+			"metadata",
+			len(enrichedPairs),
+			len(paperIDs),
+			metadataProgressMessage(len(enrichedPairs), len(paperIDs)),
+		))
 	}
 	if len(enrichedPairs) == 0 {
 		return 0, nil
 	}
-	if progress != nil {
-		progress("pipeline.classifier.classifying", fmt.Sprintf("Classifying %d paper(s).", len(enrichedPairs)))
-	}
+	EmitProgress(progress, PercentProgress(
+		"pipeline.classifier.classifying",
+		"classification",
+		0,
+		len(enrichedPairs),
+		classificationProgressMessage(0, len(enrichedPairs)),
+	))
 	batchSize := settings.ClassifierBatchSize
 	if batchSize < 1 {
 		batchSize = 10
@@ -228,6 +241,13 @@ func reclassifyExistingPapers(sqliteStore *store.Store, settings config.Settings
 			}
 			classified++
 		}
+		EmitProgress(progress, PercentProgress(
+			"pipeline.classifier.classifying",
+			"classification",
+			classified,
+			len(enrichedPairs),
+			classificationProgressMessage(classified, len(enrichedPairs)),
+		))
 		_, _ = logging.WriteDefault(logging.Event{
 			Level:     "info",
 			Component: "jobs.classifier",
@@ -245,9 +265,11 @@ func reclassifyExistingPapers(sqliteStore *store.Store, settings config.Settings
 
 func rebuildLatestReportSummary(settings config.Settings, progress ProgressFunc) (int, error) {
 	logging.SetDefaultDir(settings.LogsDir)
-	if progress != nil {
-		progress("pipeline.report.refreshing", "Refreshing the latest report from SQLite.")
-	}
+	EmitProgress(progress, ProgressUpdate{
+		MessageKey: "pipeline.report.refreshing",
+		Message:    "Refreshing the latest report from SQLite.",
+		Stage:      "report",
+	})
 	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
 	if err != nil {
 		return 0, err

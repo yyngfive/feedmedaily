@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -13,10 +14,13 @@ import (
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
+type FetchProgressFunc func(current int, total int, label string)
+
 type FetchOptions struct {
 	MaxPapers      int
 	OverrideBodies map[string][]byte
 	SkippedFeeds   map[string]string
+	Progress       FetchProgressFunc
 }
 
 type FetchResult struct {
@@ -223,6 +227,10 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 	if err != nil {
 		return FetchResult{}, err
 	}
+	totalFeeds := len(subscriptions)
+	if opts.Progress != nil {
+		opts.Progress(0, totalFeeds, "")
+	}
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "info",
 		Component: "feeds",
@@ -236,8 +244,12 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 		FeedURLs:             make([]string, 0, len(subscriptions)),
 		VerificationRequests: []VerificationRequest{},
 	}
-	for _, subscription := range subscriptions {
+	for index, subscription := range subscriptions {
 		result.FeedURLs = append(result.FeedURLs, subscription.URL)
+		label := fetchProgressLabel(subscription.Journal, subscription.URL)
+		if opts.Progress != nil {
+			opts.Progress(index+1, totalFeeds, label)
+		}
 		if reason, ok := skippedFeedReason(subscription.URL, opts.SkippedFeeds); ok {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", subscription.URL, reason))
 			continue
@@ -280,6 +292,17 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 		},
 	})
 	return result, nil
+}
+
+func fetchProgressLabel(journal string, rawURL string) string {
+	if strings.TrimSpace(journal) != "" {
+		return strings.TrimSpace(journal)
+	}
+	parsed, err := neturl.Parse(strings.TrimSpace(rawURL))
+	if err == nil && strings.TrimSpace(parsed.Hostname()) != "" {
+		return strings.TrimSpace(parsed.Hostname())
+	}
+	return strings.TrimSpace(rawURL)
 }
 
 func fetchFeed(url string, opts FetchOptions) ([]store.Paper, error) {

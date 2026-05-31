@@ -53,6 +53,11 @@ const catalog = {
   },
   "profile.proposal.generating": {text: "Generating profile proposal.", tone: "info"},
   "profile.bootstrap.generating": {text: "Generating initial profile proposal.", tone: "info"},
+  "profile.bootstrap.preparing": {text: "Preparing initial profile request.", tone: "info"},
+  "profile.bootstrap.validating": {text: "Validating generated profile.", tone: "info"},
+  "profile.bootstrap.saving": {text: "Saving initial profile proposal.", tone: "info"},
+  "profile.proposal.validating": {text: "Validating generated profile proposal.", tone: "info"},
+  "profile.proposal.saving": {text: "Saving profile proposal.", tone: "info"},
 } satisfies Record<string, {text: string; tone: StatusTone}>;
 
 export function createUiMessage(
@@ -70,6 +75,7 @@ export function createUiMessage(
 }
 
 export function messageFromJob(job: JobInfo): UiMessage {
+  const progressText = formatProgressMessage(job);
   if (job.status === "failed") {
     const message = createUiMessage(job.message_key ?? "job.failed", {
       text: job.error ?? job.message ?? "Job failed.",
@@ -93,8 +99,39 @@ export function messageFromJob(job: JobInfo): UiMessage {
     return {...message, ttlMs: STICKY_TTL_MS};
   }
   const message = createUiMessage(job.message_key ?? "job.started", {
-    text: job.message ?? undefined,
+    text: progressText ?? job.message ?? undefined,
     tone: "info",
   });
   return {...message, ttlMs: STICKY_TTL_MS};
+}
+
+function formatProgressMessage(job: JobInfo): string | null {
+  const stage = job.progress_stage?.trim();
+  if (!stage) {
+    return null;
+  }
+  const current = job.progress_current;
+  const total = job.progress_total;
+  const percent = job.progress_percent;
+  const label = job.progress_label?.trim();
+
+  if (stage === "fetch" && current != null && total != null) {
+    if (current <= 0) {
+      return `Fetching feeds ${current}/${total}.`;
+    }
+    return `Fetching feed ${current}/${total}: ${label || "Current feed"}.`;
+  }
+  if (stage === "metadata" && current != null && total != null && percent != null) {
+    return `Getting metadata ${current}/${total} (${percent}%).`;
+  }
+  if (stage === "classification" && current != null && total != null && percent != null) {
+    return `Classifying papers ${current}/${total} (${percent}%).`;
+  }
+  if ((stage === "profile-bootstrap" || stage === "profile-proposal") && job.message) {
+    return job.message;
+  }
+  if (stage === "report" && job.message) {
+    return job.message;
+  }
+  return null;
 }

@@ -14,6 +14,7 @@ Changes since `0.3.0`:
 - Tightened the feedback-driven profile proposal prompt to favor reason-first abstraction, broader rewrite/merge compaction, and clearer rejection of object-level rule sprawl; added review warnings for newly added rules that still look overly specific.
 - Further tightened feedback-driven proposal generation so conflicting old rules must be rewritten or removed, merge/add duplicates are discouraged, and merged rules are expected to preserve important boundary coverage. Classification now uses only scope plus relevance rules, without few-shot examples, to reduce broad-example bias.
 - Simplified profile maintenance to focus only on scope plus relevance rules: the current editor now uses row-based rule lists, tags/examples are cleared from new saves and proposals, and profile proposal generation can run in maintenance mode even when there is no open feedback.
+- Added structured background-job progress reporting for sync, reclassify, and profile-generation flows. The UI now shows feed-by-feed fetch status, metadata/classification completion percentages, and step-based profile generation progress without adding a separate progress-bar UI.
 
 ## 0.3.0 (2026-05-25)
 
