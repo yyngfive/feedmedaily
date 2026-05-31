@@ -12,6 +12,7 @@ import (
 
 func TestClassifyPapersWithTranslationFallback(t *testing.T) {
 	requests := []map[string]any{}
+	userPrompts := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		var payload map[string]any
@@ -21,6 +22,7 @@ func TestClassifyPapersWithTranslationFallback(t *testing.T) {
 		requests = append(requests, payload)
 		messages := payload["messages"].([]any)
 		userContent := messages[1].(map[string]any)["content"].(string)
+		userPrompts = append(userPrompts, userContent)
 		if strings.Contains(userContent, "Translate each paper title") {
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"translated_title_zh\":\"中文标题\"}]}"}}]}`))
 			return
@@ -37,7 +39,9 @@ func TestClassifyPapersWithTranslationFallback(t *testing.T) {
 			"unrelated": []any{},
 		},
 		"topic_taxonomy": []any{map[string]any{"id": "rna_bio", "label": "RNA Bio"}},
-		"few_shots":      []any{},
+		"few_shots": []any{
+			map[string]any{"title": "Broad example", "relevance": "direct", "rationale": "Example only"},
+		},
 	}, LLMConfig{
 		APIKey:   "test-key",
 		Model:    "test-model",
@@ -64,6 +68,18 @@ func TestClassifyPapersWithTranslationFallback(t *testing.T) {
 	}
 	if requests[1]["thinking"].(map[string]any)["type"] != "disabled" {
 		t.Fatalf("unexpected translation thinking: %#v", requests[1]["thinking"])
+	}
+	if len(userPrompts) == 0 {
+		t.Fatalf("expected at least one captured user prompt")
+	}
+	if strings.Contains(userPrompts[0], "few_shots") {
+		t.Fatalf("classification prompt should not include few_shots: %s", userPrompts[0])
+	}
+	if strings.Contains(userPrompts[0], "topic_taxonomy") {
+		t.Fatalf("classification prompt should not include topic_taxonomy: %s", userPrompts[0])
+	}
+	if !strings.Contains(userPrompts[0], "Judge relevance from the current scope and relevance rules only.") {
+		t.Fatalf("classification prompt missing rule-only guidance: %s", userPrompts[0])
 	}
 }
 

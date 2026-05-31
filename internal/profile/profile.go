@@ -293,8 +293,8 @@ func compactDocument(document profileDocument) profileDocument {
 		},
 		Scope:          strings.TrimSpace(document.Scope),
 		RelevanceRules: compactRules(document.RelevanceRules),
-		TopicTaxonomy:  compactTopics(document.TopicTaxonomy),
-		FewShots:       compactFewShots(document.FewShots),
+		TopicTaxonomy:  []topicDefinition{},
+		FewShots:       []profileFewShot{},
 	}
 }
 

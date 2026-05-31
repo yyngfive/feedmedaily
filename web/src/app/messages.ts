@@ -48,7 +48,7 @@ const catalog = {
     tone: "warning",
   },
   "profile.proposal.collecting_feedback": {
-    text: "Collecting feedback for profile review.",
+    text: "Collecting feedback and current profile context.",
     tone: "info",
   },
   "profile.proposal.generating": {text: "Generating profile proposal.", tone: "info"},

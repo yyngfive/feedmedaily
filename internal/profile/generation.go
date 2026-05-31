@@ -25,11 +25,13 @@ type FeedbackProposalContext struct {
 }
 
 type ProposalDraft struct {
-	Summary           string
-	ProposedProfile   map[string]any
-	RuleDelta         map[string]any
-	Model             string
-	SourceFeedbackIDs []int64
+	BaseProfileVersion int
+	Summary            string
+	ProposedProfile    map[string]any
+	Changes            []ProposalChange
+	RuleDelta          map[string]any
+	Model              string
+	SourceFeedbackIDs  []int64
 }
 
 var requestProfileModelJSONFunc = requestProfileModelJSON
@@ -54,10 +56,9 @@ Requirements:
 - Return valid JSON only.
 - Use exactly the schema shape shown below.
 - The fixed relevance labels are direct, indirect, unrelated.
-- topic_taxonomy must be lightweight and contain only id + label.
 - Write practical, compact, reusable rules.
-- few_shots are optional and must contain at most 2 examples total.
-- Do not include description/examples fields for tags.
+- Do not generate topic_taxonomy entries; return an empty array.
+- Do not generate few_shots; return an empty array.
 - Do not include a generic placeholder profile.
 
 User profile name hint:
@@ -84,10 +85,8 @@ Required JSON shape:
 		return ProposalDraft{}, err
 	}
 	summary := fmt.Sprintf(
-		"Initial profile for %s with %d topic tags and %d few-shot examples.",
+		"Initial profile for %s with compact relevance rules.",
 		proposedDocument.Meta.Name,
-		len(proposedDocument.TopicTaxonomy),
-		len(proposedDocument.FewShots),
 	)
 	proposedProfile, _, err := compactDocumentMap(proposedDocument)
 	if err != nil {
@@ -98,24 +97,27 @@ Required JSON shape:
 		return ProposalDraft{}, err
 	}
 	return ProposalDraft{
-		Summary:         summary,
-		ProposedProfile: proposedProfile,
-		RuleDelta:       ruleDeltaMap,
-		Model:           settings.ProfileModel,
+		BaseProfileVersion: 0,
+		Summary:            summary,
+		ProposedProfile:    proposedProfile,
+		Changes:            []ProposalChange{},
+		RuleDelta:          ruleDeltaMap,
+		Model:              settings.ProfileModel,
 	}, logInitialProposalCompleted(summary, proposedDocument, settings.ProfileModel)
 }
 
 func GenerateProfileProposal(settings config.Settings, current map[string]any, feedbackItems []FeedbackProposalContext) (ProposalDraft, error) {
-	// 根据当前 profile 和 open feedback 生成一个 bounded proposal 草稿。
-	if len(feedbackItems) == 0 {
-		return ProposalDraft{}, fmt.Errorf("no feedback is available for profile proposal generation")
-	}
+	// 根据当前 profile 和 open feedback 生成一个会自动压缩同类规则的 proposal 草稿。
+	maintenanceMode := len(feedbackItems) == 0
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "info",
 		Component: "profile",
 		Action:    "proposal_started",
 		Message:   fmt.Sprintf("Generating profile proposal from %d feedback item(s)", len(feedbackItems)),
-		Data:      map[string]any{"feedback_items": len(feedbackItems)},
+		Data: map[string]any{
+			"feedback_items": len(feedbackItems),
+			"maintenance":    maintenanceMode,
+		},
 	})
 	currentDocument, err := parseDocumentMap(current)
 	if err != nil {
@@ -129,65 +131,118 @@ func GenerateProfileProposal(settings config.Settings, current map[string]any, f
 	if err != nil {
 		return ProposalDraft{}, fmt.Errorf("encode feedback proposal context: %w", err)
 	}
+	instructionHeader := "Compact and refine the current scientific-literature classification profile using the human feedback below."
+	contextHeading := "Human feedback:"
+	behaviorLine := "- Use the feedback to sharpen boundaries and reduce future mistakes."
+	if maintenanceMode {
+		instructionHeader = "Compact and refine the current scientific-literature classification profile using maintenance mode because no new human feedback is available."
+		contextHeading = "Maintenance context:"
+		behaviorLine = "- There is no new feedback in this run. Focus on profile hygiene: merge overlapping rules, remove stale residue, and compress old object-level leftovers into cleaner reason-level rules."
+	}
 	prompt := strings.TrimSpace(fmt.Sprintf(`
-Summarize the human feedback and propose compact rule updates for the current
-scientific-literature classification profile.
+%s
 
 Requirements:
 - Return valid JSON only.
-- Return a compact delta object, not a full profile.
-- First infer the shared patterns behind the corrected labels.
-- Then convert those patterns into reusable relevance-rule additions.
-- Keep the current profile as the base document.
-- Do not rewrite unrelated sections of the profile.
+- Return both:
+  1. a compact proposed_profile
+  2. a structured changes array
+- First do a coverage check for every feedback item:
+  - ask whether the corrected boundary can be captured by rewriting or merging existing rules
+  - only add a brand-new rule when no existing rule can be broadened or merged to cover it safely
+- Infer the shared reasons behind the corrected labels before writing rules.
+- Use reason-first abstraction:
+  - prefer rules about why a paper is direct, indirect, or unrelated
+  - prefer high-level criteria such as where the core innovation sits
+  - do not split rules by object family when multiple object families share the same reason
+- Apply the same reason-first compaction standard to direct rules, not only indirect or unrelated rules.
+- Prefer merge/remove/rewrite over pure add whenever an existing rule can be edited.
+- Rewrite existing indirect/unrelated rules first when the new feedback reveals a broader boundary that can absorb older object-specific rules.
+- If a proposed merge or rewrite already covers a reason-level boundary, do not also add a second rule that expresses the same boundary in different wording.
+- Merge and add changes must not duplicate each other in substance.
+- If new feedback conflicts with an older rule, the new feedback wins. Resolve the conflict explicitly with rewrite/remove instead of keeping both sides.
+- When merging, preserve the salient coverage from the old rules. Do not drop boundary-defining content such as nanostructure, nano-assembly, platform, device, or other key qualifiers if they are still needed for future classification.
+- A pure add should be rare and used only when the current profile is missing an entire reason-level boundary.
+- If multiple candidate rules share the same why-indirect or why-unrelated logic, merge them into one broader rule instead of keeping separate object-level rules.
+- If you add a new rule, explain in rationale:
+  - which current rule was the closest match
+  - why that rule was still insufficient
+  - why rewrite/merge would lose a necessary boundary
+- If you merge rules, explain in rationale:
+  - which old boundaries were preserved
+  - why no important coverage was lost
+- Try to reduce the total number of relevance rules, or at least keep the total flat.
+- The goal is not to record every example; the goal is to explain more feedback with fewer, stabler rules.
+- Keep the profile compact and easier to maintain than the current version.
 - Do not replace a specific scientific-interest profile with a generic
   or placeholder profile.
 - Keep direct/indirect/unrelated as the only relevance labels.
-- Only propose small bounded tag edits when clearly necessary.
-- Do not generate few-shot examples.
-- Use the feedback to sharpen boundaries and reduce future mistakes.
+- Do not modify few_shots.
+- Only touch scope and relevance rules.
+%s
 
 Current compact profile context:
 %s
 
-Human feedback:
+%s
 %s
 
+Bad vs good abstraction examples:
+- Bad: keep one unrelated rule for MOF/COF/HOF papers, then add another unrelated rule for nucleic-acid biosensors using gold nanoparticles or silicon nanowires.
+- Good: rewrite or merge them into one broader reason-level rule when the shared reason is that the paper targets nucleic acids but the core innovation is in non-nucleic acid materials, device architecture, sensing platform, or nano-assembly, while the nucleic acid element is only a recognition element and is not itself chemically or methodologically developed.
+- Bad: merge several nanomaterial/device rules into a shorter rule, but accidentally drop important coverage such as DNA nanostructure, nano-assembly, carbon nanotube functionalization, or platform-level boundaries that the old rules were carrying.
+- Good: produce a broader merged rule only if it still preserves those salient boundaries in higher-level wording, or keep a narrower rewrite when that coverage would otherwise be lost.
+- Bad: create one merge change and one add change that both say the same boundary in slightly different words.
+- Good: either produce one rewrite/merge that absorbs the boundary, or produce one truly non-overlapping add if a separate boundary is genuinely missing.
+- Bad: create separate rules for peptide biosensors, protein sensors, and aptamer-platform papers just because the surface objects differ.
+- Good: abstract them into a higher-level boundary when the shared reason is that the recognition element is not the innovation center and the real novelty is in the material, platform, device, delivery system, or assay format rather than nucleic acid chemistry, directed evolution, proximity labeling, or engineering of nucleic acid-acting enzymes.
+- Bad: add multiple direct rules for specific probes, assays, or constructs that all really mean "the nucleic acid chemistry or enzyme-engineering innovation is central".
+- Good: rewrite or merge them into one reason-level direct rule that states the core direct boundary instead of enumerating object families.
+
 Return:
-- a short summary of the shared patterns you found
-- direct_rule_additions for patterns that should be treated as directly relevant
-- indirect_rule_additions for patterns that should be treated as indirectly relevant
-- unrelated_rule_additions for patterns that should be treated as unrelated
-- optional scope_rewrite only if the current scope summary is misleading
-- optional bounded tag_additions and tag_removals
+- summary: one short summary of what changed
+- proposed_profile: the compact full next profile
+- changes: a list of per-change items using add/remove/rewrite/merge
+- consolidate related feedback into fewer, broader changes when they point to the same reason-level boundary
+- prefer rewrite and merge changes that absorb old object-specific rules into broader reason-based rules
+- every change must include before/after content, rationale, and source ids
+- text_before/text_after are only for scope and relevance rules
+- use empty source_feedback_ids and source_paper_ids when running maintenance mode without feedback
+- do not create a few_shot section in changes
+- do not create topic changes
 
 Required JSON shape:
 %s
-`, string(compactProfileJSON), string(feedbackPayload), profileDeltaContract()))
+`, instructionHeader, behaviorLine, string(compactProfileJSON), contextHeading, string(feedbackPayload), compactProposalContract()))
 	content, err := requestProfileModelJSONFunc(
 		settings,
-		"You summarize feedback into compact profile rule deltas.",
+		"You compact scientific-literature profiles into maintainable change sets.",
 		prompt,
-		2600,
+		4200,
 	)
 	if err != nil {
 		return ProposalDraft{}, err
 	}
-	ruleDelta, err := coerceProposalDelta(settings, content)
+	summary, changes, err := coerceCompactProposal(content)
 	if err != nil {
 		return ProposalDraft{}, err
 	}
-	ruleDelta = boundedRuleDelta(ruleDelta)
-	proposedDocument := mergeProfileDelta(currentDocument, ruleDelta)
-	proposedDocument.Meta = normalizedProfileMeta(currentDocument)
+	changes = withoutTopicChanges(changes)
+	if len(changes) == 0 {
+		return ProposalDraft{}, fmt.Errorf("model generated a profile proposal without any actionable changes")
+	}
+	proposedProfile, err := BuildProposedProfileFromChanges(current, changes)
+	if err != nil {
+		return ProposalDraft{}, err
+	}
+	proposedDocument, err := parseDocumentMap(proposedProfile)
+	if err != nil {
+		return ProposalDraft{}, err
+	}
 	if reason := destructiveRevisionReason(currentDocument, proposedDocument); reason != "" {
 		return ProposalDraft{}, fmt.Errorf("model generated an unsafe profile proposal. %s Current profile was kept unchanged.", reason)
 	}
-	proposedProfile, _, err := compactDocumentMap(proposedDocument)
-	if err != nil {
-		return ProposalDraft{}, err
-	}
-	ruleDeltaMap, err := proposalDeltaToMap(ruleDelta)
+	ruleDeltaMap, err := proposalDeltaToMap(defaultProposalDelta(summary))
 	if err != nil {
 		return ProposalDraft{}, err
 	}
@@ -196,11 +251,13 @@ Required JSON shape:
 		sourceFeedbackIDs = append(sourceFeedbackIDs, item.FeedbackID)
 	}
 	draft := ProposalDraft{
-		Summary:           ruleDelta.Summary,
-		ProposedProfile:   proposedProfile,
-		RuleDelta:         ruleDeltaMap,
-		Model:             settings.ProfileModel,
-		SourceFeedbackIDs: sourceFeedbackIDs,
+		BaseProfileVersion: currentDocument.Meta.Version,
+		Summary:            summary,
+		ProposedProfile:    proposedProfile,
+		Changes:            changes,
+		RuleDelta:          ruleDeltaMap,
+		Model:              settings.ProfileModel,
+		SourceFeedbackIDs:  sourceFeedbackIDs,
 	}
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "info",
@@ -210,7 +267,8 @@ Required JSON shape:
 		Data: map[string]any{
 			"feedback_items": len(feedbackItems),
 			"model":          settings.ProfileModel,
-			"summary":        ruleDelta.Summary,
+			"summary":        summary,
+			"changes":        len(changes),
 		},
 	})
 	return draft, nil
@@ -434,7 +492,42 @@ Malformed draft:
 	return ValidateModelProposalDeltaText(content, "Generated profile proposal.")
 }
 
+func coerceCompactProposal(content string) (string, []ProposalChange, error) {
+	data, err := extractJSONObjectBytes(content)
+	if err != nil {
+		return "", nil, err
+	}
+	var payload struct {
+		Summary         string           `json:"summary"`
+		ProposedProfile json.RawMessage  `json:"proposed_profile"`
+		Changes         []ProposalChange `json:"changes"`
+	}
+	if err := decodeStrict(data, &payload); err != nil {
+		return "", nil, fmt.Errorf("parse compact profile proposal: %w", err)
+	}
+	summary := normalizeText(payload.Summary)
+	if summary == "" {
+		return "", nil, fmt.Errorf("compact profile proposal summary cannot be blank")
+	}
+	if len(payload.ProposedProfile) == 0 || string(payload.ProposedProfile) == "null" {
+		return "", nil, fmt.Errorf("compact profile proposal must include proposed_profile")
+	}
+	var proposedProfile map[string]any
+	if err := json.Unmarshal(payload.ProposedProfile, &proposedProfile); err != nil {
+		return "", nil, fmt.Errorf("parse compact profile proposal proposed_profile: %w", err)
+	}
+	if _, err := ValidateMap(proposedProfile); err != nil {
+		return "", nil, fmt.Errorf("validate compact profile proposal proposed_profile: %w", err)
+	}
+	changes, err := ValidateProposalChanges(payload.Changes)
+	if err != nil {
+		return "", nil, err
+	}
+	return summary, changes, nil
+}
+
 func logInitialProposalCompleted(summary string, document profileDocument, model string) error {
+	compact := compactDocument(document)
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "info",
 		Component: "profile",
@@ -443,9 +536,9 @@ func logInitialProposalCompleted(summary string, document profileDocument, model
 		Data: map[string]any{
 			"model":        model,
 			"summary":      summary,
-			"topic_tags":   len(document.TopicTaxonomy),
-			"few_shots":    len(document.FewShots),
-			"profile_name": document.Meta.Name,
+			"topic_tags":   len(compact.TopicTaxonomy),
+			"few_shots":    len(compact.FewShots),
+			"profile_name": compact.Meta.Name,
 		},
 	})
 	return nil
@@ -466,18 +559,45 @@ func compactProfileContract() string {
     "indirect": ["rule string"],
     "unrelated": ["rule string"]
   },
-  "topic_taxonomy": [
+  "topic_taxonomy": [],
+  "few_shots": []
+}`
+}
+
+func compactProposalContract() string {
+	return `{
+  "summary": "short summary of what changed",
+  "proposed_profile": {
+    "meta": {
+      "name": "same profile name",
+      "version": 2,
+      "created_at": "ISO-8601 datetime",
+      "updated_at": "ISO-8601 datetime",
+      "source_description": "same source description"
+    },
+    "scope": "rewritten scope if needed",
+    "relevance_rules": {
+      "direct": ["compact direct rule"],
+      "indirect": ["compact indirect rule"],
+      "unrelated": ["compact unrelated rule"]
+    },
+    "topic_taxonomy": [],
+    "few_shots": []
+  },
+  "changes": [
     {
-      "id": "snake_case_tag",
-      "label": "Display Label"
-    }
-  ],
-  "few_shots": [
-    {
-      "title": "paper title",
-      "relevance": "direct",
-      "tags": ["snake_case_tag"],
-      "rationale": "why this label is correct"
+      "id": "change_id",
+      "section": "direct_rule",
+      "operation": "merge",
+      "summary": "merge overlapping direct rules",
+      "text_before": ["old rule 1", "old rule 2"],
+      "text_after": ["merged replacement rule"],
+      "topic_before": [],
+      "topic_after": [],
+      "rationale": "why this compaction improves future classification",
+      "source_feedback_ids": [],
+      "source_paper_ids": [],
+      "status": "proposed"
     }
   ]
 }`
@@ -493,6 +613,18 @@ func profileDeltaContract() string {
   "tag_additions": [{"id": "snake_case_tag", "label": "Display Label"}],
   "tag_removals": ["old_tag_id"]
 }`
+}
+
+func defaultProposalDelta(summary string) proposalDelta {
+	return proposalDelta{
+		Summary:                strings.TrimSpace(summary),
+		DirectRuleAdditions:    []string{},
+		IndirectRuleAdditions:  []string{},
+		UnrelatedRuleAdditions: []string{},
+		ScopeRewrite:           nil,
+		TagAdditions:           []topicDefinition{},
+		TagRemovals:            []string{},
+	}
 }
 
 func profileNameHint(name *string) string {
@@ -528,12 +660,22 @@ func profilePromptPayload(document profileDocument, includeFewShots bool) map[st
 			"indirect":  compact.RelevanceRules.Indirect,
 			"unrelated": compact.RelevanceRules.Unrelated,
 		},
-		"topic_taxonomy": compact.TopicTaxonomy,
 	}
 	if includeFewShots && len(compact.FewShots) > 0 {
 		payload["few_shots"] = compact.FewShots
 	}
 	return payload
+}
+
+func withoutTopicChanges(changes []ProposalChange) []ProposalChange {
+	filtered := make([]ProposalChange, 0, len(changes))
+	for _, change := range changes {
+		if change.Section == ProposalSectionTopic {
+			continue
+		}
+		filtered = append(filtered, change)
+	}
+	return filtered
 }
 
 func normalizedProfileMeta(current profileDocument) profileMeta {
@@ -557,13 +699,14 @@ func boundedRuleDelta(delta proposalDelta) proposalDelta {
 }
 
 func initialProfileDelta(document profileDocument, summary string) proposalDelta {
+	compact := compactDocument(document)
 	return proposalDelta{
 		Summary:                strings.TrimSpace(summary),
-		DirectRuleAdditions:    document.RelevanceRules.Direct,
-		IndirectRuleAdditions:  document.RelevanceRules.Indirect,
-		UnrelatedRuleAdditions: document.RelevanceRules.Unrelated,
-		ScopeRewrite:           stringPointer(document.Scope),
-		TagAdditions:           document.TopicTaxonomy,
+		DirectRuleAdditions:    compact.RelevanceRules.Direct,
+		IndirectRuleAdditions:  compact.RelevanceRules.Indirect,
+		UnrelatedRuleAdditions: compact.RelevanceRules.Unrelated,
+		ScopeRewrite:           stringPointer(compact.Scope),
+		TagAdditions:           []topicDefinition{},
 		TagRemovals:            []string{},
 	}
 }
@@ -624,26 +767,6 @@ func mergeProfileDelta(current profileDocument, delta proposalDelta) profileDocu
 }
 
 func destructiveRevisionReason(current profileDocument, proposed profileDocument) string {
-	currentTags := map[string]struct{}{}
-	for _, item := range current.TopicTaxonomy {
-		currentTags[item.ID] = struct{}{}
-	}
-	proposedTags := map[string]struct{}{}
-	for _, item := range proposed.TopicTaxonomy {
-		proposedTags[item.ID] = struct{}{}
-	}
-	if len(currentTags) > 0 && len(proposedTags) == 0 {
-		return "Generated proposal removed every existing topic tag."
-	}
-	overlap := 0
-	for tag := range currentTags {
-		if _, ok := proposedTags[tag]; ok {
-			overlap++
-		}
-	}
-	if len(currentTags) >= 5 && len(proposedTags) <= max(2, len(currentTags)/3) && overlap < max(2, len(currentTags)/3) {
-		return fmt.Sprintf("Generated proposal collapsed the topic taxonomy too aggressively (%d -> %d tags, overlap %d).", len(currentTags), len(proposedTags), overlap)
-	}
 	if strings.Contains(strings.ToLower(proposed.Scope), "general scientific literature") && strings.TrimSpace(current.Scope) != strings.TrimSpace(proposed.Scope) {
 		return "Generated proposal replaced the specific research scope with a generic scope."
 	}

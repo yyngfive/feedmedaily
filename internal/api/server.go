@@ -633,7 +633,7 @@ func (s *Server) handleProfileProposalByID(w http.ResponseWriter, r *http.Reques
 	case len(parts) == 1 && r.Method == http.MethodGet:
 		s.handleProfileProposalDetail(w, proposalID)
 	case len(parts) == 2 && parts[1] == "apply" && r.Method == http.MethodPost:
-		s.handleProfileProposalApply(w, proposalID)
+		s.handleProfileProposalApply(w, r, proposalID)
 	case len(parts) == 2 && parts[1] == "reject" && r.Method == http.MethodPost:
 		s.handleProfileProposalReject(w, proposalID)
 	default:
@@ -666,8 +666,8 @@ func (s *Server) handleProfileProposalDetail(w http.ResponseWriter, proposalID i
 	writeJSON(w, http.StatusOK, item)
 }
 
-func (s *Server) handleProfileProposalApply(w http.ResponseWriter, proposalID int64) {
-	// 复刻 Python apply proposal 的本地状态更新，再桥接旧重分类和报告重建。
+func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Request, proposalID int64) {
+	// 支持 legacy 整份 apply，以及带 accepted/rejected change ids 的局部 apply。
 	sqliteStore, err := store.Open(s.settings.DatabasePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -693,6 +693,11 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, proposalID in
 		writeJSON(w, http.StatusOK, proposal)
 		return
 	}
+	if proposal.State == "rejected" {
+		sqliteStore.Close()
+		writeError(w, http.StatusConflict, "Profile proposal has already been rejected.")
+		return
+	}
 
 	currentProfile, err := profile.ReadCurrent(s.settings.ProfilePath)
 	if err != nil {
@@ -701,11 +706,49 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, proposalID in
 		return
 	}
 	now := time.Now().UTC()
-	appliedProfile, version, err := profile.PrepareAppliedProfile(proposal.ProposedProfile, currentProfile, now)
-	if err != nil {
-		sqliteStore.Close()
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	appliedProfile := map[string]any(nil)
+	version := 0
+	finalizedChanges := proposal.Changes
+	if len(proposal.Changes) == 0 {
+		appliedProfile, version, err = profile.PrepareAppliedProfile(proposal.ProposedProfile, currentProfile, now)
+		if err != nil {
+			sqliteStore.Close()
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else {
+		var payload struct {
+			AcceptedChangeIDs []string `json:"accepted_change_ids"`
+			RejectedChangeIDs []string `json:"rejected_change_ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+			sqliteStore.Close()
+			writeError(w, http.StatusBadRequest, "Invalid JSON body.")
+			return
+		}
+		currentVersion, err := profile.CurrentProfileVersion(currentProfile)
+		if err != nil {
+			sqliteStore.Close()
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if proposal.BaseProfileVersion != currentVersion {
+			sqliteStore.Close()
+			writeError(w, http.StatusConflict, "Current profile version has changed since this proposal was generated. Regenerate the proposal and review it again.")
+			return
+		}
+		finalizedChanges, err = profile.FinalizeProposalChanges(proposal.Changes, payload.AcceptedChangeIDs, payload.RejectedChangeIDs)
+		if err != nil {
+			sqliteStore.Close()
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		appliedProfile, version, err = profile.PrepareAppliedProfileFromChanges(currentProfile, finalizedChanges, now)
+		if err != nil {
+			sqliteStore.Close()
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if err := profile.WriteCurrent(s.settings.ProfilePath, appliedProfile); err != nil {
 		sqliteStore.Close()
@@ -713,7 +756,7 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, proposalID in
 		return
 	}
 	feedbackIDs := store.FeedbackIDsToInt64(proposal.SourceFeedbackIDs)
-	if err := sqliteStore.ApplyProfileProposalState(proposalID, version, now); err != nil {
+	if err := sqliteStore.ApplyProfileProposalState(proposalID, version, appliedProfile, finalizedChanges, now); err != nil {
 		sqliteStore.Close()
 		if errors.Is(err, store.ErrProfileProposalNotFound) {
 			writeError(w, http.StatusNotFound, "Profile proposal not found.")

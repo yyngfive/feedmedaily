@@ -741,10 +741,13 @@ export function App() {
     }
   };
 
-  const handleApplyProposal = async (id: number) => {
+  const handleApplyProposal = async (
+    id: number,
+    selection?: {accepted_change_ids: string[]; rejected_change_ids: string[]},
+  ) => {
     try {
       setBusy(true);
-      await applyProfileProposal(id);
+      await applyProfileProposal(id, selection);
       await refreshAll();
       pushMessage("profile.proposal.applied");
     } catch (error) {
@@ -881,7 +884,7 @@ export function App() {
           onDeleteScheduler={handleDeleteScheduler}
           onGenerateProposal={() => void handleGenerateProposal()}
           onStartVerification={(job) => void handleStartVerification(job)}
-        onApplyProposal={(id) => void handleApplyProposal(id)}
+        onApplyProposal={(id, selection) => void handleApplyProposal(id, selection)}
         onRejectProposal={(id) => void handleRejectProposal(id)}
         onRunSync={() => void handleRunAdminJob("/api/admin/run")}
         onReclassifyRecent={() => void handleReclassify("recent")}
