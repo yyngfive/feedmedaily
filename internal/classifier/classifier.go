@@ -18,6 +18,9 @@ const baseClassificationInstructions = `You are a careful scientific literature 
 Classify each paper using only the user-supplied classification profile.
 Do not invent new interests, relevance rules, or decision criteria outside the profile.
 Do not broaden the user's scope beyond what the profile supports.
+Judge relevance from the current scope and relevance rules only.
+Do not let broad examples, topic labels, or surface object similarity expand direct relevance.
+If two historical cues appear to conflict, follow the current profile rules as written.
 
 Labels are fixed:
 - direct
@@ -419,23 +422,6 @@ func profilePromptPayload(profile map[string]any) map[string]any {
 			"direct":    normalizeStringSlice(rawRules["direct"]),
 			"indirect":  normalizeStringSlice(rawRules["indirect"]),
 			"unrelated": normalizeStringSlice(rawRules["unrelated"]),
-		}
-	}
-	if rawFewShots, ok := profile["few_shots"].([]any); ok && len(rawFewShots) > 0 {
-		fewShots := make([]map[string]any, 0, min(2, len(rawFewShots)))
-		for _, rawFewShot := range rawFewShots[:min(2, len(rawFewShots))] {
-			item, ok := rawFewShot.(map[string]any)
-			if !ok {
-				continue
-			}
-			fewShots = append(fewShots, map[string]any{
-				"title":     normalizedString(item["title"]),
-				"relevance": normalizedString(item["relevance"]),
-				"rationale": normalizedString(item["rationale"]),
-			})
-		}
-		if len(fewShots) > 0 {
-			payload["few_shots"] = fewShots
 		}
 	}
 	return payload

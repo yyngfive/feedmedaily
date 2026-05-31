@@ -3,7 +3,7 @@ import React from "react";
 
 import {relevanceLabel} from "../../app/constants";
 import type {SettingsConfigUpdate} from "../../types";
-import {ProfileProposalPreview} from "../profile/ProfileProposalPreview";
+import {ProfileProposalReview} from "../profile/ProfileProposalReview";
 import {ProfileRulesDocument} from "../profile/ProfileRulesDocument";
 import {SettingsConfigEditor} from "./SettingsConfigEditor";
 import type {
@@ -75,7 +75,10 @@ export function AdminPanel({
   hasFeeds: boolean;
   jobs: JobInfo[];
   onAddFeed: () => void;
-  onApplyProposal: (id: number) => void;
+  onApplyProposal: (
+    id: number,
+    selection?: {accepted_change_ids: string[]; rejected_change_ids: string[]},
+  ) => Promise<void> | void;
   onClose: () => void;
   onDeleteFeedback: (id: number) => void;
   onFeedChange: (index: number, field: "journal" | "url", value: string) => void;
@@ -464,7 +467,13 @@ export function AdminPanel({
           <div className="mt-5 space-y-4">
             <section className="rounded-lg border border-(--line) bg-(--paper-accent) p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-(--ink)">Classification profile</h3>
+                <div>
+                  <h3 className="text-sm font-semibold text-(--ink)">Classification profile</h3>
+                  <p className="mt-1 text-sm leading-6 text-muted">
+                    Generate a proposal from feedback when available, or run profile compaction-only
+                    maintenance when there is no open feedback.
+                  </p>
+                </div>
                 <Button
                   isDisabled={proposalGenerating}
                   size="sm"
@@ -479,26 +488,15 @@ export function AdminPanel({
               </div>
               <div className="mt-3 space-y-3">
                 {pendingProposal ? (
-                  <>
-                    <ProfileProposalPreview proposal={pendingProposal} />
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        isDisabled={pendingProposal.state !== "pending"}
-                        size="sm"
-                        onPress={() => onApplyProposal(pendingProposal.id)}
-                      >
-                        Apply
-                      </Button>
-                      <Button
-                        isDisabled={pendingProposal.state !== "pending"}
-                        size="sm"
-                        variant="ghost"
-                        onPress={() => onRejectProposal(pendingProposal.id)}
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  </>
+                  profile ? (
+                    <ProfileProposalReview
+                      proposal={pendingProposal}
+                      onApplySelection={onApplyProposal}
+                      onRejectProposal={onRejectProposal}
+                    />
+                  ) : (
+                    <p className="text-sm text-muted">No current profile available for proposal review.</p>
+                  )
                 ) : profile ? (
                   <ProfileRulesDocument
                     editable

@@ -8,7 +8,12 @@ The latest released version is `0.3.0`. The next planned release is `0.3.1`, so 
 
 Changes since `0.3.0`:
 
-- No unreleased entries yet.
+### Changed
+
+- Changed feedback-driven profile proposal review to a git-style compact diff flow with per-change accept/reject controls, section-level change summaries, and explicit compactness signals so profile edits are easier to scan and less likely to hide rule growth.
+- Tightened the feedback-driven profile proposal prompt to favor reason-first abstraction, broader rewrite/merge compaction, and clearer rejection of object-level rule sprawl; added review warnings for newly added rules that still look overly specific.
+- Further tightened feedback-driven proposal generation so conflicting old rules must be rewritten or removed, merge/add duplicates are discouraged, and merged rules are expected to preserve important boundary coverage. Classification now uses only scope plus relevance rules, without few-shot examples, to reduce broad-example bias.
+- Simplified profile maintenance to focus only on scope plus relevance rules: the current editor now uses row-based rule lists, tags/examples are cleared from new saves and proposals, and profile proposal generation can run in maintenance mode even when there is no open feedback.
 
 ## 0.3.0 (2026-05-25)
 

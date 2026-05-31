@@ -248,8 +248,15 @@ export async function launchProfileProposalGeneration(): Promise<JobInfo> {
   return payload.job;
 }
 
-export async function applyProfileProposal(id: number): Promise<ProfileProposal> {
-  const response = await fetch(`/api/profile/proposals/${id}/apply`, {method: "POST"});
+export async function applyProfileProposal(
+  id: number,
+  selection?: {accepted_change_ids: string[]; rejected_change_ids: string[]},
+): Promise<ProfileProposal> {
+  const response = await fetch(`/api/profile/proposals/${id}/apply`, {
+    method: "POST",
+    headers: selection ? {"Content-Type": "application/json"} : undefined,
+    body: selection ? JSON.stringify(selection) : undefined,
+  });
   if (!response.ok) {
     throw new Error(await responseErrorMessage(response));
   }

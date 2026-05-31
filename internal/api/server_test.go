@@ -207,6 +207,9 @@ func TestProfileCurrentPutUpdatesExistingProfile(t *testing.T) {
 	if !contains(recorder.Body.String(), `"source_description":"current"`) {
 		t.Fatalf("expected source_description preserved: %s", recorder.Body.String())
 	}
+	if !contains(recorder.Body.String(), `"topic_taxonomy":[]`) || !contains(recorder.Body.String(), `"few_shots":[]`) {
+		t.Fatalf("expected deprecated profile fields cleared in response: %s", recorder.Body.String())
+	}
 
 	saved, err := os.ReadFile(settings.ProfilePath)
 	if err != nil {
@@ -214,6 +217,9 @@ func TestProfileCurrentPutUpdatesExistingProfile(t *testing.T) {
 	}
 	if !contains(string(saved), `"version": 3`) || !contains(string(saved), `"name": "Edited profile"`) {
 		t.Fatalf("saved profile = %s", saved)
+	}
+	if !contains(string(saved), `"topic_taxonomy": []`) || !contains(string(saved), `"few_shots": []`) {
+		t.Fatalf("expected deprecated profile fields cleared on disk: %s", saved)
 	}
 }
 
@@ -539,6 +545,57 @@ func TestProfileProposalApplyRejectAndReclassifyAPI(t *testing.T) {
 	}
 }
 
+func TestCompactProfileProposalApplyUsesAcceptedChanges(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":["Background"],"unrelated":["Plant biology"]},"topic_taxonomy":[],"few_shots":[]}`)
+	seedCompactProposalFixture(t, settings.DatabasePath)
+
+	reclassifyPaperIDsFunc = func(_ config.Settings, paperIDs []int64, _ jobruntime.ProgressFunc) (int, error) {
+		return len(paperIDs), nil
+	}
+	rebuildLatestReportFunc = func(_ config.Settings, _ jobruntime.ProgressFunc) (int, error) {
+		return 1, nil
+	}
+
+	handler := NewServer(settings, nil).Handler()
+	body := `{"accepted_change_ids":["change-1"],"rejected_change_ids":["change-2"]}`
+	applyRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(applyRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/proposals/21/apply", strings.NewReader(body)))
+	if applyRecorder.Code != http.StatusOK || !contains(applyRecorder.Body.String(), `"state":"applied"`) || !contains(applyRecorder.Body.String(), `"status":"accepted"`) || !contains(applyRecorder.Body.String(), `"status":"rejected"`) {
+		t.Fatalf("compact apply = %d %s", applyRecorder.Code, applyRecorder.Body.String())
+	}
+
+	appliedProfile, err := os.ReadFile(settings.ProfilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(appliedProfile), `"RNA chemistry"`) || !contains(string(appliedProfile), `"Plant biology"`) {
+		t.Fatalf("applied compact profile = %s", appliedProfile)
+	}
+	if contains(string(appliedProfile), `"RNA",`) {
+		t.Fatalf("expected accepted rewrite to replace the old direct rule: %s", appliedProfile)
+	}
+}
+
+func TestCompactProfileProposalApplyRejectsVersionMismatch(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":2,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":["Background"],"unrelated":["Plant biology"]},"topic_taxonomy":[],"few_shots":[]}`)
+	seedCompactProposalFixture(t, settings.DatabasePath)
+
+	handler := NewServer(settings, nil).Handler()
+	body := `{"accepted_change_ids":["change-1"],"rejected_change_ids":[]}`
+	applyRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(applyRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/proposals/21/apply", strings.NewReader(body)))
+	if applyRecorder.Code != http.StatusConflict || !contains(applyRecorder.Body.String(), "Regenerate the proposal") {
+		t.Fatalf("version mismatch apply = %d %s", applyRecorder.Code, applyRecorder.Body.String())
+	}
+}
+
 func testSettings(root string) config.Settings {
 	return config.Settings{
 		Mode:                appruntime.ModeSource,
@@ -667,6 +724,105 @@ INSERT INTO profile_proposals (
   '{"meta":{"name":"Proposal","version":1,"created_at":"2026-05-16T00:00:00Z","updated_at":"2026-05-16T00:00:00Z","source_description":"proposal"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}',
   '{"summary":"Proposal summary","direct_rule_additions":["RNA chemistry"],"indirect_rule_additions":[],"unrelated_rule_additions":[],"scope_rewrite":null,"tag_additions":[],"tag_removals":[]}',
   '[1,2]', 'deepseek-v4-pro', 'pending', '2026-05-16T00:30:00Z'
+);
+`)
+}
+
+func seedCompactProposalFixture(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	execSQLite(t, db, `
+CREATE TABLE papers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_url TEXT NOT NULL,
+  feed_title TEXT,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  doi TEXT,
+  journal TEXT,
+  authors_json TEXT NOT NULL,
+  abstract TEXT,
+  abstract_source TEXT NOT NULL DEFAULT 'none',
+  published_date TEXT,
+  first_seen_at TEXT NOT NULL,
+  read_at TEXT,
+  raw_json TEXT NOT NULL
+);
+CREATE TABLE classifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  paper_id INTEGER NOT NULL,
+  relevance TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  reason TEXT NOT NULL,
+  topic_tags_json TEXT NOT NULL,
+  recommended_action TEXT NOT NULL,
+  model TEXT NOT NULL,
+  translated_title_zh TEXT,
+  classified_at TEXT NOT NULL
+);
+CREATE TABLE feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  paper_id INTEGER NOT NULL,
+  original_relevance TEXT NOT NULL,
+  corrected_relevance TEXT NOT NULL,
+  note TEXT,
+  state TEXT NOT NULL DEFAULT 'open',
+  used_in_prompt INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE profile_proposals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  summary TEXT NOT NULL,
+  proposed_profile_json TEXT NOT NULL,
+  rule_delta_json TEXT,
+  base_profile_version INTEGER,
+  change_set_json TEXT,
+  source_feedback_ids_json TEXT NOT NULL,
+  model TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  applied_at TEXT,
+  rejected_at TEXT,
+  applied_version INTEGER,
+  applied_profile_json TEXT
+);
+`)
+	execSQLite(t, db, `
+INSERT INTO papers (
+  id, source_url, feed_title, title, url, doi, journal, authors_json, abstract,
+  abstract_source, published_date, first_seen_at, read_at, raw_json
+) VALUES (
+  1, 'https://example.com/rss', 'Fixture Feed', 'Compact proposal paper', 'https://example.com/compact-paper',
+  '10.1000/compact', 'Example Journal', '["Alice","Bob"]', 'Abstract text.',
+  'rss', '2026-05-15', '2026-05-16T00:00:00Z', NULL,
+  '{"_abstract_html":"<p>Abstract text.</p>","_abstract_images":[]}'
+);
+INSERT INTO classifications (
+  paper_id, relevance, confidence, reason, topic_tags_json, recommended_action, model, translated_title_zh, classified_at
+) VALUES (
+  1, 'indirect', 0.8, 'Fixture', '[]', 'scan', 'test', NULL, '2026-05-16T00:10:00Z'
+);
+INSERT INTO feedback (
+  id, paper_id, original_relevance, corrected_relevance, note, state, used_in_prompt, created_at
+) VALUES (
+  1, 1, 'indirect', 'direct', 'Should be direct.', 'open', 0, '2026-05-16T00:20:00Z'
+);
+INSERT INTO profile_proposals (
+  id, summary, proposed_profile_json, rule_delta_json, base_profile_version, change_set_json, source_feedback_ids_json, model, state, created_at
+) VALUES (
+  21, 'Compact proposal summary',
+  '{"meta":{"name":"Current","version":2,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-16T00:30:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA chemistry"],"indirect":["Background"],"unrelated":["Plant biology"]},"topic_taxonomy":[],"few_shots":[]}',
+  '{"summary":"Compact proposal summary","direct_rule_additions":[],"indirect_rule_additions":[],"unrelated_rule_additions":[],"scope_rewrite":null,"tag_additions":[],"tag_removals":[]}',
+  1,
+  '[{"id":"change-1","section":"direct_rule","operation":"rewrite","summary":"Promote chemistry-first RNA work.","text_before":["RNA"],"text_after":["RNA chemistry"],"topic_before":[],"topic_after":[],"rationale":"The feedback shows chemistry-first RNA papers should be direct.","source_feedback_ids":[1],"source_paper_ids":[1],"status":"proposed"},{"id":"change-2","section":"unrelated_rule","operation":"remove","summary":"Drop the unrelated rule.","text_before":["Plant biology"],"text_after":[],"topic_before":[],"topic_after":[],"rationale":"A review candidate that can be declined.","source_feedback_ids":[1],"source_paper_ids":[1],"status":"proposed"}]',
+  '[1]', 'deepseek-v4-pro', 'pending', '2026-05-16T00:30:00Z'
 );
 `)
 }

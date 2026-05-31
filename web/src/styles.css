@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "@heroui/styles";
+@import "react-diff-view/style/index.css";
 
 :root {
   --paper: #f6f7f9;
@@ -78,4 +79,39 @@ a {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+}
+
+.proposal-diff-shell {
+  --diff-background-color: var(--paper);
+  --diff-text-color: var(--body);
+  --diff-selection-background-color: color-mix(in srgb, var(--accent) 25%, transparent);
+  --diff-gutter-insert-background-color: color-mix(in srgb, var(--success-line) 18%, var(--paper));
+  --diff-gutter-delete-background-color: color-mix(in srgb, var(--danger-line) 18%, var(--paper));
+  --diff-gutter-selected-background-color: color-mix(in srgb, var(--warning-line) 22%, var(--paper));
+  --diff-code-insert-background-color: color-mix(in srgb, var(--success-bg) 70%, var(--paper));
+  --diff-code-delete-background-color: color-mix(in srgb, var(--danger-bg) 58%, var(--paper));
+  --diff-code-insert-edit-background-color: color-mix(in srgb, var(--success-line) 32%, var(--paper));
+  --diff-code-delete-edit-background-color: color-mix(in srgb, var(--danger-line) 32%, var(--paper));
+  --diff-code-selected-background-color: color-mix(in srgb, var(--warning-line) 18%, var(--paper));
+  --diff-omit-gutter-line-color: var(--danger-line);
+}
+
+.proposal-diff {
+  font-size: 0.85rem;
+}
+
+.proposal-diff .diff {
+  width: 100%;
+}
+
+.proposal-diff .diff-code,
+.proposal-diff .diff-gutter {
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+
+.proposal-diff .diff-code {
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
 }

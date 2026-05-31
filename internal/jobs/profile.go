@@ -32,7 +32,9 @@ func GenerateInitialProfileProposal(settings config.Settings, interestDescriptio
 	defer sqliteStore.Close()
 	item, err := sqliteStore.SaveProfileProposal(
 		draft.Summary,
+		draft.BaseProfileVersion,
 		draft.ProposedProfile,
+		draft.Changes,
 		draft.RuleDelta,
 		draft.SourceFeedbackIDs,
 		draft.Model,
@@ -54,7 +56,7 @@ func GenerateProfileProposal(settings config.Settings, progress ProgressFunc) (m
 		return nil, fmt.Errorf("No classification profile exists yet.")
 	}
 	if progress != nil {
-		progress("profile.proposal.collecting_feedback", "Collecting feedback for profile review.")
+		progress("profile.proposal.collecting_feedback", "Collecting feedback and current profile context.")
 	}
 	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
 	if err != nil {
@@ -87,7 +89,9 @@ func GenerateProfileProposal(settings config.Settings, progress ProgressFunc) (m
 	}
 	item, err := sqliteStore.SaveProfileProposal(
 		draft.Summary,
+		draft.BaseProfileVersion,
 		draft.ProposedProfile,
+		draft.Changes,
 		draft.RuleDelta,
 		draft.SourceFeedbackIDs,
 		draft.Model,

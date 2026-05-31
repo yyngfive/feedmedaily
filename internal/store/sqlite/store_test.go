@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yyngfive/scirssagent/internal/profile"
 	_ "modernc.org/sqlite"
 )
 
@@ -357,7 +358,23 @@ INSERT INTO profile_proposals (
 	}
 	defer store.Close()
 
-	if err := store.ApplyProfileProposalState(11, 3, time.Date(2026, 5, 16, 7, 0, 0, 0, time.UTC)); err != nil {
+	if err := store.ApplyProfileProposalState(11, 3, map[string]any{
+		"meta": map[string]any{
+			"name":               "Proposal",
+			"version":            3,
+			"created_at":         "2026-05-16T00:00:00Z",
+			"updated_at":         "2026-05-16T07:00:00Z",
+			"source_description": "proposal",
+		},
+		"scope": "RNA biology",
+		"relevance_rules": map[string]any{
+			"direct":    []any{"RNA"},
+			"indirect":  []any{},
+			"unrelated": []any{},
+		},
+		"topic_taxonomy": []any{},
+		"few_shots":      []any{},
+	}, []profile.ProposalChange{}, time.Date(2026, 5, 16, 7, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.MarkFeedbackUsed([]int64{10}); err != nil {

@@ -108,11 +108,11 @@ func TestWriteCurrentCompactsPersistedShape(t *testing.T) {
 		t.Fatalf("unexpected meta: %#v", meta)
 	}
 	taxonomy := payload["topic_taxonomy"].([]any)
-	if len(taxonomy) != 1 {
+	if len(taxonomy) != 0 {
 		t.Fatalf("unexpected taxonomy: %#v", taxonomy)
 	}
 	fewShots := payload["few_shots"].([]any)
-	if len(fewShots) != 2 {
+	if len(fewShots) != 0 {
 		t.Fatalf("unexpected few_shots: %#v", fewShots)
 	}
 }
@@ -233,5 +233,8 @@ func TestPrepareUpdatedProfilePreservesCreatedAtAndSourceDescription(t *testing.
 	}
 	if meta["source_description"] != "current profile" {
 		t.Fatalf("source_description = %#v", meta["source_description"])
+	}
+	if len(updated["topic_taxonomy"].([]any)) != 0 || len(updated["few_shots"].([]any)) != 0 {
+		t.Fatalf("deprecated profile fields should be cleared: %#v", updated)
 	}
 }

@@ -243,6 +243,31 @@ export type ProfileProposalDelta = {
   tag_removals: string[];
 };
 
+export type ProposalChangeSection =
+  | "scope"
+  | "direct_rule"
+  | "indirect_rule"
+  | "unrelated_rule"
+  | "topic";
+
+export type ProposalChangeOperation = "add" | "remove" | "rewrite" | "merge";
+export type ProposalChangeStatus = "proposed" | "accepted" | "rejected" | "ignored";
+
+export type ProposalChange = {
+  id: string;
+  section: ProposalChangeSection;
+  operation: ProposalChangeOperation;
+  summary: string;
+  text_before: string[];
+  text_after: string[];
+  topic_before: TopicDefinition[];
+  topic_after: TopicDefinition[];
+  rationale: string;
+  source_feedback_ids: number[];
+  source_paper_ids: number[];
+  status: ProposalChangeStatus;
+};
+
 export type CurrentProfileResponse = {
   profile: ClassificationProfile | null;
 };
@@ -250,7 +275,10 @@ export type CurrentProfileResponse = {
 export type ProfileProposal = {
   id: number;
   summary: string;
+  base_profile_version: number;
   proposed_profile: ClassificationProfile;
+  applied_profile?: ClassificationProfile | null;
+  changes: ProposalChange[];
   rule_delta: ProfileProposalDelta;
   source_feedback_ids: number[];
   model: string;

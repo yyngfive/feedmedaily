@@ -58,13 +58,16 @@ CREATE TABLE IF NOT EXISTS profile_proposals (
   summary TEXT NOT NULL,
   proposed_profile_json TEXT NOT NULL,
   rule_delta_json TEXT,
+  base_profile_version INTEGER,
+  change_set_json TEXT,
   source_feedback_ids_json TEXT NOT NULL,
   model TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'pending',
   created_at TEXT NOT NULL,
   applied_at TEXT,
   rejected_at TEXT,
-  applied_version INTEGER
+  applied_version INTEGER,
+  applied_profile_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS zotero_saves (
@@ -103,5 +106,52 @@ func OpenOrCreate(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize sqlite schema: %w", err)
 	}
+	if err := ensureMutableSchema(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return buildStore(db)
+}
+
+func ensureMutableSchema(db *sql.DB) error {
+	if err := ensureColumn(db, "profile_proposals", "base_profile_version", "INTEGER"); err != nil {
+		return err
+	}
+	if err := ensureColumn(db, "profile_proposals", "change_set_json", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumn(db, "profile_proposals", "applied_profile_json", "TEXT"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureColumn(db *sql.DB, table string, column string, definition string) error {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return fmt.Errorf("query sqlite table info for %s: %w", table, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return fmt.Errorf("scan sqlite table info for %s: %w", table, err)
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate sqlite table info for %s: %w", table, err)
+	}
+	if _, err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition)); err != nil {
+		return fmt.Errorf("add sqlite column %s.%s: %w", table, column, err)
+	}
+	return nil
 }

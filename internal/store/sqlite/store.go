@@ -131,17 +131,20 @@ type ProposalFeedbackContext struct {
 }
 
 type ProfileProposal struct {
-	ID                int64          `json:"id"`
-	Summary           string         `json:"summary"`
-	ProposedProfile   map[string]any `json:"proposed_profile"`
-	RuleDelta         map[string]any `json:"rule_delta"`
-	SourceFeedbackIDs []int          `json:"source_feedback_ids"`
-	Model             string         `json:"model"`
-	State             string         `json:"state"`
-	CreatedAt         time.Time      `json:"created_at"`
-	AppliedAt         *time.Time     `json:"applied_at"`
-	RejectedAt        *time.Time     `json:"rejected_at"`
-	AppliedVersion    *int           `json:"applied_version"`
+	ID                 int64                    `json:"id"`
+	Summary            string                   `json:"summary"`
+	BaseProfileVersion int                      `json:"base_profile_version"`
+	ProposedProfile    map[string]any           `json:"proposed_profile"`
+	AppliedProfile     map[string]any           `json:"applied_profile,omitempty"`
+	Changes            []profile.ProposalChange `json:"changes"`
+	RuleDelta          map[string]any           `json:"rule_delta"`
+	SourceFeedbackIDs  []int                    `json:"source_feedback_ids"`
+	Model              string                   `json:"model"`
+	State              string                   `json:"state"`
+	CreatedAt          time.Time                `json:"created_at"`
+	AppliedAt          *time.Time               `json:"applied_at"`
+	RejectedAt         *time.Time               `json:"rejected_at"`
+	AppliedVersion     *int                     `json:"applied_version"`
 }
 
 type paperRow struct {
@@ -368,12 +371,15 @@ func (s *Store) GetProfileProposal(id int64) (*ProfileProposal, error) {
 	}
 	row := s.db.QueryRow(fmt.Sprintf(`
 		SELECT id, summary, proposed_profile_json,
-			%s AS rule_delta_json, source_feedback_ids_json, model,
-			%s AS state, created_at,
-			%s AS applied_at, %s AS rejected_at, %s AS applied_version
+			%s AS rule_delta_json, %s AS base_profile_version, %s AS change_set_json,
+			%s AS applied_profile_json, source_feedback_ids_json, model,
+			%s AS state, created_at, %s AS applied_at, %s AS rejected_at, %s AS applied_version
 		FROM profile_proposals
 		WHERE id = ?
 	`, s.columnExpr(s.proposalColumns, "rule_delta_json", "NULL"),
+		s.columnExpr(s.proposalColumns, "base_profile_version", "0"),
+		s.columnExpr(s.proposalColumns, "change_set_json", "NULL"),
+		s.columnExpr(s.proposalColumns, "applied_profile_json", "NULL"),
 		s.columnExpr(s.proposalColumns, "state", quote(proposalStatePending)),
 		s.columnExpr(s.proposalColumns, "applied_at", "NULL"),
 		s.columnExpr(s.proposalColumns, "rejected_at", "NULL"),
@@ -499,11 +505,15 @@ func (s *Store) CreateFeedback(paperID int64, correctedRelevance string, note *s
 	return record, nil
 }
 
-func (s *Store) SaveProfileProposal(summary string, proposedProfile map[string]any, ruleDelta map[string]any, sourceFeedbackIDs []int64, model string, now time.Time) (*ProfileProposal, error) {
+func (s *Store) SaveProfileProposal(summary string, baseProfileVersion int, proposedProfile map[string]any, changes []profile.ProposalChange, ruleDelta map[string]any, sourceFeedbackIDs []int64, model string, now time.Time) (*ProfileProposal, error) {
 	// 保存一条新的 pending profile proposal，并回读标准化后的记录。
 	proposedDocument, err := profile.ValidateMap(proposedProfile)
 	if err != nil {
 		return nil, fmt.Errorf("validate proposed profile: %w", err)
+	}
+	normalizedChanges, err := profile.ValidateProposalChanges(changes)
+	if err != nil {
+		return nil, fmt.Errorf("validate profile proposal changes: %w", err)
 	}
 	ruleDeltaPayload, err := profile.ValidateProposalDeltaMap(ruleDelta, summary)
 	if err != nil {
@@ -516,6 +526,10 @@ func (s *Store) SaveProfileProposal(summary string, proposedProfile map[string]a
 	ruleDeltaJSON, err := json.Marshal(ruleDeltaPayload)
 	if err != nil {
 		return nil, fmt.Errorf("encode profile proposal delta: %w", err)
+	}
+	changeSetJSON, err := json.Marshal(normalizedChanges)
+	if err != nil {
+		return nil, fmt.Errorf("encode profile proposal changes: %w", err)
 	}
 	sourceIDs := make([]int64, 0, len(sourceFeedbackIDs))
 	seen := map[int64]struct{}{}
@@ -532,11 +546,11 @@ func (s *Store) SaveProfileProposal(summary string, proposedProfile map[string]a
 	}
 	result, err := s.db.Exec(`
 		INSERT INTO profile_proposals (
-			summary, proposed_profile_json, rule_delta_json,
-			source_feedback_ids_json, model, state, created_at
+			summary, proposed_profile_json, rule_delta_json, base_profile_version,
+			change_set_json, source_feedback_ids_json, model, state, created_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, strings.TrimSpace(summary), string(profileJSON), string(ruleDeltaJSON), string(sourceIDsJSON), strings.TrimSpace(model), proposalStatePending, now.UTC().Format(time.RFC3339Nano))
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, strings.TrimSpace(summary), string(profileJSON), string(ruleDeltaJSON), baseProfileVersion, string(changeSetJSON), string(sourceIDsJSON), strings.TrimSpace(model), proposalStatePending, now.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, fmt.Errorf("insert profile proposal: %w", err)
 	}
@@ -594,13 +608,44 @@ func (s *Store) MarkPaperRead(paperID int64, now time.Time) (time.Time, error) {
 	return parseTime(readAt)
 }
 
-func (s *Store) ApplyProfileProposalState(proposalID int64, version int, now time.Time) error {
+func (s *Store) ApplyProfileProposalState(proposalID int64, version int, appliedProfile map[string]any, changes []profile.ProposalChange, now time.Time) error {
 	// 把 proposal 标成 applied，并记录 applied_at/applied_version。
-	result, err := s.db.Exec(`
+	var appliedProfileJSON any
+	if appliedProfile != nil {
+		normalizedProfile, err := profile.ValidateMap(appliedProfile)
+		if err != nil {
+			return fmt.Errorf("validate applied profile: %w", err)
+		}
+		data, err := json.Marshal(normalizedProfile)
+		if err != nil {
+			return fmt.Errorf("encode applied profile: %w", err)
+		}
+		appliedProfileJSON = string(data)
+	}
+	normalizedChanges, err := profile.ValidateProposalChanges(changes)
+	if err != nil {
+		return fmt.Errorf("validate applied proposal changes: %w", err)
+	}
+	changeSetJSON, err := json.Marshal(normalizedChanges)
+	if err != nil {
+		return fmt.Errorf("encode applied proposal changes: %w", err)
+	}
+	query := `
 		UPDATE profile_proposals
 		SET state = ?, applied_at = ?, applied_version = ?, rejected_at = NULL
-		WHERE id = ?
-	`, proposalStateApplied, now.UTC().Format(time.RFC3339Nano), version, proposalID)
+	`
+	args := []any{proposalStateApplied, now.UTC().Format(time.RFC3339Nano), version}
+	if s.proposalColumns["change_set_json"] {
+		query += `, change_set_json = ?`
+		args = append(args, string(changeSetJSON))
+	}
+	if s.proposalColumns["applied_profile_json"] {
+		query += `, applied_profile_json = ?`
+		args = append(args, appliedProfileJSON)
+	}
+	query += ` WHERE id = ?`
+	args = append(args, proposalID)
+	result, err := s.db.Exec(query, args...)
 	if err != nil {
 		return fmt.Errorf("apply profile proposal state: %w", err)
 	}
@@ -951,12 +996,15 @@ func scanProfileProposalRow(scanner interface{ Scan(dest ...any) error }) (*Prof
 	var proposal ProfileProposal
 	var proposedProfileJSON string
 	var ruleDeltaJSON sql.NullString
+	var baseProfileVersion sql.NullInt64
+	var changeSetJSON sql.NullString
+	var appliedProfileJSON sql.NullString
 	var sourceFeedbackIDsJSON string
 	var createdAt string
 	var appliedAt sql.NullString
 	var rejectedAt sql.NullString
 	var appliedVersion sql.NullInt64
-	err := scanner.Scan(&proposal.ID, &proposal.Summary, &proposedProfileJSON, &ruleDeltaJSON, &sourceFeedbackIDsJSON, &proposal.Model, &proposal.State, &createdAt, &appliedAt, &rejectedAt, &appliedVersion)
+	err := scanner.Scan(&proposal.ID, &proposal.Summary, &proposedProfileJSON, &ruleDeltaJSON, &baseProfileVersion, &changeSetJSON, &appliedProfileJSON, &sourceFeedbackIDsJSON, &proposal.Model, &proposal.State, &createdAt, &appliedAt, &rejectedAt, &appliedVersion)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, false, nil
@@ -975,11 +1023,26 @@ func scanProfileProposalRow(scanner interface{ Scan(dest ...any) error }) (*Prof
 	if err != nil {
 		return nil, false, fmt.Errorf("parse rule delta for proposal %d: %w", proposal.ID, err)
 	}
+	changes, err := profile.ValidateProposalChangesBytes([]byte(changeSetJSON.String))
+	if err != nil {
+		return nil, false, fmt.Errorf("parse change set for proposal %d: %w", proposal.ID, err)
+	}
 	sourceFeedbackIDs, err := decodeIntSlice(sourceFeedbackIDsJSON)
 	if err != nil {
 		return nil, false, fmt.Errorf("parse source feedback ids for proposal %d: %w", proposal.ID, err)
 	}
 	proposal.ProposedProfile = proposedProfile
+	if baseProfileVersion.Valid {
+		proposal.BaseProfileVersion = int(baseProfileVersion.Int64)
+	}
+	if appliedProfileJSON.Valid && strings.TrimSpace(appliedProfileJSON.String) != "" {
+		appliedProfile, err := profile.ValidateBytes([]byte(appliedProfileJSON.String))
+		if err != nil {
+			return nil, false, fmt.Errorf("parse applied profile for proposal %d: %w", proposal.ID, err)
+		}
+		proposal.AppliedProfile = appliedProfile
+	}
+	proposal.Changes = changes
 	proposal.RuleDelta = ruleDelta
 	proposal.SourceFeedbackIDs = sourceFeedbackIDs
 	proposal.CreatedAt = parsedCreatedAt
