@@ -153,7 +153,7 @@ INSERT INTO zotero_saves (
 	if paper.AbstractHTML == nil || *paper.AbstractHTML != "<p>Abstract text.</p>" || len(paper.AbstractImages) != 1 {
 		t.Fatalf("unexpected abstract payload: %#v", paper)
 	}
-	if paper.Raw["source"] != "fixture" {
+	if len(paper.Raw) != 0 {
 		t.Fatalf("unexpected raw payload: %#v", paper.Raw)
 	}
 }
@@ -203,6 +203,187 @@ func TestBuildLatestReportLastUpdatedAtDoesNotDriftWithReadTime(t *testing.T) {
 	}
 	if !reportA.LastUpdatedAt.Equal(seenAt) || !reportB.LastUpdatedAt.Equal(seenAt) {
 		t.Fatalf("last updated timestamp drifted: %#v %#v", reportA.LastUpdatedAt, reportB.LastUpdatedAt)
+	}
+}
+
+func TestBuildLatestReportUsesLatestClassificationAndOpenFeedback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	db := openSQLiteTestDB(t, path)
+	execSQLite(t, db, `
+CREATE TABLE papers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_url TEXT NOT NULL,
+  feed_title TEXT,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  doi TEXT,
+  journal TEXT,
+  authors_json TEXT NOT NULL,
+  abstract TEXT,
+  abstract_source TEXT NOT NULL DEFAULT 'none',
+  published_date TEXT,
+  first_seen_at TEXT NOT NULL,
+  read_at TEXT,
+  raw_json TEXT NOT NULL
+);
+CREATE TABLE classifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  paper_id INTEGER NOT NULL,
+  relevance TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  reason TEXT NOT NULL,
+  topic_tags_json TEXT NOT NULL,
+  recommended_action TEXT NOT NULL,
+  model TEXT NOT NULL,
+  translated_title_zh TEXT,
+  classified_at TEXT NOT NULL
+);
+CREATE TABLE feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  paper_id INTEGER NOT NULL,
+  original_relevance TEXT NOT NULL,
+  corrected_relevance TEXT NOT NULL,
+  note TEXT,
+  state TEXT NOT NULL DEFAULT 'open',
+  used_in_prompt INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE zotero_saves (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  paper_id INTEGER NOT NULL UNIQUE,
+  state TEXT NOT NULL,
+  item_key TEXT,
+  error_message TEXT,
+  attempted_at TEXT NOT NULL,
+  saved_at TEXT
+);
+`)
+	execSQLite(t, db, `
+INSERT INTO papers (
+  id, source_url, feed_title, title, url, doi, journal, authors_json, abstract,
+  abstract_source, published_date, first_seen_at, read_at, raw_json
+) VALUES (
+  1, 'https://example.com/rss', 'Example Feed', 'Latest selection paper', 'https://example.com/latest',
+  NULL, 'Example Journal', '["Alice"]', 'Abstract text.', 'rss', '2026-05-15',
+  '2026-05-16T01:02:03Z', NULL,
+  '{"_abstract_html":"<p>Abstract text.</p>","_abstract_images":[]}'
+);
+INSERT INTO classifications (
+  id, paper_id, relevance, confidence, reason, topic_tags_json, recommended_action, model, translated_title_zh, classified_at
+) VALUES
+  (1, 1, 'indirect', 0.5, 'Older classification', '["old"]', 'scan', 'test-model', NULL, '2026-05-16T02:00:00Z'),
+  (2, 1, 'direct', 0.9, 'Latest classification', '["new"]', 'read', 'test-model', '新标题', '2026-05-16T02:30:00Z');
+INSERT INTO feedback (
+  id, paper_id, original_relevance, corrected_relevance, note, state, used_in_prompt, created_at
+) VALUES
+  (1, 1, 'indirect', 'indirect', 'Older open feedback', 'open', 0, '2026-05-16T03:00:00Z'),
+  (2, 1, 'direct', 'unrelated', 'Used feedback should be ignored', 'used', 1, '2026-05-16T03:30:00Z'),
+  (3, 1, 'direct', 'direct', 'Latest open feedback', 'open', 0, '2026-05-16T04:00:00Z');
+INSERT INTO zotero_saves (
+  paper_id, state, item_key, error_message, attempted_at, saved_at
+) VALUES (
+  1, 'saved', 'ITEM123', NULL, '2026-05-16T05:00:00Z', '2026-05-16T05:00:01Z'
+);
+`)
+	db.Close()
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	report, err := store.BuildLatestReport(time.Date(2026, 5, 16, 8, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Totals["total"] != 1 || report.Totals["direct"] != 1 {
+		t.Fatalf("unexpected totals: %#v", report.Totals)
+	}
+	paper := report.Papers[0]
+	if paper.Classification.Relevance != "direct" || paper.Classification.Reason != "Latest classification" {
+		t.Fatalf("unexpected latest classification: %#v", paper.Classification)
+	}
+	if paper.Classification.TranslatedTitleZH == nil || *paper.Classification.TranslatedTitleZH != "新标题" {
+		t.Fatalf("unexpected translated title: %#v", paper.Classification.TranslatedTitleZH)
+	}
+	if paper.FeedbackStatus == nil || paper.FeedbackStatus.CorrectedRelevance == nil || *paper.FeedbackStatus.CorrectedRelevance != "direct" {
+		t.Fatalf("unexpected latest open feedback: %#v", paper.FeedbackStatus)
+	}
+	if paper.FeedbackStatus.Note == nil || *paper.FeedbackStatus.Note != "Latest open feedback" {
+		t.Fatalf("unexpected feedback note: %#v", paper.FeedbackStatus)
+	}
+}
+
+func TestBuildLatestReportSupportsLegacySchemaWithoutFeedbackOrZoteroTables(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	db := openSQLiteTestDB(t, path)
+	execSQLite(t, db, `
+CREATE TABLE papers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_url TEXT NOT NULL,
+  feed_title TEXT,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  doi TEXT,
+  journal TEXT,
+  authors_json TEXT NOT NULL,
+  abstract TEXT,
+  published_date TEXT,
+  first_seen_at TEXT NOT NULL,
+  read_at TEXT,
+  raw_json TEXT NOT NULL
+);
+CREATE TABLE classifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  paper_id INTEGER NOT NULL,
+  relevance TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  reason TEXT NOT NULL,
+  topic_tags_json TEXT NOT NULL,
+  model TEXT NOT NULL,
+  classified_at TEXT NOT NULL
+);
+`)
+	execSQLite(t, db, `
+INSERT INTO papers (
+  id, source_url, feed_title, title, url, doi, journal, authors_json, abstract, published_date, first_seen_at, read_at, raw_json
+) VALUES (
+  1, 'https://example.com/rss', NULL, 'Legacy report paper', 'https://example.com/legacy-report', NULL, NULL, '["Alice"]', 'Legacy abstract', NULL, '2026-05-16T01:00:00Z', NULL, '{}'
+);
+INSERT INTO classifications (
+  id, paper_id, relevance, confidence, reason, topic_tags_json, model, classified_at
+) VALUES (
+  1, 1, 'indirect', 0.4, 'Legacy classification', '[]', 'legacy-model', '2026-05-16T02:00:00Z'
+);
+`)
+	db.Close()
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	report, err := store.BuildLatestReport(time.Date(2026, 5, 16, 8, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Papers) != 1 || report.Totals["indirect"] != 1 {
+		t.Fatalf("unexpected report payload: %#v", report)
+	}
+	paper := report.Papers[0]
+	if paper.AbstractSource != "none" {
+		t.Fatalf("unexpected abstract source fallback: %#v", paper.AbstractSource)
+	}
+	if paper.FeedbackStatus != nil {
+		t.Fatalf("expected nil feedback status for missing feedback table: %#v", paper.FeedbackStatus)
+	}
+	if paper.ZoteroStatus != nil {
+		t.Fatalf("expected nil zotero status for missing zotero table: %#v", paper.ZoteroStatus)
+	}
+	if paper.Classification.RecommendedAction != "scan" {
+		t.Fatalf("unexpected recommended action fallback: %#v", paper.Classification)
 	}
 }
 

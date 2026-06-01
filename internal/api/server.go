@@ -11,6 +11,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/yyngfive/scirssagent/internal/config"
@@ -24,10 +25,24 @@ import (
 )
 
 type Server struct {
-	settings config.Settings
-	version  string
-	shutdown func()
+	settings    config.Settings
+	version     string
+	shutdown    func()
+	storeMu     sync.RWMutex
+	sqliteStore *store.Store
+	updateMu    sync.Mutex
+	updateCache *cachedUpdateStatus
 }
+
+type cachedUpdateStatus struct {
+	payload   map[string]any
+	expiresAt time.Time
+}
+
+const (
+	updateStatusSuccessTTL = 5 * time.Minute
+	updateStatusFailureTTL = 30 * time.Second
+)
 
 var (
 	openExternalTargetFunc                                                                                          = appruntime.OpenExternalTarget
@@ -50,6 +65,60 @@ func NewServer(settings config.Settings, shutdown func()) *Server {
 		version:  appruntime.PackageVersion(settings.RootDir),
 		shutdown: shutdown,
 	}
+}
+
+func (s *Server) getStore() (*store.Store, error) {
+	s.storeMu.RLock()
+	sqliteStore := s.sqliteStore
+	s.storeMu.RUnlock()
+	if sqliteStore != nil {
+		return sqliteStore, nil
+	}
+
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	if s.sqliteStore != nil {
+		return s.sqliteStore, nil
+	}
+	sqliteStore, err := store.Open(s.settings.DatabasePath)
+	if err != nil {
+		return nil, err
+	}
+	s.sqliteStore = sqliteStore
+	return sqliteStore, nil
+}
+
+func (s *Server) Close() error {
+	s.storeMu.Lock()
+	sqliteStore := s.sqliteStore
+	s.sqliteStore = nil
+	s.storeMu.Unlock()
+	if sqliteStore == nil {
+		return nil
+	}
+	return sqliteStore.Close()
+}
+
+func (s *Server) cachedUpdateStatus() map[string]any {
+	now := nowFunc().UTC()
+
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+
+	if s.updateCache != nil && now.Before(s.updateCache.expiresAt) {
+		return cloneJSONMap(s.updateCache.payload)
+	}
+
+	payload := fetchUpdateStatus(s.settings)
+	ttl := updateStatusSuccessTTL
+	if status, ok := payload["status"].(string); ok && status == "check_failed" {
+		ttl = updateStatusFailureTTL
+	}
+	s.updateCache = &cachedUpdateStatus{
+		payload:   cloneJSONMap(payload),
+		expiresAt: now.Add(ttl),
+	}
+	return cloneJSONMap(payload)
 }
 
 func (s *Server) Handler() http.Handler {
@@ -90,7 +159,7 @@ func (s *Server) handleReportLatest(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	sqliteStore, err := store.Open(s.settings.DatabasePath)
+	sqliteStore, err := s.getStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeJSON(w, http.StatusOK, emptyReportPayload())
@@ -99,8 +168,6 @@ func (s *Server) handleReportLatest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer sqliteStore.Close()
-
 	report, err := sqliteStore.BuildLatestReport(time.Now().UTC())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -158,7 +225,7 @@ func (s *Server) handleAppUpdate(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	writeJSON(w, http.StatusOK, fetchUpdateStatus(s.settings))
+	writeJSON(w, http.StatusOK, s.cachedUpdateStatus())
 }
 
 func (s *Server) handleAppOpen(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +242,7 @@ func (s *Server) handleAppOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	updateStatus := map[string]any(nil)
 	if payload.Target == "download_url" || payload.Target == "release_notes_url" {
-		updateStatus = fetchUpdateStatus(s.settings)
+		updateStatus = s.cachedUpdateStatus()
 	}
 	target, err := resolveAppOpenTarget(s.settings, payload.Target, requestBaseURL(r), updateStatus)
 	if err != nil {
@@ -423,7 +490,7 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	// 统一承接 feedback 列表读取和创建。
 	switch r.Method {
 	case http.MethodGet:
-		sqliteStore, err := store.Open(s.settings.DatabasePath)
+		sqliteStore, err := s.getStore()
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				writeJSON(w, http.StatusOK, []any{})
@@ -432,8 +499,6 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		defer sqliteStore.Close()
-
 		items, err := sqliteStore.ListFeedback()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -450,7 +515,7 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "Invalid JSON body.")
 			return
 		}
-		sqliteStore, err := store.Open(s.settings.DatabasePath)
+		sqliteStore, err := s.getStore()
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				writeError(w, http.StatusNotFound, "Paper not found.")
@@ -459,8 +524,6 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		defer sqliteStore.Close()
-
 		record, err := sqliteStore.CreateFeedback(payload.PaperID, payload.CorrectedRelevance, payload.Note, time.Now().UTC())
 		if err != nil {
 			switch {
@@ -485,7 +548,7 @@ func (s *Server) handleProfileProposals(w http.ResponseWriter, r *http.Request) 
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	sqliteStore, err := store.Open(s.settings.DatabasePath)
+	sqliteStore, err := s.getStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeJSON(w, http.StatusOK, []any{})
@@ -494,8 +557,6 @@ func (s *Server) handleProfileProposals(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer sqliteStore.Close()
-
 	items, err := sqliteStore.ListProfileProposals()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -549,7 +610,7 @@ func (s *Server) handleFeedbackByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Feedback not found.")
 		return
 	}
-	sqliteStore, err := store.Open(s.settings.DatabasePath)
+	sqliteStore, err := s.getStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "Feedback not found.")
@@ -558,7 +619,6 @@ func (s *Server) handleFeedbackByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer sqliteStore.Close()
 	if err := sqliteStore.DeleteFeedback(feedbackID); err != nil {
 		if errors.Is(err, store.ErrFeedbackNotFound) {
 			writeError(w, http.StatusNotFound, "Feedback not found.")
@@ -588,7 +648,7 @@ func (s *Server) handlePaperByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Paper not found.")
 		return
 	}
-	sqliteStore, err := store.Open(s.settings.DatabasePath)
+	sqliteStore, err := s.getStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "Paper not found.")
@@ -597,8 +657,6 @@ func (s *Server) handlePaperByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer sqliteStore.Close()
-
 	readAt, err := sqliteStore.MarkPaperRead(paperID, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, store.ErrPaperNotFound) {
@@ -643,7 +701,7 @@ func (s *Server) handleProfileProposalByID(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleProfileProposalDetail(w http.ResponseWriter, proposalID int64) {
 	// 补齐单条 proposal 详情读取，和 Python API 保持一致。
-	sqliteStore, err := store.Open(s.settings.DatabasePath)
+	sqliteStore, err := s.getStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "Profile proposal not found.")
@@ -652,8 +710,6 @@ func (s *Server) handleProfileProposalDetail(w http.ResponseWriter, proposalID i
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer sqliteStore.Close()
-
 	item, err := sqliteStore.GetProfileProposal(proposalID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -668,7 +724,7 @@ func (s *Server) handleProfileProposalDetail(w http.ResponseWriter, proposalID i
 
 func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Request, proposalID int64) {
 	// 支持 legacy 整份 apply，以及带 accepted/rejected change ids 的局部 apply。
-	sqliteStore, err := store.Open(s.settings.DatabasePath)
+	sqliteStore, err := s.getStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "Profile proposal not found.")
@@ -679,29 +735,24 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 	}
 	proposal, err := sqliteStore.GetProfileProposal(proposalID)
 	if err != nil {
-		sqliteStore.Close()
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if proposal == nil {
-		sqliteStore.Close()
 		writeError(w, http.StatusNotFound, "Profile proposal not found.")
 		return
 	}
 	if proposal.State == "applied" {
-		defer sqliteStore.Close()
 		writeJSON(w, http.StatusOK, proposal)
 		return
 	}
 	if proposal.State == "rejected" {
-		sqliteStore.Close()
 		writeError(w, http.StatusConflict, "Profile proposal has already been rejected.")
 		return
 	}
 
 	currentProfile, err := profile.ReadCurrent(s.settings.ProfilePath)
 	if err != nil {
-		sqliteStore.Close()
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -712,7 +763,6 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 	if len(proposal.Changes) == 0 {
 		appliedProfile, version, err = profile.PrepareAppliedProfile(proposal.ProposedProfile, currentProfile, now)
 		if err != nil {
-			sqliteStore.Close()
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -722,42 +772,35 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 			RejectedChangeIDs []string `json:"rejected_change_ids"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
-			sqliteStore.Close()
 			writeError(w, http.StatusBadRequest, "Invalid JSON body.")
 			return
 		}
 		currentVersion, err := profile.CurrentProfileVersion(currentProfile)
 		if err != nil {
-			sqliteStore.Close()
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if proposal.BaseProfileVersion != currentVersion {
-			sqliteStore.Close()
 			writeError(w, http.StatusConflict, "Current profile version has changed since this proposal was generated. Regenerate the proposal and review it again.")
 			return
 		}
 		finalizedChanges, err = profile.FinalizeProposalChanges(proposal.Changes, payload.AcceptedChangeIDs, payload.RejectedChangeIDs)
 		if err != nil {
-			sqliteStore.Close()
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		appliedProfile, version, err = profile.PrepareAppliedProfileFromChanges(currentProfile, finalizedChanges, now)
 		if err != nil {
-			sqliteStore.Close()
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
 	if err := profile.WriteCurrent(s.settings.ProfilePath, appliedProfile); err != nil {
-		sqliteStore.Close()
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	feedbackIDs := store.FeedbackIDsToInt64(proposal.SourceFeedbackIDs)
 	if err := sqliteStore.ApplyProfileProposalState(proposalID, version, appliedProfile, finalizedChanges, now); err != nil {
-		sqliteStore.Close()
 		if errors.Is(err, store.ErrProfileProposalNotFound) {
 			writeError(w, http.StatusNotFound, "Profile proposal not found.")
 			return
@@ -766,18 +809,15 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := sqliteStore.MarkFeedbackUsed(feedbackIDs); err != nil {
-		sqliteStore.Close()
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	paperIDs, err := sqliteStore.PaperIDsForFeedbackIDs(feedbackIDs)
 	if err != nil {
-		sqliteStore.Close()
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	updatedProposal, err := sqliteStore.GetProfileProposal(proposalID)
-	sqliteStore.Close()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -801,7 +841,7 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) handleProfileProposalReject(w http.ResponseWriter, proposalID int64) {
 	// 复刻 Python reject proposal 的本地状态更新。
-	sqliteStore, err := store.Open(s.settings.DatabasePath)
+	sqliteStore, err := s.getStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "Profile proposal not found.")
@@ -810,7 +850,6 @@ func (s *Server) handleProfileProposalReject(w http.ResponseWriter, proposalID i
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer sqliteStore.Close()
 	item, err := sqliteStore.GetProfileProposal(proposalID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -875,7 +914,7 @@ func (s *Server) handleZoteroSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid JSON body.")
 		return
 	}
-	sqliteStore, err := store.Open(s.settings.DatabasePath)
+	sqliteStore, err := s.getStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "Paper not found.")
@@ -884,7 +923,6 @@ func (s *Server) handleZoteroSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer sqliteStore.Close()
 	paper, err := sqliteStore.PaperByID(paperID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1271,6 +1309,17 @@ func readJSONObject(path string) (map[string]any, error) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	return payload, nil
+}
+
+func cloneJSONMap(payload map[string]any) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	clone := make(map[string]any, len(payload))
+	for key, value := range payload {
+		clone[key] = value
+	}
+	return clone
 }
 
 func emptyReportPayload() map[string]any {

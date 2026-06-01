@@ -54,6 +54,7 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(ctx)
 	})
+	defer apiServer.Close()
 	server.Handler = apiServer.Handler()
 
 	// 把当前 daemon 的 PID 和端口写到 runtime.json，供托盘探活和停止服务使用。

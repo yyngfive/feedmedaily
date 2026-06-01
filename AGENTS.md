@@ -96,6 +96,7 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 - Do not commit `data/classification_profile.json` or `data/*.sqlite`; they are per-user local state.
 - When changing the profile proposal UI, optimize for reviewability rather than raw JSON visibility.
 - Keep long-running LLM actions as background jobs with visible status in the UI.
+- Keep review-critical loading paths narrow: the paper list should not wait on app-update, scheduler, settings, proposal, or feedback hydration unless the task explicitly redesigns that behavior.
 - Keep admin/settings surfaces compact and low-chrome; avoid stacked form cards when a denser table or document layout communicates better.
 - Prefer one primary profile-review document card over multiple small cards when showing the current profile or a pending proposal.
 - Keep paper cards summary-only and move richer context or rendering into the right detail panel.
@@ -104,9 +105,10 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 ## UI Baseline
 
 - The main app currently uses a three-column layout: left filters, center paper list, right detail panel.
-- If no profile exists, the app shows onboarding first. If a profile exists but no RSS feeds are configured, the app switches into a feed-initialization empty state and opens admin feed settings by default.
+- If no profile exists, the app shows onboarding first. If a profile exists, the three-column shell should render immediately and let the paper list load independently from admin/status data. If no RSS feeds are configured, the app switches into a feed-initialization empty state only after feed loading resolves and opens admin feed settings by default.
 - The center list defaults to `Unread + Last 30 days`, uses virtualized card rendering, and keeps paper cards as read-only previews without inline action buttons.
 - The admin panel owns feed subscription editing, manual jobs, feedback review, and profile proposal review.
 - The right detail panel owns the paper action buttons (`DOI link`, `Mark as read`, `Save to Zotero`, `Mark wrong`).
 - Zotero saving is implemented through the Zotero Web API with an in-app collection picker, not through the browser connector.
+- `/api/report/latest` is a performance-critical path. Keep report reads batched and avoid reintroducing request-level SQLite reopen/close behavior or first-screen blocking dependencies from non-critical admin requests.
 - In `web/src/App.tsx` and `web/src/main.tsx`, top-level helpers and components should keep short Chinese comments that explain each function or component's responsibility.
