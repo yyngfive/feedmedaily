@@ -83,8 +83,10 @@ CREATE TABLE IF NOT EXISTS zotero_saves (
 
 CREATE INDEX IF NOT EXISTS idx_papers_first_seen_at ON papers(first_seen_at);
 CREATE INDEX IF NOT EXISTS idx_classifications_paper_id ON classifications(paper_id);
+CREATE INDEX IF NOT EXISTS idx_classifications_paper_id_classified_at ON classifications(paper_id, classified_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_feedback_paper_id ON feedback(paper_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedback(created_at);
+CREATE INDEX IF NOT EXISTS idx_feedback_paper_id_state_created_at ON feedback(paper_id, state, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_profile_proposals_created_at ON profile_proposals(created_at);
 `
 

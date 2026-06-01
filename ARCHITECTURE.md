@@ -33,7 +33,7 @@ Legacy reference files still remain in the repository for comparison and regress
 5. The classifier evaluates papers against the active `data/classification_profile.json`.
 6. Classifications, feedback, profile proposals, and Zotero save status are persisted in SQLite.
 7. `feedmedailyd` serves `web/dist` and exposes the local JSON API surface.
-8. The UI reads the latest report through `/api/report/latest`, rebuilt from SQLite-backed state rather than replayed from disk report snapshots.
+8. The API service keeps a long-lived SQLite handle open for request reuse, and the UI reads the latest report through `/api/report/latest`, rebuilt from SQLite-backed state rather than replayed from disk report snapshots.
 
 ## Runtime Surfaces
 
@@ -54,6 +54,8 @@ Legacy reference files still remain in the repository for comparison and regress
 `Run Sync Now` is fully owned by Go end-to-end: feed fetch, ingest, conditional metadata enrichment, classification, report refresh, and background job state all run through `feedmedailyd`.
 
 The job polling endpoints expose both human-readable messages and structured progress fields so the UI can show stage-aware status such as current feed `i/N`, metadata/classification completion percentages, and step-based profile generation progress.
+
+The API service reuses its SQLite store across requests instead of reopening it per handler. The `/api/report/latest` read path batch-selects each paper's latest classification, latest open feedback, and latest Zotero save state with SQL windowing rather than issuing per-paper follow-up lookups. `/api/app/update` also keeps a short-lived in-memory status cache so remote manifest fetch latency does not get multiplied by repeated UI polling or page initialization.
 
 ### Protected-feed verification
 
@@ -127,11 +129,13 @@ The main app uses a three-column layout:
 Behavioral baseline:
 
 - if no profile exists, onboarding is shown first and includes local configuration editing
-- if a profile exists but no feeds exist, the app switches into a feed-initialization empty state
+- if a profile exists, the three-column review shell renders immediately and the paper list begins loading as soon as the report request starts
+- if a profile exists but no feeds exist, the app switches into a feed-initialization empty state once feed loading resolves
 - the default review view is `Unread + Last 30 days`
 - paper cards stay summary-only
 - paper actions live in the detail panel
 - admin owns configuration editing, feed editing, manual jobs, feedback review, and profile proposal review
+- app-update, scheduler, settings, proposal, and feedback hydration are non-critical background loads and must not block the card list from appearing
 
 ## Profile Lifecycle
 
@@ -152,6 +156,8 @@ Supported admin reclassification scopes:
 ## Reporting
 
 The supported report read path is the live `/api/report/latest` API backed by SQLite and current profile state.
+
+That report path is optimized for the current UI by using batched SQLite reads and lightweight `raw_json` extraction for card-list fields such as abstract HTML and abstract images.
 
 Legacy disk report artifacts under `reports/` remain compatibility or export leftovers. They are no longer the primary source of truth for the app UI or runtime verification.
 

@@ -9,6 +9,7 @@ import type {Paper, Relevance} from "../../types";
 
 export function PaperListSection({
   hasNoFetchedPapers,
+  loading,
   needsFeedSetup,
   onOpenAdmin,
   onResetFilters,
@@ -26,6 +27,7 @@ export function PaperListSection({
   visibleTotals,
 }: {
   hasNoFetchedPapers: boolean;
+  loading: boolean;
   needsFeedSetup: boolean;
   onOpenAdmin: () => void;
   onResetFilters: () => void;
@@ -101,6 +103,12 @@ export function PaperListSection({
               </Button>
             </>
           }
+        />
+      ) : loading ? (
+        <EmptyStateCard
+          eyebrow="Loading"
+          title="Loading your paper list"
+          body="The review list is being prepared. You can open Admin in the meantime, but the card list will appear as soon as the latest report finishes loading."
         />
       ) : hasNoFetchedPapers ? (
         <EmptyStateCard

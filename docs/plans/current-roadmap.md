@@ -1,6 +1,6 @@
 # FeedMeDaily Current Roadmap
 
-Last Updated: 2026-05-24
+Last Updated: 2026-06-01
 Status: Active
 
 ## Summary
@@ -76,7 +76,22 @@ Constraints:
 - configuration editing remains local-first
 - secret values stay write-only from the frontend perspective
 
-### 5. Zotero and packaging follow-up
+### 5. Review-path scaling follow-up
+
+Goal: keep the paper review surface responsive as local libraries grow larger.
+
+Planned work:
+
+- measure whether the current batched SQLite report path and non-blocking first-screen loading are sufficient on larger real libraries
+- if needed, split list and detail data more aggressively or add server-side pagination and filtering for the report payload
+- continue treating app-update and other admin/status requests as non-critical background hydration
+
+Constraints:
+
+- preserve the current `/api/report/latest` contract unless a clear follow-up redesign is intentionally scheduled
+- keep the card list on the first-screen critical path and avoid reintroducing admin-request blocking
+
+### 6. Zotero and packaging follow-up
 
 Goal: close the main remaining integration and distribution gaps.
 
@@ -97,8 +112,9 @@ Constraints:
 2. Feed discovery and job progress improvements
 3. Review filters, sorting, and bulk-read actions
 4. Settings and onboarding polish
-5. Zotero follow-up
-6. Packaging and cross-platform follow-up
+5. Review-path scaling follow-up
+6. Zotero follow-up
+7. Packaging and cross-platform follow-up
 
 ## Working Rules
 

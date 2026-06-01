@@ -15,6 +15,12 @@ Changes since `0.3.0`:
 - Further tightened feedback-driven proposal generation so conflicting old rules must be rewritten or removed, merge/add duplicates are discouraged, and merged rules are expected to preserve important boundary coverage. Classification now uses only scope plus relevance rules, without few-shot examples, to reduce broad-example bias.
 - Simplified profile maintenance to focus only on scope plus relevance rules: the current editor now uses row-based rule lists, tags/examples are cleared from new saves and proposals, and profile proposal generation can run in maintenance mode even when there is no open feedback.
 - Added structured background-job progress reporting for sync, reclassify, and profile-generation flows. The UI now shows feed-by-feed fetch status, metadata/classification completion percentages, and step-based profile generation progress without adding a separate progress-bar UI.
+- Changed the local API server to keep a long-lived SQLite store open across requests, batch-build `/api/report/latest`, and reuse a short-lived cached app-update status instead of repeatedly reopening the database or rechecking the remote manifest on every page load.
+
+### Fixed
+
+- Reduced homepage wait time for larger libraries by replacing the report page's earlier N+1 SQLite read pattern with indexed batch queries for the latest classification, feedback, and Zotero state per paper.
+- Fixed the review app's first-screen loading flow so the paper card list no longer waits for update checks, scheduler state, settings, proposals, or feedback requests before it starts loading. Those admin/status requests now hydrate in the background.
 
 ## 0.3.0 (2026-05-25)
 

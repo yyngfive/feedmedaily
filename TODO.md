@@ -44,7 +44,10 @@
 
 ## Performance
 
-- [ ] [High] 每次打开应用读取数据库都要等待，且会随文献数量增长越来越慢；需要优化启动时/首页加载时的 SQLite 读取与 report 构建路径
+- [X] [High] API Server 复用长期存活的 SQLite Store，不再为每个请求重复 `Open` / `Ping` / `loadColumns`
+- [X] [High] `/api/report/latest` 改为批量查询最新 classification / feedback / zotero 状态，并补齐匹配索引以消除 N+1 读取
+- [X] [High] 首页 card list 不再等待 app update / scheduler / settings / proposals / feedback 请求；更新检查已移出首屏关键路径并增加短期缓存
+- [ ] [Medium] 如果大库下首页仍有明显压力，继续评估 report 列表/详情拆分或服务端分页与筛选
 
 ## Feed
 

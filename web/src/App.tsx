@@ -82,6 +82,9 @@ export function App() {
   const [scheduler, setScheduler] = React.useState<SchedulerSettings | null>(null);
   const [settingsConfig, setSettingsConfig] = React.useState<SettingsConfigField[]>([]);
   const [feedsLoaded, setFeedsLoaded] = React.useState(false);
+  const [profileResolved, setProfileResolved] = React.useState(false);
+  const [reportLoading, setReportLoading] = React.useState(false);
+  const [adminDataLoading, setAdminDataLoading] = React.useState(false);
   const [message, setMessage] = React.useState<UiMessage | null>(null);
   const [query, setQuery] = React.useState("");
   const [relevance, setRelevance] = React.useState<RelevanceFilter>("direct");
@@ -168,16 +171,27 @@ export function App() {
     window.localStorage.setItem("feedmedaily-theme", themePreference);
   }, [themePreference]);
 
-  const refreshProfile = React.useCallback(async () => {
+  const pushLoadError = React.useCallback((error: unknown) => {
+    pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+  }, [pushMessage]);
+
+  const refreshProfileGate = React.useCallback(async () => {
     const next = await fetchCurrentProfile();
     setProfile(next.profile);
+    setProfileResolved(true);
     return next.profile;
   }, []);
 
   const refreshReport = React.useCallback(async () => {
-    const next = await fetchLatestReport();
-    React.startTransition(() => setReport(next));
-  }, [pushMessage]);
+    setReportLoading(true);
+    try {
+      const next = await fetchLatestReport();
+      React.startTransition(() => setReport(next));
+      return next;
+    } finally {
+      setReportLoading(false);
+    }
+  }, []);
 
   const refreshFeedback = React.useCallback(async () => {
     setFeedbackRecords(await fetchFeedback());
@@ -210,40 +224,88 @@ export function App() {
     setProfileProposals(await fetchProfileProposals());
   }, []);
 
-  const refreshAll = React.useCallback(async () => {
+  const refreshReviewCore = React.useCallback(async (
+    currentProfile?: ClassificationProfile | null,
+  ) => {
+    const profileValue = currentProfile ?? profile;
+    if (!profileValue) {
+      setReport(EMPTY_REPORT);
+      setReportLoading(false);
+      return;
+    }
+    const results = await Promise.allSettled([refreshReport(), refreshFeeds()]);
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed?.status === "rejected") {
+      pushLoadError(failed.reason);
+    }
+  }, [profile, pushLoadError, refreshFeeds, refreshReport]);
+
+  const refreshAdminData = React.useCallback(async () => {
+    setAdminDataLoading(true);
     try {
-      const currentProfile = await refreshProfile();
-      await Promise.all([
+      const results = await Promise.allSettled([
         refreshProposals(),
         refreshFeedback(),
-        refreshFeeds(),
         refreshConfig(),
         refreshAppMeta(),
         refreshAppUpdate(),
         refreshScheduler(),
       ]);
-      if (currentProfile) {
-        await refreshReport();
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed?.status === "rejected") {
+        pushLoadError(failed.reason);
       }
-    } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+    } finally {
+      setAdminDataLoading(false);
     }
   }, [
-    pushMessage,
     refreshAppMeta,
     refreshAppUpdate,
     refreshConfig,
     refreshFeedback,
-    refreshFeeds,
-    refreshProfile,
     refreshProposals,
-    refreshReport,
     refreshScheduler,
+    pushLoadError,
   ]);
 
+  const refreshAll = React.useCallback(async () => {
+    try {
+      const currentProfile = await refreshProfileGate();
+      await Promise.all([
+        refreshAdminData(),
+        currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve(),
+      ]);
+    } catch (error) {
+      pushLoadError(error);
+    }
+  }, [pushLoadError, refreshAdminData, refreshProfileGate, refreshReviewCore]);
+
   React.useEffect(() => {
-    void refreshAll();
-  }, [refreshAll]);
+    let cancelled = false;
+
+    const loadInitialView = async () => {
+      try {
+        const currentProfile = await refreshProfileGate();
+        if (cancelled) {
+          return;
+        }
+        if (currentProfile) {
+          void refreshReviewCore(currentProfile);
+        }
+        void refreshAdminData();
+      } catch (error) {
+        if (!cancelled) {
+          pushLoadError(error);
+          setProfileResolved(true);
+        }
+      }
+    };
+
+    void loadInitialView();
+    return () => {
+      cancelled = true;
+    };
+  }, [pushLoadError, refreshAdminData, refreshProfileGate, refreshReviewCore]);
 
   React.useEffect(() => {
     if (profile && feedsLoaded && feeds.length === 0) {
@@ -364,10 +426,15 @@ export function App() {
         jobsHydratedRef.current = true;
 
         if (shouldRefresh) {
-          void refreshAll();
+          if (profile) {
+            void refreshReviewCore();
+            void refreshAdminData();
+          } else {
+            void refreshAll();
+          }
         }
       } catch (error) {
-        pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+        pushLoadError(error);
       }
     };
 
@@ -380,7 +447,7 @@ export function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [profile, pushMessage, refreshAll]);
+  }, [profile, pushLoadError, refreshAdminData, refreshAll, refreshReviewCore]);
 
   const journals = React.useMemo(
     () => Array.from(new Set(report.papers.map((paper) => paper.journal).filter(Boolean) as string[])).sort(),
@@ -429,7 +496,12 @@ export function App() {
   );
 
   const needsFeedSetup = Boolean(profile && feedsLoaded && feeds.length === 0);
-  const hasNoFetchedPapers = !needsFeedSetup && feeds.length > 0 && report.papers.length === 0;
+  const hasNoFetchedPapers =
+    feedsLoaded &&
+    !reportLoading &&
+    !needsFeedSetup &&
+    feeds.length > 0 &&
+    report.papers.length === 0;
   const visibleBase = React.useMemo(
     () => (needsFeedSetup ? [] : filteredBase),
     [filteredBase, needsFeedSetup],
@@ -634,14 +706,18 @@ export function App() {
       setSettingsConfigSaving(true);
       const saved = await saveSettingsConfig(fields);
       setSettingsConfig(saved.fields);
-      await refreshAll();
+      const currentProfile = await refreshProfileGate();
+      await Promise.all([
+        refreshAdminData(),
+        currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve(),
+      ]);
       pushMessage("settings.config.save.succeeded");
     } catch (error) {
       pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
     } finally {
       setSettingsConfigSaving(false);
     }
-  }, [pushMessage, refreshAll]);
+  }, [pushMessage, refreshAdminData, refreshProfileGate, refreshReviewCore]);
 
   const handleSaveScheduler = React.useCallback(async (dailyTime: string) => {
     try {
@@ -748,7 +824,12 @@ export function App() {
     try {
       setBusy(true);
       await applyProfileProposal(id, selection);
-      await refreshAll();
+      const currentProfile = await refreshProfileGate();
+      await Promise.all([
+        refreshFeedback(),
+        refreshProposals(),
+        currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve(),
+      ]);
       pushMessage("profile.proposal.applied");
     } catch (error) {
       pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
@@ -815,6 +896,34 @@ export function App() {
     setRelevance("all");
     setQuery("");
   }, []);
+
+  if (!profileResolved) {
+    return (
+      <main className="flex min-h-screen flex-col bg-[--paper] text-[--ink]">
+        <TopBar
+          message={message}
+          onOpenAdmin={() => setAdminOpen(true)}
+          onToggleTheme={toggleTheme}
+          resolvedTheme={resolvedTheme}
+          usingSystemTheme={themePreference === "system"}
+        />
+        <div className="mx-auto flex w-full max-w-5xl flex-1 items-center justify-center px-4 py-8">
+          <div className="rounded-lg border border-(--line) bg-(--paper-accent) px-5 py-4 text-sm text-muted">
+            Loading your library...
+          </div>
+        </div>
+        <AppStatusBar
+          appMeta={appMeta}
+          appUpdate={appUpdate}
+          busy={appControlBusy}
+          onExit={() => void handleExitApp()}
+          onOpenData={() => void handleOpenAppTarget("data_dir")}
+          onOpenInstall={() => void handleOpenAppTarget("install_dir")}
+          onOpenLogs={() => void handleOpenAppTarget("logs_dir")}
+        />
+      </main>
+    );
+  }
 
   if (!profile) {
     return (
@@ -935,6 +1044,7 @@ export function App() {
 
         <PaperListSection
           hasNoFetchedPapers={hasNoFetchedPapers}
+          loading={(reportLoading || !feedsLoaded) && report.papers.length === 0}
           needsFeedSetup={needsFeedSetup}
           onOpenAdmin={() => setAdminOpen(true)}
           onResetFilters={resetFilters}

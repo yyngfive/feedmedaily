@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -25,7 +26,7 @@ func TestAppHealthAndMeta(t *testing.T) {
 	writeFile(t, filepath.Join(root, "web", "package.json"), `{"version":"1.2.3"}`)
 
 	settings := testSettings(root)
-	handler := NewServer(settings, nil).Handler()
+	handler := newTestHandler(t, settings)
 
 	healthRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(healthRecorder, httptest.NewRequest(http.MethodGet, "/api/app/health", nil))
@@ -62,7 +63,7 @@ func TestStaticFallbackAndAPINotFound(t *testing.T) {
 	settings := testSettings(root)
 	writeFile(t, filepath.Join(settings.WebDistDir, "index.html"), "<main>app shell</main>")
 	writeFile(t, filepath.Join(settings.WebDistDir, "assets", "app.js"), "console.log('ok')")
-	handler := NewServer(settings, nil).Handler()
+	handler := newTestHandler(t, settings)
 
 	assetRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(assetRecorder, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
@@ -89,7 +90,7 @@ func TestSettingsConfigAPI(t *testing.T) {
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
 	writeFile(t, filepath.Join(root, "src", "scirssagent", "__init__.py"), "")
 	writeFile(t, filepath.Join(root, ".env"), "SCIRSS_CLASSIFIER_API_KEY=super-secret\n")
-	handler := NewServer(testSettings(root), nil).Handler()
+	handler := newTestHandler(t, testSettings(root))
 
 	getRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(getRecorder, httptest.NewRequest(http.MethodGet, "/api/settings/config", nil))
@@ -117,7 +118,7 @@ func TestSettingsConfigAPI(t *testing.T) {
 
 func TestSettingsFeedsAPI(t *testing.T) {
 	root := t.TempDir()
-	handler := NewServer(testSettings(root), nil).Handler()
+	handler := newTestHandler(t, testSettings(root))
 
 	getRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(getRecorder, httptest.NewRequest(http.MethodGet, "/api/settings/feeds", nil))
@@ -141,7 +142,7 @@ func TestReadOnlyBootstrapEndpoints(t *testing.T) {
 	settings := testSettings(root)
 	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Test","version":1,"created_at":"2026-05-16T00:00:00Z","updated_at":"2026-05-16T00:00:00Z","source_description":"test"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`)
 	seedReadOnlyFixture(t, settings.DatabasePath)
-	handler := NewServer(settings, nil).Handler()
+	handler := newTestHandler(t, settings)
 
 	profileRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(profileRecorder, httptest.NewRequest(http.MethodGet, "/api/profile/current", nil))
@@ -184,7 +185,7 @@ func TestProfileCurrentPutUpdatesExistingProfile(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)
 	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":2,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`)
-	handler := NewServer(settings, nil).Handler()
+	handler := newTestHandler(t, settings)
 
 	body := `{
 		"meta":{"name":"Edited profile","version":1,"created_at":"2026-05-20T00:00:00Z","updated_at":"2026-05-20T00:00:00Z","source_description":"edited"},
@@ -226,7 +227,7 @@ func TestProfileCurrentPutUpdatesExistingProfile(t *testing.T) {
 func TestProfileCurrentPutRejectsInvalidOrMissingProfile(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)
-	handler := NewServer(settings, nil).Handler()
+	handler := newTestHandler(t, settings)
 
 	missingRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(missingRecorder, httptest.NewRequest(http.MethodPut, "/api/profile/current", strings.NewReader(`{}`)))
@@ -249,10 +250,12 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 	restore := stubAPIGlobals(t)
 	defer restore()
 
+	manifestCalls := 0
 	nowFunc = func() time.Time {
 		return time.Date(2026, 5, 16, 7, 30, 0, 0, time.FixedZone("CST", 8*3600))
 	}
 	fetchUpdateManifestFunc = func(string) (map[string]any, error) {
+		manifestCalls++
 		return map[string]any{
 			"version":           "9.9.9",
 			"download_url":      "https://example.com/feedmedaily.exe",
@@ -268,7 +271,7 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 		return nil
 	}
 	settings.UpdateManifestURL = "https://example.com/update.json"
-	handler := NewServer(settings, nil).Handler()
+	handler := newTestHandler(t, settings)
 
 	updateRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(updateRecorder, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
@@ -280,6 +283,9 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 	handler.ServeHTTP(openRecorder, httptest.NewRequest(http.MethodPost, "/api/app/open", strings.NewReader(`{"target":"download_url"}`)))
 	if openRecorder.Code != http.StatusOK || opened != "https://example.com/feedmedaily.exe" {
 		t.Fatalf("open response = %d %s opened=%q", openRecorder.Code, openRecorder.Body.String(), opened)
+	}
+	if manifestCalls != 1 {
+		t.Fatalf("expected cached update status, manifestCalls=%d", manifestCalls)
 	}
 
 	schedulerGet := httptest.NewRecorder()
@@ -298,6 +304,93 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 	handler.ServeHTTP(schedulerDelete, httptest.NewRequest(http.MethodDelete, "/api/settings/scheduler", nil))
 	if schedulerDelete.Code != http.StatusOK || !contains(schedulerDelete.Body.String(), `"installed":false`) {
 		t.Fatalf("scheduler delete = %d %s", schedulerDelete.Code, schedulerDelete.Body.String())
+	}
+}
+
+func TestAppUpdateCachesSuccessfulManifestFetches(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	settings.UpdateManifestURL = "https://example.com/update.json"
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	currentTime := time.Date(2026, 5, 16, 7, 30, 0, 0, time.UTC)
+	nowFunc = func() time.Time {
+		return currentTime
+	}
+	manifestCalls := 0
+	fetchUpdateManifestFunc = func(string) (map[string]any, error) {
+		manifestCalls++
+		return map[string]any{
+			"version":           "9.9.9",
+			"download_url":      "https://example.com/feedmedaily.exe",
+			"release_notes_url": "https://example.com/release-notes",
+		}, nil
+	}
+	handler := newTestHandler(t, settings)
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
+	if first.Code != http.StatusOK || !contains(first.Body.String(), `"has_update":true`) {
+		t.Fatalf("first update response = %d %s", first.Code, first.Body.String())
+	}
+
+	currentTime = currentTime.Add(2 * time.Minute)
+
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
+	if second.Code != http.StatusOK || !contains(second.Body.String(), `"has_update":true`) {
+		t.Fatalf("second update response = %d %s", second.Code, second.Body.String())
+	}
+	if manifestCalls != 1 {
+		t.Fatalf("expected cached success response, manifestCalls=%d", manifestCalls)
+	}
+}
+
+func TestAppUpdateCachesFailuresBriefly(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	settings.UpdateManifestURL = "https://example.com/update.json"
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	currentTime := time.Date(2026, 5, 16, 7, 30, 0, 0, time.UTC)
+	nowFunc = func() time.Time {
+		return currentTime
+	}
+	manifestCalls := 0
+	fetchUpdateManifestFunc = func(string) (map[string]any, error) {
+		manifestCalls++
+		return nil, errors.New("dial timeout")
+	}
+	handler := newTestHandler(t, settings)
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
+	if first.Code != http.StatusOK || !contains(first.Body.String(), `"status":"check_failed"`) {
+		t.Fatalf("first failed update response = %d %s", first.Code, first.Body.String())
+	}
+
+	currentTime = currentTime.Add(20 * time.Second)
+
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
+	if second.Code != http.StatusOK || !contains(second.Body.String(), `"status":"check_failed"`) {
+		t.Fatalf("second failed update response = %d %s", second.Code, second.Body.String())
+	}
+	if manifestCalls != 1 {
+		t.Fatalf("expected cached failure response, manifestCalls=%d", manifestCalls)
+	}
+
+	currentTime = currentTime.Add(20 * time.Second)
+
+	third := httptest.NewRecorder()
+	handler.ServeHTTP(third, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
+	if third.Code != http.StatusOK || !contains(third.Body.String(), `"status":"check_failed"`) {
+		t.Fatalf("third failed update response = %d %s", third.Code, third.Body.String())
+	}
+	if manifestCalls != 2 {
+		t.Fatalf("expected failure cache expiry, manifestCalls=%d", manifestCalls)
 	}
 }
 
@@ -321,7 +414,7 @@ func TestAdminSyncJob(t *testing.T) {
 			Errors:     []string{"https://bad.feed/: timeout"},
 		}, nil
 	}
-	handler := NewServer(testSettings(root), nil).Handler()
+	handler := newTestHandler(t, testSettings(root))
 
 	runRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
@@ -353,7 +446,7 @@ func TestFeedbackReadAndDeleteMutationAPIs(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)
 	seedReadOnlyFixture(t, settings.DatabasePath)
-	handler := NewServer(settings, nil).Handler()
+	handler := newTestHandler(t, settings)
 
 	createRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(createRecorder, httptest.NewRequest(http.MethodPost, "/api/feedback", strings.NewReader(`{"paper_id":1,"corrected_relevance":"direct","note":"Promote."}`)))
@@ -421,7 +514,7 @@ func TestBootstrapProposalGenerateAndZoteroBridgeAPIs(t *testing.T) {
 		return &itemKey, nil
 	}
 
-	handler := NewServer(settings, nil).Handler()
+	handler := newTestHandler(t, settings)
 
 	bootstrapRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(bootstrapRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/bootstrap", strings.NewReader(`{"interest_description":"RNA biology","name":"Alice"}`)))
@@ -500,7 +593,7 @@ func TestProfileProposalApplyRejectAndReclassifyAPI(t *testing.T) {
 		return 1, nil
 	}
 
-	handler := NewServer(settings, nil).Handler()
+	handler := newTestHandler(t, settings)
 
 	applyRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(applyRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/proposals/1/apply", nil))
@@ -561,7 +654,7 @@ func TestCompactProfileProposalApplyUsesAcceptedChanges(t *testing.T) {
 		return 1, nil
 	}
 
-	handler := NewServer(settings, nil).Handler()
+	handler := newTestHandler(t, settings)
 	body := `{"accepted_change_ids":["change-1"],"rejected_change_ids":["change-2"]}`
 	applyRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(applyRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/proposals/21/apply", strings.NewReader(body)))
@@ -587,12 +680,56 @@ func TestCompactProfileProposalApplyRejectsVersionMismatch(t *testing.T) {
 	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":2,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":["Background"],"unrelated":["Plant biology"]},"topic_taxonomy":[],"few_shots":[]}`)
 	seedCompactProposalFixture(t, settings.DatabasePath)
 
-	handler := NewServer(settings, nil).Handler()
+	handler := newTestHandler(t, settings)
 	body := `{"accepted_change_ids":["change-1"],"rejected_change_ids":[]}`
 	applyRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(applyRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/proposals/21/apply", strings.NewReader(body)))
 	if applyRecorder.Code != http.StatusConflict || !contains(applyRecorder.Body.String(), "Regenerate the proposal") {
 		t.Fatalf("version mismatch apply = %d %s", applyRecorder.Code, applyRecorder.Body.String())
+	}
+}
+
+func TestReportLatestReturnsEmptyWhenDatabaseMissing(t *testing.T) {
+	root := t.TempDir()
+	handler := newTestHandler(t, testSettings(root))
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/report/latest", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("report status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !contains(recorder.Body.String(), `"total":0`) || !contains(recorder.Body.String(), `"papers":[]`) {
+		t.Fatalf("unexpected empty report payload: %s", recorder.Body.String())
+	}
+}
+
+func TestServerOpensDatabaseAfterInitialMiss(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	handler := newTestHandler(t, settings)
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/api/report/latest", nil))
+	if first.Code != http.StatusOK || !contains(first.Body.String(), `"total":0`) {
+		t.Fatalf("first report response = %d %s", first.Code, first.Body.String())
+	}
+
+	seedReadOnlyFixture(t, settings.DatabasePath)
+
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/api/report/latest", nil))
+	if second.Code != http.StatusOK || !contains(second.Body.String(), `"total":1`) || !contains(second.Body.String(), `"title":"API paper"`) {
+		t.Fatalf("second report response = %d %s", second.Code, second.Body.String())
+	}
+}
+
+func TestServerCloseIsIdempotent(t *testing.T) {
+	server := NewServer(testSettings(t.TempDir()), nil)
+	if err := server.Close(); err != nil {
+		t.Fatalf("first close failed: %v", err)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatalf("second close failed: %v", err)
 	}
 }
 
@@ -623,6 +760,17 @@ func testSettings(root string) config.Settings {
 		ServerHost:          "127.0.0.1",
 		ServerPort:          8000,
 	}
+}
+
+func newTestHandler(t *testing.T, settings config.Settings) http.Handler {
+	t.Helper()
+	server := NewServer(settings, nil)
+	t.Cleanup(func() {
+		if err := server.Close(); err != nil {
+			t.Errorf("close api server: %v", err)
+		}
+	})
+	return server.Handler()
 }
 
 func seedReadOnlyFixture(t *testing.T, path string) {
@@ -926,7 +1074,7 @@ func TestAdminRunWaitsForCloudflareVerificationAndResumes(t *testing.T) {
 		}
 		return nil
 	}
-	handler := NewServer(testSettings(root), nil).Handler()
+	handler := newTestHandler(t, testSettings(root))
 
 	runRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
@@ -1011,7 +1159,7 @@ func TestAdminRunContinuesWithWarningWhenVerificationRetryFails(t *testing.T) {
 		}
 		return nil
 	}
-	handler := NewServer(testSettings(root), nil).Handler()
+	handler := newTestHandler(t, testSettings(root))
 
 	runRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
@@ -1078,7 +1226,7 @@ func TestVerificationCompleteRequiresCallbackXML(t *testing.T) {
 		return nil
 	}
 
-	handler := NewServer(testSettings(root), nil).Handler()
+	handler := newTestHandler(t, testSettings(root))
 
 	runRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
