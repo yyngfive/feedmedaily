@@ -5,12 +5,14 @@ import type {Paper} from "../../types";
 
 export function DetailPanel({
   isUnread,
+  markReadBusy,
   onMarkRead,
   onMarkWrong,
   onSave,
   paper,
 }: {
   isUnread: boolean;
+  markReadBusy: boolean;
   onMarkRead: () => void;
   onMarkWrong: () => void;
   onSave: () => void;
@@ -99,11 +101,11 @@ export function DetailPanel({
         </Button>
         <Button
           size="sm"
-          isDisabled={!isUnread}
+          isDisabled={!isUnread || markReadBusy}
           variant={isUnread ? "secondary" : "outline"}
           onPress={onMarkRead}
         >
-          {isUnread ? "Mark as read" : "Read"}
+          {markReadBusy ? "Marking..." : isUnread ? "Mark as read" : "Read"}
         </Button>
         <Button size="sm" variant={zoteroSaved ? "tertiary" : "tertiary"} onPress={onSave}>
           {zoteroSaved ? "Saved" : "Save to Zotero"}

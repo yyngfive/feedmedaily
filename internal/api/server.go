@@ -29,7 +29,8 @@ type Server struct {
 	version     string
 	shutdown    func()
 	storeMu     sync.RWMutex
-	sqliteStore *store.Store
+	readStore   *store.Store
+	writeStore  *store.Store
 	updateMu    sync.Mutex
 	updateCache *cachedUpdateStatus
 }
@@ -67,9 +68,9 @@ func NewServer(settings config.Settings, shutdown func()) *Server {
 	}
 }
 
-func (s *Server) getStore() (*store.Store, error) {
+func (s *Server) getReadStore() (*store.Store, error) {
 	s.storeMu.RLock()
-	sqliteStore := s.sqliteStore
+	sqliteStore := s.readStore
 	s.storeMu.RUnlock()
 	if sqliteStore != nil {
 		return sqliteStore, nil
@@ -77,26 +78,53 @@ func (s *Server) getStore() (*store.Store, error) {
 
 	s.storeMu.Lock()
 	defer s.storeMu.Unlock()
-	if s.sqliteStore != nil {
-		return s.sqliteStore, nil
+	if s.readStore != nil {
+		return s.readStore, nil
 	}
-	sqliteStore, err := store.Open(s.settings.DatabasePath)
+	sqliteStore, err := store.OpenRead(s.settings.DatabasePath)
 	if err != nil {
 		return nil, err
 	}
-	s.sqliteStore = sqliteStore
+	s.readStore = sqliteStore
+	return sqliteStore, nil
+}
+
+func (s *Server) getWriteStore() (*store.Store, error) {
+	s.storeMu.RLock()
+	sqliteStore := s.writeStore
+	s.storeMu.RUnlock()
+	if sqliteStore != nil {
+		return sqliteStore, nil
+	}
+
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	if s.writeStore != nil {
+		return s.writeStore, nil
+	}
+	sqliteStore, err := store.OpenWrite(s.settings.DatabasePath)
+	if err != nil {
+		return nil, err
+	}
+	s.writeStore = sqliteStore
 	return sqliteStore, nil
 }
 
 func (s *Server) Close() error {
 	s.storeMu.Lock()
-	sqliteStore := s.sqliteStore
-	s.sqliteStore = nil
+	readStore := s.readStore
+	writeStore := s.writeStore
+	s.readStore = nil
+	s.writeStore = nil
 	s.storeMu.Unlock()
-	if sqliteStore == nil {
-		return nil
+	var closeErr error
+	if readStore != nil {
+		closeErr = errors.Join(closeErr, readStore.Close())
 	}
-	return sqliteStore.Close()
+	if writeStore != nil {
+		closeErr = errors.Join(closeErr, writeStore.Close())
+	}
+	return closeErr
 }
 
 func (s *Server) cachedUpdateStatus() map[string]any {
@@ -159,7 +187,7 @@ func (s *Server) handleReportLatest(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	sqliteStore, err := s.getStore()
+	sqliteStore, err := s.getReadStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeJSON(w, http.StatusOK, emptyReportPayload())
@@ -490,7 +518,7 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	// 统一承接 feedback 列表读取和创建。
 	switch r.Method {
 	case http.MethodGet:
-		sqliteStore, err := s.getStore()
+		sqliteStore, err := s.getReadStore()
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				writeJSON(w, http.StatusOK, []any{})
@@ -515,7 +543,7 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "Invalid JSON body.")
 			return
 		}
-		sqliteStore, err := s.getStore()
+		sqliteStore, err := s.getWriteStore()
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				writeError(w, http.StatusNotFound, "Paper not found.")
@@ -548,7 +576,7 @@ func (s *Server) handleProfileProposals(w http.ResponseWriter, r *http.Request) 
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	sqliteStore, err := s.getStore()
+	sqliteStore, err := s.getReadStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeJSON(w, http.StatusOK, []any{})
@@ -610,7 +638,7 @@ func (s *Server) handleFeedbackByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Feedback not found.")
 		return
 	}
-	sqliteStore, err := s.getStore()
+	sqliteStore, err := s.getWriteStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "Feedback not found.")
@@ -648,7 +676,7 @@ func (s *Server) handlePaperByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Paper not found.")
 		return
 	}
-	sqliteStore, err := s.getStore()
+	sqliteStore, err := s.getWriteStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "Paper not found.")
@@ -701,7 +729,7 @@ func (s *Server) handleProfileProposalByID(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleProfileProposalDetail(w http.ResponseWriter, proposalID int64) {
 	// 补齐单条 proposal 详情读取，和 Python API 保持一致。
-	sqliteStore, err := s.getStore()
+	sqliteStore, err := s.getReadStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "Profile proposal not found.")
@@ -724,7 +752,7 @@ func (s *Server) handleProfileProposalDetail(w http.ResponseWriter, proposalID i
 
 func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Request, proposalID int64) {
 	// 支持 legacy 整份 apply，以及带 accepted/rejected change ids 的局部 apply。
-	sqliteStore, err := s.getStore()
+	sqliteStore, err := s.getWriteStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "Profile proposal not found.")
@@ -841,7 +869,7 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) handleProfileProposalReject(w http.ResponseWriter, proposalID int64) {
 	// 复刻 Python reject proposal 的本地状态更新。
-	sqliteStore, err := s.getStore()
+	sqliteStore, err := s.getWriteStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "Profile proposal not found.")
@@ -914,7 +942,7 @@ func (s *Server) handleZoteroSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid JSON body.")
 		return
 	}
-	sqliteStore, err := s.getStore()
+	sqliteStore, err := s.getWriteStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "Paper not found.")

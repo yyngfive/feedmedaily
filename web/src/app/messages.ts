@@ -15,6 +15,25 @@ const STICKY_TTL_MS = 0;
 
 const catalog = {
   "app.load.failed": {text: "Could not load data.", tone: "danger"},
+  "app.service.unavailable": {
+    text: "The local FeedMeDaily service is unavailable.",
+    tone: "danger",
+  },
+  "report.load.failed": {text: "Could not load the paper list.", tone: "danger"},
+  "profile.current.load.failed": {text: "Could not load the local profile.", tone: "danger"},
+  "feeds.load.failed": {text: "Could not load RSS feed settings.", tone: "danger"},
+  "feeds.save.failed": {text: "Could not save RSS feed settings.", tone: "danger"},
+  "feedback.load.failed": {text: "Could not load feedback records.", tone: "danger"},
+  "feedback.save.failed": {text: "Could not save feedback.", tone: "danger"},
+  "feedback.delete.failed": {text: "Could not delete feedback.", tone: "danger"},
+  "profile.proposals.load.failed": {text: "Could not load profile proposals.", tone: "danger"},
+  "settings.config.load.failed": {text: "Could not load local settings.", tone: "danger"},
+  "settings.config.save.failed": {text: "Could not save local settings.", tone: "danger"},
+  "app.update.load.failed": {text: "Could not check for updates.", tone: "danger"},
+  "admin.hydration.partial": {
+    text: "The paper list is ready, but some admin data did not finish loading.",
+    tone: "warning",
+  },
   "paper.read.failed": {text: "Could not update read status.", tone: "danger"},
   "zotero.save.succeeded": {text: "Saved to Zotero.", tone: "success"},
   "feedback.save.succeeded": {text: "Feedback saved.", tone: "success"},

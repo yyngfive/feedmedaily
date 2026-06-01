@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,9 @@ const (
 	zoteroStateError      = "error"
 	zoteroStateSaved      = "saved"
 	abstractSourceNone    = "none"
+	sqliteBusyTimeoutMS   = 5000
+	readStoreMaxOpenConns = 4
+	writeStoreMaxOpenConn = 1
 )
 
 var (
@@ -41,6 +45,13 @@ type Store struct {
 	proposalColumns       map[string]bool
 	zoteroColumns         map[string]bool
 }
+
+type storePoolRole int
+
+const (
+	storePoolRoleWrite storePoolRole = iota
+	storePoolRoleRead
+)
 
 type AbstractImage struct {
 	Src string  `json:"src"`
@@ -166,19 +177,54 @@ type paperRow struct {
 
 func Open(path string) (*Store, error) {
 	// 打开现有 SQLite 数据库，并缓存表列信息用于旧 schema 兼容读取。
+	return openExistingStore(path, storePoolRoleWrite)
+}
+
+func OpenRead(path string) (*Store, error) {
+	// 为 API 读路径打开共享读 store，允许小型连接池承接并发读取。
+	return openExistingStore(path, storePoolRoleRead)
+}
+
+func OpenWrite(path string) (*Store, error) {
+	// 为 API 写路径打开单连接 store，避免并发写操作重新打出 SQLITE_BUSY。
+	return openExistingStore(path, storePoolRoleWrite)
+}
+
+func openExistingStore(path string, role storePoolRole) (*Store, error) {
 	clean := filepath.Clean(path)
 	if _, err := os.Stat(clean); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", clean)
+	db, err := sql.Open("sqlite", sqliteDSN(clean))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
+	configureSQLiteDB(db, role)
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping sqlite database: %w", err)
 	}
 	return buildStore(db)
+}
+
+func sqliteDSN(path string) string {
+	values := url.Values{}
+	values.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", sqliteBusyTimeoutMS))
+	values.Add("_pragma", "journal_mode(WAL)")
+	values.Add("_pragma", "synchronous(NORMAL)")
+	return path + "?" + values.Encode()
+}
+
+func configureSQLiteDB(db *sql.DB, role storePoolRole) {
+	// 读写共用 WAL/busy_timeout；写连接保持串行，读连接允许小型池并发读。
+	maxOpenConns := writeStoreMaxOpenConn
+	if role == storePoolRoleRead {
+		maxOpenConns = readStoreMaxOpenConns
+	}
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxOpenConns)
+	db.SetConnMaxIdleTime(0)
+	db.SetConnMaxLifetime(0)
 }
 
 func buildStore(db *sql.DB) (*Store, error) {
@@ -291,7 +337,21 @@ func (s *Store) ListProfileProposals() ([]ProfileProposal, error) {
 	if len(s.proposalColumns) == 0 {
 		return []ProfileProposal{}, nil
 	}
-	rows, err := s.db.Query("SELECT id FROM profile_proposals ORDER BY created_at DESC, id DESC")
+	rows, err := s.db.Query(fmt.Sprintf(`
+		SELECT id, summary, proposed_profile_json,
+			%s AS rule_delta_json, %s AS base_profile_version, %s AS change_set_json,
+			%s AS applied_profile_json, source_feedback_ids_json, model,
+			%s AS state, created_at, %s AS applied_at, %s AS rejected_at, %s AS applied_version
+		FROM profile_proposals
+		ORDER BY created_at DESC, id DESC
+	`, s.columnExpr(s.proposalColumns, "rule_delta_json", "NULL"),
+		s.columnExpr(s.proposalColumns, "base_profile_version", "0"),
+		s.columnExpr(s.proposalColumns, "change_set_json", "NULL"),
+		s.columnExpr(s.proposalColumns, "applied_profile_json", "NULL"),
+		s.columnExpr(s.proposalColumns, "state", quote(proposalStatePending)),
+		s.columnExpr(s.proposalColumns, "applied_at", "NULL"),
+		s.columnExpr(s.proposalColumns, "rejected_at", "NULL"),
+		s.columnExpr(s.proposalColumns, "applied_version", "NULL")))
 	if err != nil {
 		return nil, fmt.Errorf("query profile proposals: %w", err)
 	}
@@ -299,15 +359,11 @@ func (s *Store) ListProfileProposals() ([]ProfileProposal, error) {
 
 	items := []ProfileProposal{}
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan profile proposal id: %w", err)
-		}
-		item, err := s.GetProfileProposal(id)
+		item, found, err := scanProfileProposalRow(rows)
 		if err != nil {
 			return nil, err
 		}
-		if item != nil {
+		if found && item != nil {
 			items = append(items, *item)
 		}
 	}

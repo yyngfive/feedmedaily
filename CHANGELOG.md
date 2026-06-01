@@ -21,6 +21,8 @@ Changes since `0.3.0`:
 
 - Reduced homepage wait time for larger libraries by replacing the report page's earlier N+1 SQLite read pattern with indexed batch queries for the latest classification, feedback, and Zotero state per paper.
 - Fixed the review app's first-screen loading flow so the paper card list no longer waits for update checks, scheduler state, settings, proposals, or feedback requests before it starts loading. Those admin/status requests now hydrate in the background.
+- Fixed SQLite lock regressions introduced by the first long-lived-store refactor by separating the local API server into read and write store roles and enabling WAL plus busy-timeout pragmas for better local concurrency.
+- Fixed review-side `Mark as read` and feedback mutations so they no longer block on a full report refresh, and removed the remaining post-read card-list flicker by committing reconcile report data and local read overrides in the same UI update.
 
 ## 0.3.0 (2026-05-25)
 

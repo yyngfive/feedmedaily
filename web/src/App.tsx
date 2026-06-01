@@ -1,4 +1,5 @@
 import React from "react";
+import {flushSync} from "react-dom";
 
 import {
   applyProfileProposal,
@@ -72,6 +73,33 @@ import type {
   ZoteroCollectionOption,
 } from "./types";
 
+declare global {
+  interface Window {
+    __MARK_READ_DEBUG__?: Array<Record<string, unknown>>;
+  }
+}
+
+type MarkReadRequest = {
+  requestId: string;
+  paperId: number;
+  originSelectedId: number | null;
+  plannedNextSelectedId: number | null;
+  startedAt: number;
+};
+
+type RefreshRequestFlags = {
+  all: boolean;
+  admin: boolean;
+  review: boolean;
+};
+
+type LocalMutation = {
+  requestId: string;
+  kind: "mark-read" | "feedback-save" | "feedback-delete";
+  entityId: number;
+  startedAt: number;
+};
+
 // 应用根组件负责衔接数据加载、筛选状态、后台任务和三栏式阅读界面。
 export function App() {
   const [report, setReport] = React.useState<Report>(EMPTY_REPORT);
@@ -85,12 +113,16 @@ export function App() {
   const [profileResolved, setProfileResolved] = React.useState(false);
   const [reportLoading, setReportLoading] = React.useState(false);
   const [adminDataLoading, setAdminDataLoading] = React.useState(false);
+  const [reportLoadError, setReportLoadError] = React.useState<string | null>(null);
+  const [adminHydrationWarning, setAdminHydrationWarning] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<UiMessage | null>(null);
   const [query, setQuery] = React.useState("");
   const [relevance, setRelevance] = React.useState<RelevanceFilter>("direct");
   const [journal, setJournal] = React.useState("all");
   const [dateFilter, setDateFilter] = React.useState<DateFilter>("30d");
   const [readFilter, setReadFilter] = React.useState<ReadFilter>("unread");
+  const [markReadRequest, setMarkReadRequest] = React.useState<MarkReadRequest | null>(null);
+  const [pendingReadOverrides, setPendingReadOverrides] = React.useState<Record<number, string>>({});
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
   const [feedbackRecords, setFeedbackRecords] = React.useState<FeedbackRecord[]>([]);
   const [profileProposals, setProfileProposals] = React.useState<ProfileProposal[]>([]);
@@ -120,8 +152,26 @@ export function App() {
   const jobsHydratedRef = React.useRef(false);
   const bootstrapRefreshRef = React.useRef<string | null>(null);
   const activeJobMessageRef = React.useRef<string | null>(null);
+  const queuedRefreshRef = React.useRef<RefreshRequestFlags>({all: false, admin: false, review: false});
+  const markReadRequestRef = React.useRef<MarkReadRequest | null>(null);
+  const localMutationRef = React.useRef<LocalMutation | null>(null);
+  const profileRef = React.useRef<ClassificationProfile | null>(null);
+  const pendingReadOverridesRef = React.useRef<Record<number, string>>({});
+  const selectedIdRef = React.useRef<number | null>(null);
+  const markReadSequenceRef = React.useRef(0);
+  const feedbackMutationSequenceRef = React.useRef(0);
+  const reportRefreshSequenceRef = React.useRef(0);
+  const reportRefreshInflightRef = React.useRef(0);
   const deferredQuery = React.useDeferredValue(query);
   const resolvedTheme = themePreference === "system" ? systemTheme : themePreference;
+  const markReadDebugEnabled = React.useMemo(() => {
+    try {
+      return new URLSearchParams(window.location.search).get("mark-read-debug") === "1";
+    } catch {
+      return false;
+    }
+  }, []);
+  const markReadSubmitting = markReadRequest != null;
 
   const hydrateEditableFeeds = React.useCallback((items: FeedSubscription[]) =>
     items.map((item) => ({
@@ -171,27 +221,204 @@ export function App() {
     window.localStorage.setItem("feedmedaily-theme", themePreference);
   }, [themePreference]);
 
-  const pushLoadError = React.useCallback((error: unknown) => {
-    pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
-  }, [pushMessage]);
+  React.useEffect(() => {
+    markReadRequestRef.current = markReadRequest;
+  }, [markReadRequest]);
+
+  React.useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+
+  React.useEffect(() => {
+    pendingReadOverridesRef.current = pendingReadOverrides;
+  }, [pendingReadOverrides]);
+
+  React.useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  const logMarkReadDebug = React.useCallback((
+    event: string,
+    payload: Record<string, unknown> = {},
+  ) => {
+    if (!markReadDebugEnabled) {
+      return;
+    }
+    const entry = {
+      at: new Date().toISOString(),
+      event,
+      ...payload,
+    };
+    const history = window.__MARK_READ_DEBUG__ ?? [];
+    history.push(entry);
+    window.__MARK_READ_DEBUG__ = history.slice(-100);
+    console.info("[mark-read-debug]", entry);
+  }, [markReadDebugEnabled]);
+
+  const scheduleRefreshFlags = React.useCallback((
+    flags: Partial<RefreshRequestFlags>,
+    source: string,
+  ) => {
+    const nextFlags: RefreshRequestFlags = {
+      all: Boolean(flags.all),
+      admin: Boolean(flags.admin),
+      review: Boolean(flags.review),
+    };
+    if (localMutationRef.current) {
+      queuedRefreshRef.current = {
+        all: queuedRefreshRef.current.all || nextFlags.all,
+        admin: queuedRefreshRef.current.admin || nextFlags.admin,
+        review: queuedRefreshRef.current.review || nextFlags.review,
+      };
+      logMarkReadDebug("refresh.queued", {
+        source,
+        activeMutation: localMutationRef.current,
+        queued: queuedRefreshRef.current,
+      });
+      return false;
+    }
+    return true;
+  }, [logMarkReadDebug]);
+
+  const beginLocalMutation = React.useCallback((
+    mutation: LocalMutation,
+  ) => {
+    localMutationRef.current = mutation;
+    logMarkReadDebug("mutation.started", mutation);
+  }, [logMarkReadDebug]);
+
+  const endLocalMutation = React.useCallback((requestId: string) => {
+    if (localMutationRef.current?.requestId !== requestId) {
+      return;
+    }
+    logMarkReadDebug("mutation.finished", localMutationRef.current);
+    localMutationRef.current = null;
+  }, [logMarkReadDebug]);
+
+  const errorText = React.useCallback((error: unknown, fallback: string) => {
+    if (error instanceof Error && error.message.trim()) {
+      return error.message;
+    }
+    return fallback;
+  }, []);
+
+  const pushErrorMessage = React.useCallback((
+    name: string,
+    error: unknown,
+    fallback: string,
+  ) => {
+    pushMessage(name, {text: errorText(error, fallback), tone: "danger"});
+  }, [errorText, pushMessage]);
+
+  const formatAdminHydrationWarning = React.useCallback((areas: string[]) => {
+    if (areas.length === 0) {
+      return null;
+    }
+    if (areas.length === 1) {
+      return `The paper list is ready, but ${areas[0]} did not finish loading yet.`;
+    }
+    if (areas.length === 2) {
+      return `The paper list is ready, but ${areas[0]} and ${areas[1]} did not finish loading yet.`;
+    }
+    const prefix = areas.slice(0, -1).join(", ");
+    return `The paper list is ready, but ${prefix}, and ${areas[areas.length - 1]} did not finish loading yet.`;
+  }, []);
 
   const refreshProfileGate = React.useCallback(async () => {
     const next = await fetchCurrentProfile();
     setProfile(next.profile);
     setProfileResolved(true);
+    profileRef.current = next.profile;
     return next.profile;
   }, []);
 
-  const refreshReport = React.useCallback(async () => {
+  const refreshReport = React.useCallback(async (source = "report") => {
+    const refreshId = `report-${++reportRefreshSequenceRef.current}`;
+    const startedAt = performance.now();
+    const currentSelectedId = selectedIdRef.current;
+    const currentPendingReadOverrides = pendingReadOverridesRef.current;
+    reportRefreshInflightRef.current += 1;
     setReportLoading(true);
+    logMarkReadDebug("report.refresh.started", {
+      refreshId,
+      source,
+      selectedId: currentSelectedId,
+      displayedSelectedId: markReadRequestRef.current?.plannedNextSelectedId ?? currentSelectedId,
+      pendingOverrideIds: Object.keys(currentPendingReadOverrides).map((value) => Number(value)),
+    });
     try {
       const next = await fetchLatestReport();
-      React.startTransition(() => setReport(next));
+      const nextPapersById = new Map(next.papers.map((paper) => [paper.id, paper]));
+      const pendingPaperEntries = Object.keys(currentPendingReadOverrides).map((value) => Number(value));
+      const pendingReadStatus = pendingPaperEntries.map((paperId) => {
+        const paper = nextPapersById.get(paperId) ?? null;
+        return {
+          paperId,
+          stillUnread: paper ? !paper.read_at : null,
+        };
+      });
+      logMarkReadDebug("report.refresh.succeeded", {
+        refreshId,
+        source,
+        durationMs: Math.round(performance.now() - startedAt),
+        paperCount: next.papers.length,
+        pendingReadStatus,
+      });
+      const confirmedOverrides: Array<{paperId: number; refreshedReadAt: string}> = [];
+      flushSync(() => {
+        setReportLoadError(null);
+        setReport(next);
+        setPendingReadOverrides((current) => {
+          const pendingPaperIds = Object.keys(current);
+          if (pendingPaperIds.length === 0) {
+            return current;
+          }
+          let changed = false;
+          const nextOverrides = {...current};
+          for (const pendingPaperId of pendingPaperIds) {
+            const paperId = Number(pendingPaperId);
+            const refreshedPaper = nextPapersById.get(paperId) ?? null;
+            if (!refreshedPaper?.read_at) {
+              continue;
+            }
+            if (!(paperId in nextOverrides)) {
+              continue;
+            }
+            delete nextOverrides[paperId];
+            confirmedOverrides.push({
+              paperId,
+              refreshedReadAt: refreshedPaper.read_at,
+            });
+            changed = true;
+          }
+          return changed ? nextOverrides : current;
+        });
+      });
+      confirmedOverrides.forEach(({paperId, refreshedReadAt}) => {
+        logMarkReadDebug("mark-read.override.confirmed", {
+          paperId,
+          refreshId,
+          source,
+          refreshedReadAt,
+        });
+      });
       return next;
+    } catch (error) {
+      setReportLoadError(errorText(error, "Could not load the paper list from the local library."));
+      logMarkReadDebug("report.refresh.failed", {
+        refreshId,
+        source,
+        durationMs: Math.round(performance.now() - startedAt),
+        message: errorText(error, "Could not load the paper list from the local library."),
+      });
+      throw error;
     } finally {
-      setReportLoading(false);
+      reportRefreshInflightRef.current = Math.max(0, reportRefreshInflightRef.current - 1);
+      if (reportRefreshInflightRef.current === 0) {
+        setReportLoading(false);
+      }
     }
-  }, []);
+  }, [errorText, logMarkReadDebug]);
 
   const refreshFeedback = React.useCallback(async () => {
     setFeedbackRecords(await fetchFeedback());
@@ -226,59 +453,123 @@ export function App() {
 
   const refreshReviewCore = React.useCallback(async (
     currentProfile?: ClassificationProfile | null,
+    source = "review-core",
   ) => {
-    const profileValue = currentProfile ?? profile;
+    const profileValue = currentProfile ?? profileRef.current;
     if (!profileValue) {
       setReport(EMPTY_REPORT);
+      setReportLoadError(null);
       setReportLoading(false);
       return;
     }
-    const results = await Promise.allSettled([refreshReport(), refreshFeeds()]);
-    const failed = results.find((result) => result.status === "rejected");
-    if (failed?.status === "rejected") {
-      pushLoadError(failed.reason);
+    const tasks = [
+      {name: "report.load.failed", run: () => refreshReport(`${source}:report`), fallback: "Could not load the paper list from the local library."},
+      {name: "feeds.load.failed", run: refreshFeeds, fallback: "Could not load RSS feed settings."},
+    ] as const;
+    const results = await Promise.allSettled(tasks.map((task) => task.run()));
+    for (const [index, result] of results.entries()) {
+      if (result.status === "rejected") {
+        const task = tasks[index];
+        pushErrorMessage(task.name, result.reason, task.fallback);
+      }
     }
-  }, [profile, pushLoadError, refreshFeeds, refreshReport]);
+  }, [pushErrorMessage, refreshFeeds, refreshReport]);
 
   const refreshAdminData = React.useCallback(async () => {
     setAdminDataLoading(true);
     try {
-      const results = await Promise.allSettled([
-        refreshProposals(),
-        refreshFeedback(),
-        refreshConfig(),
-        refreshAppMeta(),
-        refreshAppUpdate(),
-        refreshScheduler(),
-      ]);
-      const failed = results.find((result) => result.status === "rejected");
-      if (failed?.status === "rejected") {
-        pushLoadError(failed.reason);
+      const tasks = [
+        {label: "profile proposals", run: refreshProposals},
+        {label: "feedback records", run: refreshFeedback},
+        {label: "local settings", run: refreshConfig},
+        {label: "app status", run: refreshAppMeta},
+        {label: "update status", run: refreshAppUpdate},
+        {label: "scheduler status", run: refreshScheduler},
+      ] as const;
+      const results = await Promise.allSettled(tasks.map((task) => task.run()));
+      const failedAreas = results.flatMap((result, index) =>
+        result.status === "rejected" ? [tasks[index].label] : [],
+      );
+      setAdminHydrationWarning(formatAdminHydrationWarning(failedAreas));
+      if (failedAreas.length === 0) {
+        setAdminHydrationWarning(null);
       }
     } finally {
       setAdminDataLoading(false);
     }
   }, [
+    formatAdminHydrationWarning,
     refreshAppMeta,
     refreshAppUpdate,
     refreshConfig,
     refreshFeedback,
     refreshProposals,
     refreshScheduler,
-    pushLoadError,
   ]);
 
-  const refreshAll = React.useCallback(async () => {
+  const refreshAll = React.useCallback(async (source = "refresh-all") => {
     try {
       const currentProfile = await refreshProfileGate();
       await Promise.all([
         refreshAdminData(),
-        currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve(),
+        currentProfile ? refreshReviewCore(currentProfile, `${source}:review`) : Promise.resolve(),
       ]);
     } catch (error) {
-      pushLoadError(error);
+      pushErrorMessage("profile.current.load.failed", error, "Could not load the local profile.");
     }
-  }, [pushLoadError, refreshAdminData, refreshProfileGate, refreshReviewCore]);
+  }, [pushErrorMessage, refreshAdminData, refreshProfileGate, refreshReviewCore]);
+
+  const runScheduledRefresh = React.useCallback((
+    flags: Partial<RefreshRequestFlags>,
+    source: string,
+  ) => {
+    logMarkReadDebug("refresh.requested", {
+      source,
+      flags,
+      pendingPaperId: markReadRequestRef.current?.paperId ?? null,
+    });
+    if (!scheduleRefreshFlags(flags, source)) {
+      return;
+    }
+    if (flags.all) {
+      void refreshAll(source);
+      return;
+    }
+    if (flags.review) {
+      void refreshReviewCore(undefined, source);
+    }
+    if (flags.admin) {
+      void refreshAdminData();
+    }
+  }, [logMarkReadDebug, refreshAdminData, refreshAll, refreshReviewCore, scheduleRefreshFlags]);
+
+  const scheduleDeferredReviewRefresh = React.useCallback((source: string, delayMs = 150) => {
+    window.setTimeout(() => {
+      runScheduledRefresh({review: true}, source);
+    }, delayMs);
+  }, [runScheduledRefresh]);
+
+  React.useEffect(() => {
+    if (markReadSubmitting) {
+      return;
+    }
+    const queued = queuedRefreshRef.current;
+    if (!queued.all && !queued.admin && !queued.review) {
+      return;
+    }
+    queuedRefreshRef.current = {all: false, admin: false, review: false};
+    logMarkReadDebug("refresh.flushed", {queued});
+    if (queued.all) {
+      void refreshAll("queued-refresh:all");
+      return;
+    }
+    if (queued.review) {
+      void refreshReviewCore(undefined, "queued-refresh:review");
+    }
+    if (queued.admin) {
+      void refreshAdminData();
+    }
+  }, [logMarkReadDebug, markReadSubmitting, refreshAdminData, refreshAll, refreshReviewCore]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -295,7 +586,7 @@ export function App() {
         void refreshAdminData();
       } catch (error) {
         if (!cancelled) {
-          pushLoadError(error);
+          pushErrorMessage("profile.current.load.failed", error, "Could not load the local profile.");
           setProfileResolved(true);
         }
       }
@@ -305,7 +596,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [pushLoadError, refreshAdminData, refreshProfileGate, refreshReviewCore]);
+  }, [pushErrorMessage, refreshAdminData, refreshProfileGate, refreshReviewCore]);
 
   React.useEffect(() => {
     if (profile && feedsLoaded && feeds.length === 0) {
@@ -342,8 +633,8 @@ export function App() {
       return;
     }
     bootstrapRefreshRef.current = completionKey;
-    void refreshAll();
-  }, [bootstrapJob, refreshAll]);
+    runScheduledRefresh({all: true}, "bootstrap.complete");
+  }, [bootstrapJob, runScheduledRefresh]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -427,14 +718,13 @@ export function App() {
 
         if (shouldRefresh) {
           if (profile) {
-            void refreshReviewCore();
-            void refreshAdminData();
+            runScheduledRefresh({review: true, admin: true}, "jobs.refresh");
           } else {
-            void refreshAll();
+            runScheduledRefresh({all: true}, "jobs.refresh");
           }
         }
       } catch (error) {
-        pushLoadError(error);
+        pushErrorMessage("app.service.unavailable", error, "Could not load job status.");
       }
     };
 
@@ -447,11 +737,21 @@ export function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [profile, pushLoadError, refreshAdminData, refreshAll, refreshReviewCore]);
+  }, [profile, pushErrorMessage, runScheduledRefresh]);
+
+  const effectivePapers = React.useMemo(
+    () =>
+      report.papers.map((paper) =>
+        pendingReadOverrides[paper.id]
+          ? {...paper, read_at: pendingReadOverrides[paper.id]}
+          : paper,
+      ),
+    [pendingReadOverrides, report.papers],
+  );
 
   const journals = React.useMemo(
-    () => Array.from(new Set(report.papers.map((paper) => paper.journal).filter(Boolean) as string[])).sort(),
-    [report.papers],
+    () => Array.from(new Set(effectivePapers.map((paper) => paper.journal).filter(Boolean) as string[])).sort(),
+    [effectivePapers],
   );
   const journalOptions = React.useMemo(
     () => [{value: "all", label: "All journals"}, ...journals.map((item) => ({value: item, label: item}))],
@@ -460,7 +760,7 @@ export function App() {
 
   const filteredBase = React.useMemo(
     () =>
-      report.papers.filter((paper) => {
+      effectivePapers.filter((paper) => {
         const haystack = [
           paper.title,
           paper.classification.translated_title_zh ?? "",
@@ -480,7 +780,7 @@ export function App() {
         const matchesDate = matchesDateFilter(dateValue, report.report_date, dateFilter);
         return matchesQuery && matchesJournal && matchesRead && matchesDate;
       }),
-    [dateFilter, deferredQuery, journal, readFilter, report.papers, report.report_date],
+    [dateFilter, deferredQuery, effectivePapers, journal, readFilter, report.report_date],
   );
 
   const filtered = React.useMemo(
@@ -499,6 +799,7 @@ export function App() {
   const hasNoFetchedPapers =
     feedsLoaded &&
     !reportLoading &&
+    !reportLoadError &&
     !needsFeedSetup &&
     feeds.length > 0 &&
     report.papers.length === 0;
@@ -513,6 +814,9 @@ export function App() {
   const visibleTotals = React.useMemo(() => relevanceCounts(visibleBase), [visibleBase]);
 
   React.useEffect(() => {
+    if (markReadSubmitting) {
+      return;
+    }
     if (visibleList.length === 0) {
       setSelectedId(null);
       return;
@@ -520,7 +824,7 @@ export function App() {
     if (!selectedId || !visibleList.some((paper) => paper.id === selectedId)) {
       setSelectedId(visibleList[0].id);
     }
-  }, [selectedId, visibleList]);
+  }, [markReadSubmitting, selectedId, visibleList]);
 
   React.useEffect(() => {
     if (!zoteroPaper) {
@@ -557,7 +861,48 @@ export function App() {
     };
   }, [zoteroPaper]);
 
-  const selectedPaper = visibleList.find((paper) => paper.id === selectedId) ?? null;
+  const selectedPaperId = React.useMemo(() => {
+    if (!markReadRequest) {
+      return selectedId;
+    }
+    if (
+      selectedId != null &&
+      selectedId !== markReadRequest.originSelectedId &&
+      selectedId !== markReadRequest.paperId
+    ) {
+      return selectedId;
+    }
+    return markReadRequest.paperId;
+  }, [markReadRequest, selectedId]);
+
+  const selectedPaper = React.useMemo(() => {
+    if (needsFeedSetup || selectedPaperId == null) {
+      return null;
+    }
+    const visiblePaper = visibleList.find((paper) => paper.id === selectedPaperId);
+    if (visiblePaper) {
+      return visiblePaper;
+    }
+    return effectivePapers.find((paper) => paper.id === selectedPaperId) ?? null;
+  }, [effectivePapers, needsFeedSetup, selectedPaperId, visibleList]);
+
+  React.useEffect(() => {
+    logMarkReadDebug("selection.changed", {
+      selectedId,
+      displayedSelectedId: selectedPaperId,
+      selectedPaperId: selectedPaper?.id ?? null,
+      requestId: markReadRequest?.requestId ?? null,
+    });
+  }, [logMarkReadDebug, markReadRequest?.requestId, selectedId, selectedPaper?.id, selectedPaperId]);
+
+  React.useEffect(() => {
+    logMarkReadDebug("visible-list.changed", {
+      readFilter,
+      count: visibleList.length,
+      firstPaperIds: visibleList.slice(0, 8).map((paper) => paper.id),
+      overrideIds: Object.keys(pendingReadOverrides).map((value) => Number(value)),
+    });
+  }, [logMarkReadDebug, pendingReadOverrides, readFilter, visibleList]);
 
   const updatePaper = (paperId: number, updater: (paper: Paper) => Paper) => {
     setReport((current) => ({
@@ -566,19 +911,114 @@ export function App() {
     }));
   };
 
+  const applyFeedbackRecordToPaper = React.useCallback((record: FeedbackRecord) => {
+    updatePaper(record.paper_id, (paper) => ({
+      ...paper,
+      feedback_status: {
+        has_feedback: true,
+        corrected_relevance: record.corrected_relevance,
+        note: record.note ?? null,
+        latest_feedback_at: record.created_at,
+        state: record.state,
+        used_in_profile: record.used_in_profile,
+      },
+    }));
+  }, []);
+
+  const clearPaperFeedbackStatus = React.useCallback((paperId: number) => {
+    updatePaper(paperId, (paper) => ({
+      ...paper,
+      feedback_status: null,
+    }));
+  }, []);
+
   const persistReadStatus = async (paperId: number) => {
-    const paper = report.papers.find((item) => item.id === paperId);
-    if (!paper || paper.read_at) {
+    const paper = effectivePapers.find((item) => item.id === paperId);
+    if (!paper || paper.read_at || markReadRequest != null) {
       return;
     }
-    const optimisticReadAt = new Date().toISOString();
-    updatePaper(paperId, (current) => ({...current, read_at: optimisticReadAt}));
+    const requestId = `mark-read-${++markReadSequenceRef.current}`;
+    const visibleIds = visibleList.map((item) => item.id);
+    const currentIndex = visibleIds.indexOf(paperId);
+    let plannedNextSelectedId: number | null = paperId;
+    if (readFilter === "unread" && currentIndex >= 0) {
+      if (currentIndex + 1 < visibleIds.length) {
+        plannedNextSelectedId = visibleIds[currentIndex + 1];
+      } else if (currentIndex - 1 >= 0) {
+        plannedNextSelectedId = visibleIds[currentIndex - 1];
+      } else {
+        plannedNextSelectedId = null;
+      }
+    }
+    const request: MarkReadRequest = {
+      requestId,
+      paperId,
+      originSelectedId: selectedId,
+      plannedNextSelectedId,
+      startedAt: performance.now(),
+    };
+    beginLocalMutation({
+      requestId,
+      kind: "mark-read",
+      entityId: paperId,
+      startedAt: request.startedAt,
+    });
+    logMarkReadDebug("mark-read.clicked", {
+      requestId,
+      paperId,
+      readFilter,
+      selectedId,
+      plannedNextSelectedId,
+      visibleIds: visibleIds.slice(0, 12),
+    });
+    setMarkReadRequest(request);
+    let succeeded = false;
     try {
+      logMarkReadDebug("mark-read.request.started", {
+        requestId,
+        paperId,
+      });
       const status = await markPaperRead(paperId);
-      updatePaper(paperId, (current) => ({...current, read_at: status.read_at}));
+      logMarkReadDebug("mark-read.request.succeeded", {
+        requestId,
+        paperId,
+        durationMs: Math.round(performance.now() - request.startedAt),
+        readAt: status.read_at,
+      });
+      succeeded = true;
+      flushSync(() => {
+        setPendingReadOverrides((current) => ({
+          ...current,
+          [paperId]: status.read_at,
+        }));
+        setSelectedId((current) => {
+          if (
+            current != null &&
+            current !== request.originSelectedId &&
+            current !== request.paperId
+          ) {
+            return current;
+          }
+          return request.plannedNextSelectedId;
+        });
+        setMarkReadRequest((current) => (current?.requestId === requestId ? null : current));
+      });
     } catch (error) {
-      updatePaper(paperId, (current) => ({...current, read_at: null}));
+      logMarkReadDebug("mark-read.request.failed", {
+        requestId,
+        paperId,
+        durationMs: Math.round(performance.now() - request.startedAt),
+        message: errorText(error, "Could not update read status."),
+      });
+      flushSync(() => {
+        setMarkReadRequest((current) => (current?.requestId === requestId ? null : current));
+      });
       pushMessage("paper.read.failed", {text: (error as Error).message, tone: "danger"});
+    } finally {
+      endLocalMutation(requestId);
+      if (succeeded) {
+        scheduleDeferredReviewRefresh(`mark-read:${requestId}:reconcile`);
+      }
     }
   };
 
@@ -604,7 +1044,7 @@ export function App() {
       setZoteroError(status.last_error ?? "Zotero save updated.");
     } catch (error) {
       setZoteroError((error as Error).message);
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushMessage("app.service.unavailable", {text: errorText(error, "Could not save to Zotero."), tone: "danger"});
     } finally {
       setZoteroSaving(false);
     }
@@ -620,28 +1060,99 @@ export function App() {
     if (!feedbackPaper) {
       return;
     }
+    const requestId = `feedback-save-${++feedbackMutationSequenceRef.current}`;
+    const startedAt = performance.now();
+    beginLocalMutation({
+      requestId,
+      kind: "feedback-save",
+      entityId: feedbackPaper.id,
+      startedAt,
+    });
+    logMarkReadDebug("feedback.save.started", {
+      requestId,
+      paperId: feedbackPaper.id,
+      correctedRelevance: feedbackValue,
+    });
+    let succeeded = false;
     try {
-      await createFeedback({
+      const record = await createFeedback({
         paper_id: feedbackPaper.id,
         corrected_relevance: feedbackValue,
         note: feedbackNote.trim() || undefined,
       });
-      setFeedbackPaper(null);
-      setFeedbackNote("");
-      await Promise.all([refreshReport(), refreshFeedback()]);
+      logMarkReadDebug("feedback.save.succeeded", {
+        requestId,
+        paperId: record.paper_id,
+        feedbackId: record.id,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+      succeeded = true;
+      flushSync(() => {
+        setFeedbackPaper(null);
+        setFeedbackNote("");
+        applyFeedbackRecordToPaper(record);
+        setFeedbackRecords((current) => [record, ...current.filter((item) => item.id !== record.id)]);
+      });
+      void refreshFeedback();
+      scheduleDeferredReviewRefresh("feedback.save");
       pushMessage("feedback.save.succeeded");
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      logMarkReadDebug("feedback.save.failed", {
+        requestId,
+        paperId: feedbackPaper.id,
+        durationMs: Math.round(performance.now() - startedAt),
+        message: errorText(error, "Could not save feedback."),
+      });
+      pushErrorMessage("feedback.save.failed", error, "Could not save feedback.");
+    } finally {
+      endLocalMutation(requestId);
     }
   };
 
   const handleDeleteFeedback = async (feedbackId: number) => {
+    const existingRecord = feedbackRecords.find((item) => item.id === feedbackId) ?? null;
+    const requestId = `feedback-delete-${++feedbackMutationSequenceRef.current}`;
+    const startedAt = performance.now();
+    beginLocalMutation({
+      requestId,
+      kind: "feedback-delete",
+      entityId: feedbackId,
+      startedAt,
+    });
+    logMarkReadDebug("feedback.delete.started", {
+      requestId,
+      feedbackId,
+      paperId: existingRecord?.paper_id ?? null,
+    });
     try {
       await deleteFeedback(feedbackId);
-      await Promise.all([refreshReport(), refreshFeedback(), refreshProposals()]);
+      logMarkReadDebug("feedback.delete.succeeded", {
+        requestId,
+        feedbackId,
+        paperId: existingRecord?.paper_id ?? null,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+      flushSync(() => {
+        setFeedbackRecords((current) => current.filter((item) => item.id !== feedbackId));
+        if (existingRecord) {
+          clearPaperFeedbackStatus(existingRecord.paper_id);
+        }
+      });
+      void refreshFeedback();
+      void refreshProposals();
+      scheduleDeferredReviewRefresh("feedback.delete");
       pushMessage("feedback.delete.succeeded");
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      logMarkReadDebug("feedback.delete.failed", {
+        requestId,
+        feedbackId,
+        paperId: existingRecord?.paper_id ?? null,
+        durationMs: Math.round(performance.now() - startedAt),
+        message: errorText(error, "Could not delete feedback."),
+      });
+      pushErrorMessage("feedback.delete.failed", error, "Could not delete feedback.");
+    } finally {
+      endLocalMutation(requestId);
     }
   };
 
@@ -693,7 +1204,7 @@ export function App() {
       setFeedsLoaded(true);
       pushMessage("feeds.save.succeeded");
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("feeds.save.failed", error, "Could not save RSS feed settings.");
     } finally {
       setFeedsSaving(false);
     }
@@ -713,11 +1224,11 @@ export function App() {
       ]);
       pushMessage("settings.config.save.succeeded");
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("settings.config.save.failed", error, "Could not save local settings.");
     } finally {
       setSettingsConfigSaving(false);
     }
-  }, [pushMessage, refreshAdminData, refreshProfileGate, refreshReviewCore]);
+  }, [pushErrorMessage, pushMessage, refreshAdminData, refreshProfileGate, refreshReviewCore]);
 
   const handleSaveScheduler = React.useCallback(async (dailyTime: string) => {
     try {
@@ -733,11 +1244,11 @@ export function App() {
         pushMessage("scheduler.save.succeeded");
       }
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("app.service.unavailable", error, "Could not save local scheduler settings.");
     } finally {
       setSchedulerSaving(false);
     }
-  }, [pushMessage]);
+  }, [pushErrorMessage, pushMessage]);
 
   const handleSaveProfile = React.useCallback(async (nextProfile: ClassificationProfile) => {
     try {
@@ -746,12 +1257,12 @@ export function App() {
       setProfile(saved.profile);
       pushMessage("profile.current.save.succeeded");
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("app.service.unavailable", error, "Could not save the local profile.");
       throw error;
     } finally {
       setProfileSaving(false);
     }
-  }, [pushMessage]);
+  }, [pushErrorMessage, pushMessage]);
 
   const handleDeleteScheduler = React.useCallback(async () => {
     try {
@@ -759,11 +1270,11 @@ export function App() {
       setScheduler(await deleteSchedulerSettings());
       pushMessage("scheduler.delete.succeeded");
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("app.service.unavailable", error, "Could not disable local scheduler settings.");
     } finally {
       setSchedulerSaving(false);
     }
-  }, [pushMessage]);
+  }, [pushErrorMessage, pushMessage]);
 
   const handleOpenAppTarget = React.useCallback(
     async (target: "data_dir" | "logs_dir" | "install_dir") => {
@@ -772,12 +1283,12 @@ export function App() {
         await openAppTarget(target);
         pushMessage("app.control.open.succeeded");
       } catch (error) {
-        pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+        pushErrorMessage("app.service.unavailable", error, "Could not open the selected local target.");
       } finally {
         setAppControlBusy(false);
       }
     },
-    [pushMessage],
+    [pushErrorMessage, pushMessage],
   );
 
   const handleExitApp = React.useCallback(async () => {
@@ -790,9 +1301,9 @@ export function App() {
       }, 350);
     } catch (error) {
       setAppControlBusy(false);
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("app.service.unavailable", error, "Could not exit the local FeedMeDaily service.");
     }
-  }, [pushMessage]);
+  }, [pushErrorMessage, pushMessage]);
 
   const handleBootstrap = async (interestDescription: string, name: string) => {
     try {
@@ -802,7 +1313,7 @@ export function App() {
         false,
       );
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("app.service.unavailable", error, "Could not start profile generation.");
     } finally {
       setBusy(false);
     }
@@ -813,7 +1324,7 @@ export function App() {
       registerJob(await launchProfileProposalGeneration());
       pushMessage("profile.proposal.started");
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("app.service.unavailable", error, "Could not start profile proposal generation.");
     }
   };
 
@@ -832,7 +1343,7 @@ export function App() {
       ]);
       pushMessage("profile.proposal.applied");
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("app.service.unavailable", error, "Could not apply the profile proposal.");
     } finally {
       setBusy(false);
     }
@@ -844,7 +1355,7 @@ export function App() {
       await refreshProposals();
       pushMessage("profile.proposal.rejected");
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("app.service.unavailable", error, "Could not reject the profile proposal.");
     }
   };
 
@@ -853,13 +1364,13 @@ export function App() {
       registerJob(await launchAdminJob(path));
       pushMessage("job.started");
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("app.service.unavailable", error, "Could not start the sync job.");
     }
   };
 
   const handleStartVerification = React.useCallback(async (job: JobInfo) => {
     if (!job.verification_feed_url) {
-      pushMessage("app.load.failed", {text: "Verification feed URL is missing.", tone: "danger"});
+      pushMessage("app.service.unavailable", {text: "Verification feed URL is missing.", tone: "danger"});
       return;
     }
     try {
@@ -869,16 +1380,16 @@ export function App() {
         tone: "info",
       });
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("app.service.unavailable", error, "Could not start feed verification.");
     }
-  }, [pushMessage]);
+  }, [pushErrorMessage, pushMessage]);
 
   const handleReclassify = async (scope: "recent" | "feedback" | "all") => {
     try {
       registerJob(await launchReclassifyJob({scope, limit: scope === "all" ? 500 : 50}));
       pushMessage("job.reclassify.started");
     } catch (error) {
-      pushMessage("app.load.failed", {text: (error as Error).message, tone: "danger"});
+      pushErrorMessage("app.service.unavailable", error, "Could not start the reclassification job.");
     }
   };
 
@@ -965,6 +1476,11 @@ export function App() {
         resolvedTheme={resolvedTheme}
         usingSystemTheme={themePreference === "system"}
       />
+      {adminHydrationWarning ? (
+        <StatusBanner className="mx-auto mt-3 w-full max-w-375 px-4" tone="warning">
+          {adminHydrationWarning}
+        </StatusBanner>
+      ) : null}
       <AdminPanel
         activeTab={adminTab}
         appMeta={appMeta}
@@ -1044,6 +1560,7 @@ export function App() {
 
         <PaperListSection
           hasNoFetchedPapers={hasNoFetchedPapers}
+          loadError={reportLoadError}
           loading={(reportLoading || !feedsLoaded) && report.papers.length === 0}
           needsFeedSetup={needsFeedSetup}
           onOpenAdmin={() => setAdminOpen(true)}
@@ -1061,7 +1578,7 @@ export function App() {
           query={query}
           reportErrors={report.errors}
           relevance={relevance}
-          selectedId={selectedId}
+          selectedId={needsFeedSetup ? null : selectedPaperId}
           setQuery={setQuery}
           setRelevance={setRelevance}
           visibleBaseCount={visibleBase.length}
@@ -1071,6 +1588,10 @@ export function App() {
         <DetailPanel
           paper={needsFeedSetup ? null : selectedPaper}
           isUnread={Boolean(selectedPaper && !selectedPaper.read_at)}
+          markReadBusy={
+            selectedPaper?.id === markReadRequest?.paperId &&
+            markReadSubmitting
+          }
           onMarkRead={() => selectedPaper && void persistReadStatus(selectedPaper.id)}
           onMarkWrong={() => selectedPaper && openFeedbackModal(selectedPaper)}
           onSave={() => selectedPaper && openZoteroModal(selectedPaper)}
