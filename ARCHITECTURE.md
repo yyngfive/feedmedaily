@@ -55,7 +55,7 @@ Legacy reference files still remain in the repository for comparison and regress
 
 The job polling endpoints expose both human-readable messages and structured progress fields so the UI can show stage-aware status such as current feed `i/N`, metadata/classification completion percentages, and step-based profile generation progress.
 
-The API service reuses its SQLite store across requests instead of reopening it per handler. The `/api/report/latest` read path batch-selects each paper's latest classification, latest open feedback, and latest Zotero save state with SQL windowing rather than issuing per-paper follow-up lookups. `/api/app/update` also keeps a short-lived in-memory status cache so remote manifest fetch latency does not get multiplied by repeated UI polling or page initialization.
+The API service reuses long-lived SQLite stores across requests instead of reopening the database per handler. Read-heavy endpoints and mutation endpoints are split across separate store roles so the UI can keep `/api/report/latest` responsive while feedback or read-status writes are in flight. The SQLite runtime now enables WAL plus a busy-timeout-oriented connection string, and the `/api/report/latest` read path batch-selects each paper's latest classification, latest open feedback, and latest Zotero save state with SQL windowing rather than issuing per-paper follow-up lookups. `/api/app/update` also keeps a short-lived in-memory status cache so remote manifest fetch latency does not get multiplied by repeated UI polling or page initialization.
 
 ### Protected-feed verification
 
@@ -136,6 +136,7 @@ Behavioral baseline:
 - paper actions live in the detail panel
 - admin owns configuration editing, feed editing, manual jobs, feedback review, and profile proposal review
 - app-update, scheduler, settings, proposal, and feedback hydration are non-critical background loads and must not block the card list from appearing
+- `Mark as read` and feedback mutations commit their local UI result first and use a non-blocking report reconcile pass afterward, so the card list stays visible during background refreshes
 
 ## Profile Lifecycle
 

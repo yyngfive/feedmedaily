@@ -3,6 +3,7 @@ package sqlite
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -509,6 +510,60 @@ func TestCreateDeleteFeedbackAndMarkRead(t *testing.T) {
 	}
 	if _, err := store.CreateFeedback(999, "direct", nil, time.Now().UTC()); err == nil {
 		t.Fatal("expected missing paper error")
+	}
+}
+
+func TestOpenReadAndWriteConfigureSQLiteConcurrency(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+
+	writableStore, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats := writableStore.db.Stats(); stats.MaxOpenConnections != 1 {
+		t.Fatalf("expected writable store max open connections to be 1, got %d", stats.MaxOpenConnections)
+	}
+	assertSQLitePragmas(t, writableStore.db)
+	if err := writableStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	readOnlyStore, err := OpenRead(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readOnlyStore.Close()
+	if stats := readOnlyStore.db.Stats(); stats.MaxOpenConnections != 4 {
+		t.Fatalf("expected read store max open connections to be 4, got %d", stats.MaxOpenConnections)
+	}
+	assertSQLitePragmas(t, readOnlyStore.db)
+
+	writeOnlyStore, err := OpenWrite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writeOnlyStore.Close()
+	if stats := writeOnlyStore.db.Stats(); stats.MaxOpenConnections != 1 {
+		t.Fatalf("expected write store max open connections to be 1, got %d", stats.MaxOpenConnections)
+	}
+	assertSQLitePragmas(t, writeOnlyStore.db)
+}
+
+func assertSQLitePragmas(t *testing.T, db *sql.DB) {
+	t.Helper()
+	var journalMode string
+	if err := db.QueryRow(`PRAGMA journal_mode`).Scan(&journalMode); err != nil {
+		t.Fatalf("query journal_mode: %v", err)
+	}
+	if !strings.EqualFold(journalMode, "wal") {
+		t.Fatalf("expected journal_mode WAL, got %q", journalMode)
+	}
+	var busyTimeout int
+	if err := db.QueryRow(`PRAGMA busy_timeout`).Scan(&busyTimeout); err != nil {
+		t.Fatalf("query busy_timeout: %v", err)
+	}
+	if busyTimeout != sqliteBusyTimeoutMS {
+		t.Fatalf("expected busy_timeout %d, got %d", sqliteBusyTimeoutMS, busyTimeout)
 	}
 }
 

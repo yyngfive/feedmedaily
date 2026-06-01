@@ -38,166 +38,238 @@ async function responseErrorMessage(response: Response): Promise<string> {
   return text || `Request failed (${response.status})`;
 }
 
-export async function fetchLatestReport(): Promise<Report> {
-  const response = await fetch("/api/report/latest");
-  if (!response.ok) {
-    throw new Error(`Could not load report data (${response.status})`);
+function localServiceUnavailableMessage(operation: string): string {
+  return `Could not ${operation} because the local FeedMeDaily service is unavailable.`;
+}
+
+function normalizeFetchError(error: unknown, operation: string): Error {
+  if (error instanceof Error) {
+    const normalized = error.message.trim().toLowerCase();
+    if (
+      normalized === "failed to fetch" ||
+      normalized.includes("networkerror") ||
+      normalized.includes("load failed")
+    ) {
+      return new Error(localServiceUnavailableMessage(operation));
+    }
+    return error;
   }
-  return (await response.json()) as Report;
+  return new Error(localServiceUnavailableMessage(operation));
+}
+
+async function localRequest(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  operation: string,
+): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    throw normalizeFetchError(error, operation);
+  }
+}
+
+async function localJSONRequest<T>(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  operation: string,
+  fallbackStatusMessage: string,
+): Promise<T> {
+  const response = await localRequest(input, init, operation);
+  if (!response.ok) {
+    const detail = await responseErrorMessage(response);
+    throw new Error(detail || `${fallbackStatusMessage} (${response.status})`);
+  }
+  return (await response.json()) as T;
+}
+
+async function localVoidRequest(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  operation: string,
+  fallbackStatusMessage: string,
+): Promise<void> {
+  const response = await localRequest(input, init, operation);
+  if (!response.ok) {
+    const detail = await responseErrorMessage(response);
+    throw new Error(detail || `${fallbackStatusMessage} (${response.status})`);
+  }
+}
+
+export async function fetchLatestReport(): Promise<Report> {
+  return localJSONRequest(
+    "/api/report/latest",
+    undefined,
+    "load the paper list from the local library",
+    "Could not load the paper list from the local library",
+  );
 }
 
 export async function fetchAppMeta(): Promise<AppMeta> {
-  const response = await fetch("/api/app/meta");
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as AppMeta;
+  return localJSONRequest(
+    "/api/app/meta",
+    undefined,
+    "load local app status",
+    "Could not load local app status",
+  );
 }
 
 export async function fetchAppUpdate(): Promise<AppUpdate> {
-  const response = await fetch("/api/app/update");
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as AppUpdate;
+  return localJSONRequest(
+    "/api/app/update",
+    undefined,
+    "check local update status",
+    "Could not check local update status",
+  );
 }
 
 export async function openAppTarget(target: AppControlTarget): Promise<AppControlResponse> {
-  const response = await fetch("/api/app/open", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({target}),
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as AppControlResponse;
+  return localJSONRequest(
+    "/api/app/open",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({target}),
+    },
+    "open the selected local target",
+    "Could not open the selected local target",
+  );
 }
 
 export async function exitApp(): Promise<AppControlResponse> {
-  const response = await fetch("/api/app/exit", {
-    method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as AppControlResponse;
+  return localJSONRequest(
+    "/api/app/exit",
+    {method: "POST"},
+    "exit the local FeedMeDaily service",
+    "Could not exit the local FeedMeDaily service",
+  );
 }
 
 export async function fetchFeedSubscriptions(): Promise<FeedSubscription[]> {
-  const response = await fetch("/api/settings/feeds");
-  if (!response.ok) {
-    throw new Error(`Could not load feed subscriptions (${response.status})`);
-  }
-  return (await response.json()) as FeedSubscription[];
+  return localJSONRequest(
+    "/api/settings/feeds",
+    undefined,
+    "load RSS feed settings",
+    "Could not load RSS feed settings",
+  );
 }
 
 export async function fetchSettingsConfig(): Promise<SettingsConfigResponse> {
-  const response = await fetch("/api/settings/config");
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as SettingsConfigResponse;
+  return localJSONRequest(
+    "/api/settings/config",
+    undefined,
+    "load local settings",
+    "Could not load local settings",
+  );
 }
 
 export async function fetchSchedulerSettings(): Promise<SchedulerSettings> {
-  const response = await fetch("/api/settings/scheduler");
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as SchedulerSettings;
+  return localJSONRequest(
+    "/api/settings/scheduler",
+    undefined,
+    "load local scheduler settings",
+    "Could not load local scheduler settings",
+  );
 }
 
 export async function saveSchedulerSettings(dailyTime: string): Promise<SchedulerSettings> {
-  const response = await fetch("/api/settings/scheduler", {
-    method: "PUT",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({daily_time: dailyTime}),
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as SchedulerSettings;
+  return localJSONRequest(
+    "/api/settings/scheduler",
+    {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({daily_time: dailyTime}),
+    },
+    "save local scheduler settings",
+    "Could not save local scheduler settings",
+  );
 }
 
 export async function deleteSchedulerSettings(): Promise<SchedulerSettings> {
-  const response = await fetch("/api/settings/scheduler", {method: "DELETE"});
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as SchedulerSettings;
+  return localJSONRequest(
+    "/api/settings/scheduler",
+    {method: "DELETE"},
+    "disable local scheduler settings",
+    "Could not disable local scheduler settings",
+  );
 }
 
 export async function saveSettingsConfig(
   fields: Record<string, SettingsConfigUpdate>,
 ): Promise<SettingsConfigResponse> {
-  const response = await fetch("/api/settings/config", {
-    method: "PUT",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({fields}),
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as SettingsConfigResponse;
+  return localJSONRequest(
+    "/api/settings/config",
+    {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({fields}),
+    },
+    "save local settings",
+    "Could not save local settings",
+  );
 }
 
 export async function saveFeedSubscriptions(
   feeds: FeedSubscription[],
 ): Promise<FeedSubscription[]> {
-  const response = await fetch("/api/settings/feeds", {
-    method: "PUT",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({feeds}),
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as FeedSubscription[];
+  return localJSONRequest(
+    "/api/settings/feeds",
+    {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({feeds}),
+    },
+    "save RSS feed settings",
+    "Could not save RSS feed settings",
+  );
 }
 
 export async function fetchCurrentProfile(): Promise<CurrentProfileResponse> {
-  const response = await fetch("/api/profile/current");
-  if (!response.ok) {
-    throw new Error(`Could not load current profile (${response.status})`);
-  }
-  return (await response.json()) as CurrentProfileResponse;
+  return localJSONRequest(
+    "/api/profile/current",
+    undefined,
+    "load the local profile",
+    "Could not load the local profile",
+  );
 }
 
 export async function saveCurrentProfile(profile: ClassificationProfile): Promise<CurrentProfileResponse> {
-  const response = await fetch("/api/profile/current", {
-    method: "PUT",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(profile),
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as CurrentProfileResponse;
+  return localJSONRequest(
+    "/api/profile/current",
+    {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(profile),
+    },
+    "save the local profile",
+    "Could not save the local profile",
+  );
 }
 
 export async function bootstrapProfile(input: {
   interest_description: string;
   name?: string;
 }): Promise<JobInfo> {
-  const response = await fetch("/api/profile/bootstrap", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(input),
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  const payload = (await response.json()) as {job: JobInfo};
+  const payload = await localJSONRequest<{job: JobInfo}>(
+    "/api/profile/bootstrap",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(input),
+    },
+    "start profile generation",
+    "Could not start profile generation",
+  );
   return payload.job;
 }
 
 export async function fetchFeedback(): Promise<FeedbackRecord[]> {
-  const response = await fetch("/api/feedback");
-  if (!response.ok) {
-    throw new Error(`Could not load feedback (${response.status})`);
-  }
-  return (await response.json()) as FeedbackRecord[];
+  return localJSONRequest(
+    "/api/feedback",
+    undefined,
+    "load feedback records",
+    "Could not load feedback records",
+  );
 }
 
 export async function createFeedback(input: {
@@ -205,46 +277,52 @@ export async function createFeedback(input: {
   corrected_relevance: Relevance;
   note?: string;
 }): Promise<FeedbackRecord> {
-  const response = await fetch("/api/feedback", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(input),
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as FeedbackRecord;
+  return localJSONRequest(
+    "/api/feedback",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(input),
+    },
+    "save feedback",
+    "Could not save feedback",
+  );
 }
 
 export async function deleteFeedback(feedbackId: number): Promise<void> {
-  const response = await fetch(`/api/feedback/${feedbackId}`, {method: "DELETE"});
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
+  return localVoidRequest(
+    `/api/feedback/${feedbackId}`,
+    {method: "DELETE"},
+    "delete feedback",
+    "Could not delete feedback",
+  );
 }
 
 export async function markPaperRead(paperId: number): Promise<PaperReadStatus> {
-  const response = await fetch(`/api/papers/${paperId}/read`, {method: "POST"});
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-  return (await response.json()) as PaperReadStatus;
+  return localJSONRequest(
+    `/api/papers/${paperId}/read`,
+    {method: "POST"},
+    "update read status",
+    "Could not update read status",
+  );
 }
 
 export async function fetchProfileProposals(): Promise<ProfileProposal[]> {
-  const response = await fetch("/api/profile/proposals");
-  if (!response.ok) {
-    throw new Error(`Could not load profile proposals (${response.status})`);
-  }
-  return (await response.json()) as ProfileProposal[];
+  return localJSONRequest(
+    "/api/profile/proposals",
+    undefined,
+    "load profile proposals",
+    "Could not load profile proposals",
+  );
 }
 
 export async function launchProfileProposalGeneration(): Promise<JobInfo> {
-  const response = await fetch("/api/profile/proposals/generate", {method: "POST"});
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  const payload = (await response.json()) as {job: JobInfo};
+  const payload = await localJSONRequest<{job: JobInfo}>(
+    "/api/profile/proposals/generate",
+    {method: "POST"},
+    "start profile proposal generation",
+    "Could not start profile proposal generation",
+  );
   return payload.job;
 }
 
@@ -252,56 +330,61 @@ export async function applyProfileProposal(
   id: number,
   selection?: {accepted_change_ids: string[]; rejected_change_ids: string[]},
 ): Promise<ProfileProposal> {
-  const response = await fetch(`/api/profile/proposals/${id}/apply`, {
-    method: "POST",
-    headers: selection ? {"Content-Type": "application/json"} : undefined,
-    body: selection ? JSON.stringify(selection) : undefined,
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as ProfileProposal;
+  return localJSONRequest(
+    `/api/profile/proposals/${id}/apply`,
+    {
+      method: "POST",
+      headers: selection ? {"Content-Type": "application/json"} : undefined,
+      body: selection ? JSON.stringify(selection) : undefined,
+    },
+    "apply the profile proposal",
+    "Could not apply the profile proposal",
+  );
 }
 
 export async function rejectProfileProposal(id: number): Promise<ProfileProposal> {
-  const response = await fetch(`/api/profile/proposals/${id}/reject`, {method: "POST"});
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as ProfileProposal;
+  return localJSONRequest(
+    `/api/profile/proposals/${id}/reject`,
+    {method: "POST"},
+    "reject the profile proposal",
+    "Could not reject the profile proposal",
+  );
 }
 
 export async function fetchZoteroCollections(): Promise<ZoteroCollectionsResponse> {
-  const response = await fetch("/api/zotero/collections");
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as ZoteroCollectionsResponse;
+  return localJSONRequest(
+    "/api/zotero/collections",
+    undefined,
+    "load Zotero collections",
+    "Could not load Zotero collections",
+  );
 }
 
 export async function saveToZotero(
   paperId: number,
   collectionKey?: string | null,
 ): Promise<ZoteroStatus> {
-  const response = await fetch(`/api/zotero/save/${paperId}`, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({collection_key: collectionKey ?? null}),
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as ZoteroStatus;
+  return localJSONRequest(
+    `/api/zotero/save/${paperId}`,
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({collection_key: collectionKey ?? null}),
+    },
+    "save to Zotero",
+    "Could not save to Zotero",
+  );
 }
 
 export async function launchAdminJob(
   path: "/api/admin/run",
 ): Promise<JobInfo> {
-  const response = await fetch(path, {method: "POST"});
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  const payload = (await response.json()) as {job: JobInfo};
+  const payload = await localJSONRequest<{job: JobInfo}>(
+    path,
+    {method: "POST"},
+    "start the sync job",
+    "Could not start the sync job",
+  );
   return payload.job;
 }
 
@@ -309,60 +392,65 @@ export async function launchReclassifyJob(input: {
   scope: "recent" | "feedback" | "all";
   limit: number;
 }): Promise<JobInfo> {
-  const response = await fetch("/api/admin/reclassify", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(input),
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  const payload = (await response.json()) as {job: JobInfo};
+  const payload = await localJSONRequest<{job: JobInfo}>(
+    "/api/admin/reclassify",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(input),
+    },
+    "start the reclassification job",
+    "Could not start the reclassification job",
+  );
   return payload.job;
 }
 
 export async function fetchJob(id: string): Promise<JobInfo> {
-  const response = await fetch(`/api/admin/jobs/${id}`);
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as JobInfo;
+  return localJSONRequest(
+    `/api/admin/jobs/${id}`,
+    undefined,
+    "load job status",
+    "Could not load job status",
+  );
 }
 
 export async function fetchJobs(): Promise<JobInfo[]> {
-  const response = await fetch("/api/admin/jobs");
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as JobInfo[];
+  return localJSONRequest(
+    "/api/admin/jobs",
+    undefined,
+    "load job status",
+    "Could not load job status",
+  );
 }
 
 export async function startFeedVerification(input: {
   job_id: string;
   feed_url: string;
 }): Promise<{ok: boolean; verification_id: string}> {
-  const response = await fetch("/api/feeds/verification/start", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(input),
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as {ok: boolean; verification_id: string};
+  return localJSONRequest(
+    "/api/feeds/verification/start",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(input),
+    },
+    "start feed verification",
+    "Could not start feed verification",
+  );
 }
 
 export async function completeFeedVerification(input: {
   job_id: string;
   feed_url: string;
 }): Promise<{ok: boolean; verification_id: string}> {
-  const response = await fetch("/api/feeds/verification/complete", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(input),
-  });
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
-  }
-  return (await response.json()) as {ok: boolean; verification_id: string};
+  return localJSONRequest(
+    "/api/feeds/verification/complete",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(input),
+    },
+    "complete feed verification",
+    "Could not complete feed verification",
+  );
 }

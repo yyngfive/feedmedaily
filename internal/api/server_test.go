@@ -733,6 +733,30 @@ func TestServerCloseIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestServerUsesSeparateReadAndWriteStores(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	seedReadOnlyFixture(t, settings.DatabasePath)
+	server := NewServer(settings, nil)
+	defer func() {
+		if err := server.Close(); err != nil {
+			t.Fatalf("close api server: %v", err)
+		}
+	}()
+
+	readStore, err := server.getReadStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeStore, err := server.getWriteStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readStore == writeStore {
+		t.Fatal("expected separate read and write stores")
+	}
+}
+
 func testSettings(root string) config.Settings {
 	return config.Settings{
 		Mode:                appruntime.ModeSource,

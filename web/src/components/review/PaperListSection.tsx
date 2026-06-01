@@ -8,6 +8,7 @@ import {PaperCard} from "./PaperCard";
 import type {Paper, Relevance} from "../../types";
 
 export function PaperListSection({
+  loadError,
   hasNoFetchedPapers,
   loading,
   needsFeedSetup,
@@ -26,6 +27,7 @@ export function PaperListSection({
   visibleBaseCount,
   visibleTotals,
 }: {
+  loadError: string | null;
   hasNoFetchedPapers: boolean;
   loading: boolean;
   needsFeedSetup: boolean;
@@ -109,6 +111,17 @@ export function PaperListSection({
           eyebrow="Loading"
           title="Loading your paper list"
           body="The review list is being prepared. You can open Admin in the meantime, but the card list will appear as soon as the latest report finishes loading."
+        />
+      ) : loadError ? (
+        <EmptyStateCard
+          eyebrow="Local data"
+          title="The paper list could not be loaded"
+          body={loadError}
+          actions={
+            <Button size="sm" variant="outline" onPress={onOpenAdmin}>
+              Open admin
+            </Button>
+          }
         />
       ) : hasNoFetchedPapers ? (
         <EmptyStateCard
