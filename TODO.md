@@ -9,11 +9,12 @@
 
 - [X] 增加自己编辑Profile功能
 - [X] 增加AI自动简化Profile的功能，优化Profile更新逻辑
+- [ ] 更新profile后feedback文章的分类还是保持之前
 
 ## Feed
 
 - [ ] 增加一个内置的Feed List以及官方RSS List跳转页
-- [ ] 增加获取feed、metadata、llm分类时的具体进度条（当前已有状态消息提示，但还不是进度条）
+- [X] 增加获取feed、metadata、llm分类时的具体进度条（当前已有状态消息提示，但还不是进度条）
 
 ## Initialization & Settings
 
@@ -47,15 +48,16 @@
 - [X] [High] API Server 复用长期存活的 SQLite Store，不再为每个请求重复 `Open` / `Ping` / `loadColumns`
 - [X] [High] `/api/report/latest` 改为批量查询最新 classification / feedback / zotero 状态，并补齐匹配索引以消除 N+1 读取
 - [X] [High] 首页 card list 不再等待 app update / scheduler / settings / proposals / feedback 请求；更新检查已移出首屏关键路径并增加短期缓存
-- [ ] [Medium] 如果大库下首页仍有明显压力，继续评估 report 列表/详情拆分或服务端分页与筛选
+- [X] [Medium] 如果大库下首页仍有明显压力，继续评估 report 列表/详情拆分或服务端分页与筛选
 
 ## Feed
 
 - [X] APSB等Elsevier期刊解析报错
 - [X] NAR的RSS无法获取
-- [ ] 避免数据更新时的终端弹窗
-- [ ] 托盘启动和双击打开应用时仍会闪烁命令行窗口
+- [X] 避免数据更新时的终端弹窗
+- [X] 托盘启动和双击打开应用时仍会闪烁命令行窗口
 - [X] Last Update没有更新却自动增加
+- [ ] 2026-06-03 13:21:51,951 WARNING Feed returned unsupported XML root "html" attempt=0 root=html url=https://www.pnas.org/action/showfeed?type=searchTopic&taxonomyCode=topic&tagCode=bio-sci
 
 ## Scheduler
 
@@ -68,3 +70,4 @@
 ## 托盘
 
 - [X] 后台服务检测到托盘程序未启动，自动打开托盘
+- [ ] 修改自动同步时间后，托盘菜单显示的时间还是十点半

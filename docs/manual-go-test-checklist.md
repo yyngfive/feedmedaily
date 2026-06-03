@@ -1035,7 +1035,7 @@ Get-ChildItem .\dist\installer
 
 预期至少有一个类似文件：
 
-- `FeedMeDaily-v0.3.0.exe`
+- `FeedMeDaily-v0.3.1.exe`
 
 如果没有安装器但前面 release 目录有了，常见原因是：
 
@@ -1069,7 +1069,7 @@ Get-Item .\dist\installer\FeedMeDaily-*.exe | Select-Object Name,Length,LastWrit
 或者 PowerShell：
 
 ```powershell
-Start-Process .\dist\installer\FeedMeDaily-v0.3.0.exe
+Start-Process .\dist\installer\FeedMeDaily-v0.3.1.exe
 ```
 
 预期结果：
