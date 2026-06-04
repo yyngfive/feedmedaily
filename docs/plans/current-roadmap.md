@@ -1,6 +1,6 @@
 # FeedMeDaily Current Roadmap
 
-Last Updated: 2026-06-01
+Last Updated: 2026-06-04
 Status: Active
 
 ## Summary
@@ -12,6 +12,7 @@ Current baseline:
 - `feedmedailyd` is the production local backend
 - `feedmedaily-tray` is the Windows app shell
 - the React UI is the primary review and settings surface
+- first-run onboarding now uses split basic/advanced settings plus an editable initial profile review
 
 ## Priority Areas
 
@@ -67,8 +68,8 @@ Goal: make first-run configuration and ongoing settings edits denser and easier 
 
 Planned work:
 
-- simplify the settings surface and reduce stacked form-card chrome
-- add clearer onboarding help and external guidance links where useful
+- add clearer onboarding help and external guidance links where useful without re-expanding the page chrome
+- keep the compact split onboarding flow easy to scan while tightening wording around proposal acceptance and follow-up steps
 - improve job status continuity and other high-value feedback messaging in the UI
 
 Constraints:
