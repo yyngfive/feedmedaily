@@ -10,6 +10,7 @@
 - [X] 增加自己编辑Profile功能
 - [X] 增加AI自动简化Profile的功能，优化Profile更新逻辑
 - [ ] 更新profile后feedback文章的分类还是保持之前
+- [ ] 拒绝的Feedback应该保留
 
 ## Feed
 
@@ -18,8 +19,8 @@
 
 ## Initialization & Settings
 
-- [ ] 精简参数界面，把确认按钮放在下方
-- [ ] 增加DeepSeek开发者中心链接指引
+- [X] 精简参数界面，把确认按钮放在下方
+- [X] 增加DeepSeek开发者中心链接指引
 - [ ] 增加起始界面的说明文档
 - [ ] thinking 自动降级时补更明确的前端提示和设置说明
 
@@ -42,6 +43,8 @@
 - [X] 增加内置的manifest
 
 # Server
+
+- [ ] 貌似gemini api不兼容think设置
 
 ## Performance
 

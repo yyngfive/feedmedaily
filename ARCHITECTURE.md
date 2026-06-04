@@ -117,6 +117,7 @@ Editable local configuration is exposed through the UI:
 - secret values are written only to local config storage
 - secrets are never echoed back to the frontend in plain text
 - each field reports whether its value comes from local config, the system environment, or a built-in default
+- first-run onboarding presents one shared LLM API key entry plus optional advanced per-role overrides for classifier and profile generation
 
 ## UI Architecture
 
@@ -128,7 +129,7 @@ The main app uses a three-column layout:
 
 Behavioral baseline:
 
-- if no profile exists, onboarding is shown first and includes local configuration editing
+- if no profile exists, onboarding is shown first with split basic/advanced settings, local configuration editing, bootstrap job status, and an editable initial profile review card
 - if a profile exists, the three-column review shell renders immediately and the paper list begins loading as soon as the report request starts
 - if a profile exists but no feeds exist, the app switches into a feed-initialization empty state once feed loading resolves
 - the default review view is `Unread + Last 30 days`
@@ -142,8 +143,8 @@ Behavioral baseline:
 
 1. The user describes research interests during onboarding.
 2. The profile model generates an initial profile proposal.
-3. The user applies the proposal.
-4. The applied profile is written to `data/classification_profile.json`.
+3. The user reviews and can edit the pending onboarding proposal before accepting it.
+4. Accepting onboarding first applies the pending proposal and then saves the edited draft as the current profile.
 5. Future classifications use that profile.
 6. User feedback can generate new full-profile proposals.
 7. Applying a proposal reclassifies only papers linked to that proposal feedback.

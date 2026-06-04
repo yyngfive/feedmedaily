@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	appconfig "github.com/yyngfive/scirssagent/internal/config"
 )
 
 const (
@@ -57,25 +59,18 @@ func ResolveLayout(root string) (Layout, error) {
 		return Layout{}, fmt.Errorf("resolve root: %w", err)
 	}
 
-	mode := detectRuntimeMode(absRoot)
-	serverHost := strings.TrimSpace(os.Getenv("SCIRSS_SERVER_HOST"))
-	if serverHost == "" {
-		serverHost = defaultHost
+	settings, err := appconfig.Load(absRoot)
+	if err != nil {
+		return Layout{}, fmt.Errorf("load app settings: %w", err)
 	}
-
-	serverPort := defaultPort
-	if raw := strings.TrimSpace(os.Getenv("SCIRSS_SERVER_PORT")); raw != "" {
-		if parsed, parseErr := strconv.Atoi(raw); parseErr == nil && parsed > 0 {
-			serverPort = parsed
-		}
-	}
+	mode := settings.Mode
 
 	layout := Layout{
 		Mode:       mode,
 		RootDir:    absRoot,
 		AppDir:     absRoot,
-		ServerHost: serverHost,
-		ServerPort: serverPort,
+		ServerHost: settings.ServerHost,
+		ServerPort: settings.ServerPort,
 	}
 
 	if mode == runtimeModeRelease {

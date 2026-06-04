@@ -99,6 +99,9 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 - Keep review-critical loading paths narrow: the paper list should not wait on app-update, scheduler, settings, proposal, or feedback hydration unless the task explicitly redesigns that behavior.
 - Keep admin/settings surfaces compact and low-chrome; avoid stacked form cards when a denser table or document layout communicates better.
 - Prefer one primary profile-review document card over multiple small cards when showing the current profile or a pending proposal.
+- For onboarding, profile, and proposal review surfaces, avoid card-inside-card or box-inside-box compositions; prefer one primary document card with lightweight sections.
+- Keep onboarding/profile review pages short when possible by compressing explanatory chrome and using document-style sections instead of nested modules.
+- When a user has already removed specific UI helper text, badges, or decorative labels during the current iteration, do not reintroduce them unless the user explicitly asks for them back.
 - Keep paper cards summary-only and move richer context or rendering into the right detail panel.
 - Favor simplified wording and fewer redundant labels or duplicate actions when refining the UI.
 

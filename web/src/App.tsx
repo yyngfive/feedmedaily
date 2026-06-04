@@ -1305,19 +1305,47 @@ export function App() {
     }
   }, [pushErrorMessage, pushMessage]);
 
-  const handleBootstrap = async (interestDescription: string, name: string) => {
+  const handleOnboardingSaveAndBootstrap = React.useCallback(async (
+    fields: Record<string, {value?: string | null; clear?: boolean}>,
+    interestDescription: string,
+  ) => {
+    try {
+      setSettingsConfigSaving(true);
+      const saved = await saveSettingsConfig(fields);
+      setSettingsConfig(saved.fields);
+      const currentProfile = await refreshProfileGate();
+      await Promise.all([
+        refreshAdminData(),
+        currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve(),
+      ]);
+    } catch (error) {
+      return {
+        ok: false,
+        tone: "danger" as const,
+        message: errorText(error, "Could not save local settings."),
+      };
+    } finally {
+      setSettingsConfigSaving(false);
+    }
+
     try {
       setBusy(true);
-      registerJob(
-        await bootstrapProfile({interest_description: interestDescription, name}),
-        false,
-      );
+      registerJob(await bootstrapProfile({interest_description: interestDescription}), false);
+      return {
+        ok: true,
+        tone: "info" as const,
+        message: "Local settings saved. Initial profile generation started.",
+      };
     } catch (error) {
-      pushErrorMessage("app.service.unavailable", error, "Could not start profile generation.");
+      return {
+        ok: false,
+        tone: "warning" as const,
+        message: `Local settings were saved, but the initial profile generation did not start: ${errorText(error, "Unknown error.")}`,
+      };
     } finally {
       setBusy(false);
     }
-  };
+  }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore]);
 
   const handleGenerateProposal = async () => {
     try {
@@ -1358,6 +1386,69 @@ export function App() {
       pushErrorMessage("app.service.unavailable", error, "Could not reject the profile proposal.");
     }
   };
+
+  const handleOnboardingAcceptDraft = React.useCallback(async (
+    id: number,
+    draftProfile: ClassificationProfile,
+  ) => {
+    try {
+      setBusy(true);
+      await applyProfileProposal(id);
+    } catch (error) {
+      return {
+        ok: false,
+        tone: "danger" as const,
+        message: errorText(error, "Could not apply the profile proposal."),
+      };
+    }
+
+    try {
+      const saved = await saveCurrentProfile(draftProfile);
+      setProfile(saved.profile);
+      await Promise.all([
+        refreshFeedback(),
+        refreshProposals(),
+        refreshReviewCore(saved.profile),
+      ]);
+      pushMessage("profile.proposal.applied", {
+        text: "Initial profile applied and saved.",
+        tone: "success",
+      });
+      return {ok: true};
+    } catch (error) {
+      const currentProfile = await refreshProfileGate();
+      await Promise.all([
+        refreshFeedback(),
+        refreshProposals(),
+        currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve(),
+      ]);
+      pushMessage("profile.proposal.applied", {
+        text: `Profile proposal applied, but the edited draft was not fully saved: ${errorText(error, "Unknown error.")}`,
+        tone: "warning",
+      });
+      return {ok: true};
+    } finally {
+      setBusy(false);
+    }
+  }, [errorText, pushMessage, refreshFeedback, refreshProfileGate, refreshProposals, refreshReviewCore]);
+
+  const handleOnboardingRejectProposal = React.useCallback(async (id: number) => {
+    try {
+      await rejectProfileProposal(id);
+      await refreshProposals();
+      return {
+        ok: true,
+        tone: "success" as const,
+        message: "Rejected the pending proposal.",
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        tone: "danger" as const,
+        message: errorText(error, "Could not reject the profile proposal."),
+      };
+    }
+  }, [errorText, refreshProposals]);
 
   const handleRunAdminJob = async (path: "/api/admin/run") => {
     try {
@@ -1450,18 +1541,9 @@ export function App() {
           configSaving={settingsConfigSaving}
           jobs={jobs}
           proposals={profileProposals}
-          onBootstrap={handleBootstrap}
-          onApplyProposal={handleApplyProposal}
-          onSaveConfig={handleSaveConfig}
-        />
-        <AppStatusBar
-          appMeta={appMeta}
-          appUpdate={appUpdate}
-          busy={appControlBusy}
-          onExit={() => void handleExitApp()}
-          onOpenData={() => void handleOpenAppTarget("data_dir")}
-          onOpenInstall={() => void handleOpenAppTarget("install_dir")}
-          onOpenLogs={() => void handleOpenAppTarget("logs_dir")}
+          onAcceptDraft={handleOnboardingAcceptDraft}
+          onRejectProposal={handleOnboardingRejectProposal}
+          onSaveAndBootstrap={handleOnboardingSaveAndBootstrap}
         />
       </>
     );
