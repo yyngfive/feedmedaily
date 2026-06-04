@@ -324,12 +324,15 @@ Invoke-RestMethod "$base/api/app/meta"
 
 ```powershell
 Invoke-RestMethod "$base/api/app/update"
+Invoke-RestMethod "$base/api/app/update?force=1"
 ```
 
 检查点：
 
 - 如果没配置更新地址，`status` 通常为 `not_configured`
 - 如果配置了更新地址，会返回 `has_update`
+- `force=1` 会立即重查远程 manifest，而不是继续复用 5 分钟成功缓存
+- 返回体里的 `checked_at` 会反映本次实际检查时间
 
 ### 7.1.4 `POST /api/app/open`
 
@@ -1015,6 +1018,8 @@ Get-Content .\dist\update.json
 - `feedmedailyd.exe` 存在
 - `web/dist` 已复制进去
 - `update.json` 的 `version` 与 `web/package.json` 一致
+- `update.json` 的 `download_url` 仍指向 GitHub Releases 安装包
+- 构建后需要把 `dist/update.json` 额外发布到主地址，供应用内更新检查读取
 
 ## 12.3 构建完整安装包
 

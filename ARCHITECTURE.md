@@ -55,7 +55,7 @@ Legacy reference files still remain in the repository for comparison and regress
 
 The job polling endpoints expose both human-readable messages and structured progress fields so the UI can show stage-aware status such as current feed `i/N`, metadata/classification completion percentages, and step-based profile generation progress.
 
-The API service reuses long-lived SQLite stores across requests instead of reopening the database per handler. Read-heavy endpoints and mutation endpoints are split across separate store roles so the UI can keep `/api/report/latest` responsive while feedback or read-status writes are in flight. The SQLite runtime now enables WAL plus a busy-timeout-oriented connection string, and the `/api/report/latest` read path batch-selects each paper's latest classification, latest open feedback, and latest Zotero save state with SQL windowing rather than issuing per-paper follow-up lookups. `/api/app/update` also keeps a short-lived in-memory status cache so remote manifest fetch latency does not get multiplied by repeated UI polling or page initialization.
+The API service reuses long-lived SQLite stores across requests instead of reopening the database per handler. Read-heavy endpoints and mutation endpoints are split across separate store roles so the UI can keep `/api/report/latest` responsive while feedback or read-status writes are in flight. The SQLite runtime now enables WAL plus a busy-timeout-oriented connection string, and the `/api/report/latest` read path batch-selects each paper's latest classification, latest open feedback, and latest Zotero save state with SQL windowing rather than issuing per-paper follow-up lookups. `/api/app/update` keeps a short-lived in-memory status cache for routine polling and page initialization, but also accepts a force-refresh path so manual checks can bypass that cache immediately.
 
 ### Protected-feed verification
 
@@ -118,6 +118,7 @@ Editable local configuration is exposed through the UI:
 - secrets are never echoed back to the frontend in plain text
 - each field reports whether its value comes from local config, the system environment, or a built-in default
 - first-run onboarding presents one shared LLM API key entry plus optional advanced per-role overrides for classifier and profile generation
+- changing `FEEDMEDAILY_UPDATE_MANIFEST_URL` takes effect immediately for subsequent in-app update checks without requiring a backend restart
 
 ## UI Architecture
 
@@ -136,8 +137,14 @@ Behavioral baseline:
 - paper cards stay summary-only
 - paper actions live in the detail panel
 - admin owns configuration editing, feed editing, manual jobs, feedback review, and profile proposal review
+- manual update checks are exposed both in `Settings -> Update check` and in the footer status bar, and both routes trigger the same force-refresh update request
 - app-update, scheduler, settings, proposal, and feedback hydration are non-critical background loads and must not block the card list from appearing
 - `Mark as read` and feedback mutations commit their local UI result first and use a non-blocking report reconcile pass afterward, so the card list stays visible during background refreshes
+
+### Packaged update distribution
+
+- packaged builds still direct installer downloads and release notes to GitHub Releases
+- the update manifest URL can point to a separately hosted `update.json`, so update checks and installer hosting can be split across different origins
 
 ## Profile Lifecycle
 

@@ -1,4 +1,4 @@
-import {Button, Chip} from "@heroui/react";
+import {Button, Chip, Spinner} from "@heroui/react";
 
 import type {AppMeta, AppUpdate} from "../../types";
 
@@ -24,7 +24,9 @@ function updateLabel(appUpdate: AppUpdate | null): string {
 export function AppStatusBar({
   appMeta,
   appUpdate,
+  appUpdateChecking,
   busy,
+  onCheckForUpdates,
   onExit,
   onOpenData,
   onOpenInstall,
@@ -32,7 +34,9 @@ export function AppStatusBar({
 }: {
   appMeta: AppMeta | null;
   appUpdate: AppUpdate | null;
+  appUpdateChecking: boolean;
   busy: boolean;
+  onCheckForUpdates: () => void;
   onExit: () => void;
   onOpenData: () => void;
   onOpenInstall: () => void;
@@ -59,6 +63,12 @@ export function AppStatusBar({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Button isDisabled={appUpdateChecking} size="sm" variant="outline" onPress={onCheckForUpdates}>
+            <span className="inline-flex items-center gap-2">
+              {appUpdateChecking ? <Spinner color="current" size="sm" /> : null}
+              {appUpdateChecking ? "Checking..." : "Check for updates"}
+            </span>
+          </Button>
           <Button size="sm" variant="outline" onPress={onOpenData}>
             Open Data
           </Button>

@@ -41,6 +41,7 @@
 ## Update
 
 - [X] 增加内置的manifest
+- [X] 增加手动检查更新入口（`Settings` + 页面状态栏）
 
 # Server
 

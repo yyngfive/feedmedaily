@@ -12,10 +12,12 @@ Changes since `0.3.1`:
 
 - Replaced the old first-run onboarding page with the new compact onboarding flow. First-run setup now uses split basic/advanced settings, a shared LLM API key with optional per-role overrides, and an editable initial profile review before acceptance.
 - Changed onboarding acceptance so accepting the initial proposal now applies it and immediately saves the user's edited draft as the live classification profile.
+- Added manual `Check for updates` actions in Settings and the footer status bar so release builds can force-refresh the update manifest on demand, while keeping the normal background update check cached.
 
 ### Fixed
 
 - Fixed source-mode tray startup so `.env` or environment-based `SCIRSS_SERVER_HOST` and `SCIRSS_SERVER_PORT` values are respected when launching the local backend.
+- Fixed release-mode update-manifest changes so saving a new `FEEDMEDAILY_UPDATE_MANIFEST_URL` now takes effect immediately without restarting the local service.
 
 ## 0.3.1 (2026-06-03)
 

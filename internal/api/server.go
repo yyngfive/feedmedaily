@@ -25,14 +25,15 @@ import (
 )
 
 type Server struct {
-	settings    config.Settings
-	version     string
-	shutdown    func()
-	storeMu     sync.RWMutex
-	readStore   *store.Store
-	writeStore  *store.Store
-	updateMu    sync.Mutex
-	updateCache *cachedUpdateStatus
+	settings          config.Settings
+	version           string
+	shutdown          func()
+	storeMu           sync.RWMutex
+	readStore         *store.Store
+	writeStore        *store.Store
+	updateMu          sync.Mutex
+	updateManifestURL string
+	updateCache       *cachedUpdateStatus
 }
 
 type cachedUpdateStatus struct {
@@ -62,9 +63,10 @@ func NewServer(settings config.Settings, shutdown func()) *Server {
 	// 用当前解析好的 settings 创建一个可挂到 net/http 上的 API 服务器。
 	logging.SetDefaultDir(settings.LogsDir)
 	return &Server{
-		settings: settings,
-		version:  appruntime.PackageVersion(settings.RootDir),
-		shutdown: shutdown,
+		settings:          settings,
+		version:           appruntime.PackageVersion(settings.RootDir),
+		shutdown:          shutdown,
+		updateManifestURL: settings.UpdateManifestURL,
 	}
 }
 
@@ -127,17 +129,32 @@ func (s *Server) Close() error {
 	return closeErr
 }
 
-func (s *Server) cachedUpdateStatus() map[string]any {
+func (s *Server) currentUpdateManifestURL() string {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+	return s.updateManifestURL
+}
+
+func (s *Server) setUpdateManifestURL(manifestURL string) {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+	s.updateManifestURL = strings.TrimSpace(manifestURL)
+	s.updateCache = nil
+}
+
+func (s *Server) cachedUpdateStatus(force bool) map[string]any {
 	now := nowFunc().UTC()
 
 	s.updateMu.Lock()
 	defer s.updateMu.Unlock()
 
-	if s.updateCache != nil && now.Before(s.updateCache.expiresAt) {
+	if !force && s.updateCache != nil && now.Before(s.updateCache.expiresAt) {
 		return cloneJSONMap(s.updateCache.payload)
 	}
 
-	payload := fetchUpdateStatus(s.settings)
+	settings := s.settings
+	settings.UpdateManifestURL = s.updateManifestURL
+	payload := fetchUpdateStatus(settings)
 	ttl := updateStatusSuccessTTL
 	if status, ok := payload["status"].(string); ok && status == "check_failed" {
 		ttl = updateStatusFailureTTL
@@ -228,8 +245,8 @@ func (s *Server) handleAppMeta(w http.ResponseWriter, r *http.Request) {
 		processRunning = appruntime.ProcessRunning(state.PID)
 	}
 	updateManifestURL := any(nil)
-	if s.settings.UpdateManifestURL != "" {
-		updateManifestURL = s.settings.UpdateManifestURL
+	if current := s.currentUpdateManifestURL(); current != "" {
+		updateManifestURL = current
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":                appruntime.AppPublicName,
@@ -253,7 +270,8 @@ func (s *Server) handleAppUpdate(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.cachedUpdateStatus())
+	force := r.URL.Query().Get("force") == "1"
+	writeJSON(w, http.StatusOK, s.cachedUpdateStatus(force))
 }
 
 func (s *Server) handleAppOpen(w http.ResponseWriter, r *http.Request) {
@@ -270,7 +288,7 @@ func (s *Server) handleAppOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	updateStatus := map[string]any(nil)
 	if payload.Target == "download_url" || payload.Target == "release_notes_url" {
-		updateStatus = s.cachedUpdateStatus()
+		updateStatus = s.cachedUpdateStatus(false)
 	}
 	target, err := resolveAppOpenTarget(s.settings, payload.Target, requestBaseURL(r), updateStatus)
 	if err != nil {
@@ -329,6 +347,7 @@ func (s *Server) handleSettingsConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		s.setUpdateManifestURL(settingsConfigFieldValue(response.Fields, "FEEDMEDAILY_UPDATE_MANIFEST_URL"))
 		writeJSON(w, http.StatusOK, response)
 	default:
 		w.Header().Set("Allow", "GET, PUT")
@@ -1449,6 +1468,16 @@ func fetchUpdateStatus(settings config.Settings) map[string]any {
 		payload["release_notes_url"] = releaseNotesURL
 	}
 	return payload
+}
+
+func settingsConfigFieldValue(fields []config.SettingsConfigField, key string) string {
+	for _, field := range fields {
+		if field.Key != key || field.Value == nil {
+			continue
+		}
+		return strings.TrimSpace(*field.Value)
+	}
+	return ""
 }
 
 func resolveAppOpenTarget(settings config.Settings, target string, serverURL string, update map[string]any) (string, error) {

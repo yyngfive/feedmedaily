@@ -30,6 +30,7 @@ export function AdminPanel({
   activeTab,
   appMeta,
   appUpdate,
+  appUpdateChecking,
   configFields,
   configSaving,
   feedback,
@@ -39,6 +40,7 @@ export function AdminPanel({
   jobs,
   onAddFeed,
   onApplyProposal,
+  onCheckForUpdates,
   onClose,
   onDeleteFeedback,
   onFeedChange,
@@ -67,6 +69,7 @@ export function AdminPanel({
   activeTab: AdminTab;
   appMeta: AppMeta | null;
   appUpdate: AppUpdate | null;
+  appUpdateChecking: boolean;
   configFields: SettingsConfigField[];
   configSaving: boolean;
   feedback: FeedbackRecord[];
@@ -79,6 +82,7 @@ export function AdminPanel({
     id: number,
     selection?: {accepted_change_ids: string[]; rejected_change_ids: string[]},
   ) => Promise<void> | void;
+  onCheckForUpdates: () => void;
   onClose: () => void;
   onDeleteFeedback: (id: number) => void;
   onFeedChange: (index: number, field: "journal" | "url", value: string) => void;
@@ -118,6 +122,10 @@ export function AdminPanel({
   const [schedulerTime, setSchedulerTime] = React.useState("10:00");
   const schedulerAdvisory = scheduler?.advisory?.trim() ?? "";
   const showSchedulerAdvisory = schedulerAdvisory.length > 0;
+  const lastCheckedLabel =
+    appUpdate && !Number.isNaN(Date.parse(appUpdate.checked_at))
+      ? new Date(appUpdate.checked_at).toLocaleString()
+      : null;
 
   React.useEffect(() => {
     setSchedulerTime(scheduler?.scheduled_time ?? "10:00");
@@ -276,6 +284,12 @@ export function AdminPanel({
                     download without auto-updating.
                   </p>
                 </div>
+                <Button isDisabled={appUpdateChecking} size="sm" variant="outline" onPress={onCheckForUpdates}>
+                    <span className="inline-flex items-center gap-2">
+                      {appUpdateChecking ? <Spinner color="current" size="sm" /> : null}
+                      {appUpdateChecking ? "Checking..." : "Check for updates"}
+                    </span>
+                  </Button>
               </div>
               {appUpdate ? (
                 <div className="mt-3 rounded-lg border border-(--line) p-3 text-sm">
@@ -285,6 +299,9 @@ export function AdminPanel({
                   <p className="mt-1 text-muted">Status: {appUpdate.status}</p>
                   {appUpdate.latest_version ? (
                     <p className="mt-1 text-muted">Latest version: {appUpdate.latest_version}</p>
+                  ) : null}
+                  {lastCheckedLabel ? (
+                    <p className="mt-1 text-muted">Last checked: {lastCheckedLabel}</p>
                   ) : null}
                   {appUpdate.detail ? <p className="mt-1 text-muted">{appUpdate.detail}</p> : null}
                   <div className="mt-3 flex flex-wrap gap-2">

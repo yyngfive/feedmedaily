@@ -114,9 +114,10 @@ export async function fetchAppMeta(): Promise<AppMeta> {
   );
 }
 
-export async function fetchAppUpdate(): Promise<AppUpdate> {
+export async function fetchAppUpdate(force = false): Promise<AppUpdate> {
+  const path = force ? "/api/app/update?force=1" : "/api/app/update";
   return localJSONRequest(
-    "/api/app/update",
+    path,
     undefined,
     "check local update status",
     "Could not check local update status",

@@ -119,6 +119,9 @@
 
 - 当前版本显示为 `0.2.0`
 - 不应再显示 `0.0.0`
+- `Update check` 区域显示 `Check for updates`
+- 页面底部状态栏也显示 `Check for updates`
+- 点击任一 `Check for updates` 后按钮会进入检查中状态，并更新 `Last checked`
 
 实际：
 

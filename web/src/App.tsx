@@ -106,6 +106,7 @@ export function App() {
   const [profile, setProfile] = React.useState<ClassificationProfile | null>(null);
   const [appMeta, setAppMeta] = React.useState<AppMeta | null>(null);
   const [appUpdate, setAppUpdate] = React.useState<AppUpdate | null>(null);
+  const [appUpdateChecking, setAppUpdateChecking] = React.useState(false);
   const [feeds, setFeeds] = React.useState<FeedSubscription[]>([]);
   const [scheduler, setScheduler] = React.useState<SchedulerSettings | null>(null);
   const [settingsConfig, setSettingsConfig] = React.useState<SettingsConfigField[]>([]);
@@ -437,6 +438,17 @@ export function App() {
   const refreshAppUpdate = React.useCallback(async () => {
     setAppUpdate(await fetchAppUpdate());
   }, []);
+
+  const handleCheckAppUpdate = React.useCallback(async () => {
+    try {
+      setAppUpdateChecking(true);
+      setAppUpdate(await fetchAppUpdate(true));
+    } catch (error) {
+      pushErrorMessage("app.update.check.failed", error, "Could not check local update status.");
+    } finally {
+      setAppUpdateChecking(false);
+    }
+  }, [pushErrorMessage]);
 
   const refreshScheduler = React.useCallback(async () => {
     setScheduler(await fetchSchedulerSettings());
@@ -1517,7 +1529,9 @@ export function App() {
         <AppStatusBar
           appMeta={appMeta}
           appUpdate={appUpdate}
+          appUpdateChecking={appUpdateChecking}
           busy={appControlBusy}
+          onCheckForUpdates={() => void handleCheckAppUpdate()}
           onExit={() => void handleExitApp()}
           onOpenData={() => void handleOpenAppTarget("data_dir")}
           onOpenInstall={() => void handleOpenAppTarget("install_dir")}
@@ -1567,6 +1581,7 @@ export function App() {
         activeTab={adminTab}
         appMeta={appMeta}
         appUpdate={appUpdate}
+        appUpdateChecking={appUpdateChecking}
         configFields={settingsConfig}
         configSaving={settingsConfigSaving}
         open={adminOpen}
@@ -1582,6 +1597,7 @@ export function App() {
         onClose={() => setAdminOpen(false)}
         onFeedChange={handleFeedChange}
         onAddFeed={handleAddFeed}
+        onCheckForUpdates={() => void handleCheckAppUpdate()}
         onRemoveFeed={handleRemoveFeed}
         onSaveConfig={handleSaveConfig}
         onSaveProfile={handleSaveProfile}
@@ -1682,7 +1698,9 @@ export function App() {
       <AppStatusBar
         appMeta={appMeta}
         appUpdate={appUpdate}
+        appUpdateChecking={appUpdateChecking}
         busy={appControlBusy}
+        onCheckForUpdates={() => void handleCheckAppUpdate()}
         onExit={() => void handleExitApp()}
         onOpenData={() => void handleOpenAppTarget("data_dir")}
         onOpenInstall={() => void handleOpenAppTarget("install_dir")}

@@ -13,6 +13,7 @@ Current baseline:
 - `feedmedaily-tray` is the Windows app shell
 - the React UI is the primary review and settings surface
 - first-run onboarding now uses split basic/advanced settings plus an editable initial profile review
+- packaged update checks can use a separately hosted `update.json`, while installer downloads still point to GitHub Releases
 
 ## Priority Areas
 
@@ -100,7 +101,7 @@ Planned work:
 
 - fix remaining Zotero collection-tree and folder-hierarchy issues
 - reduce visible runtime startup flashing where possible
-- improve packaged-update guidance and cross-platform follow-up documentation
+- improve packaged-update guidance, including how the hosted `update.json` is published and verified, and continue cross-platform follow-up documentation
 
 Constraints:
 

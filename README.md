@@ -39,7 +39,8 @@ SCIRSS_ZOTERO_COLLECTION_KEY=
 - `SCIRSS_CLASSIFIER_*` 用于论文分类
 - `SCIRSS_PROFILE_*` 用于Profile 生成和 Profile 修订，可以和CLASSIFIER是同一个模型
 - `SCIRSS_ZOTERO_*` 用于 Zotero 保存
-- `FEEDMEDAILY_UPDATE_MANIFEST_URL` 一般不需要手动设置
+- `FEEDMEDAILY_UPDATE_MANIFEST_URL` 一般不需要手动设置；release build 通常通过这个主地址上的 `update.json` 检查新版本，但安装包下载仍指向 GitHub Releases
+- 已安装的 release build 可以在 `Settings -> Update check` 或页面底部状态栏点击 `Check for updates` 手动立即重查更新信息
 
 ### DeepSeek 设置
 

@@ -347,6 +347,46 @@ func TestAppUpdateCachesSuccessfulManifestFetches(t *testing.T) {
 	}
 }
 
+func TestAppUpdateForceBypassesCache(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	settings.UpdateManifestURL = "https://example.com/update.json"
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	currentTime := time.Date(2026, 5, 16, 7, 30, 0, 0, time.UTC)
+	nowFunc = func() time.Time {
+		return currentTime
+	}
+	manifestCalls := 0
+	fetchUpdateManifestFunc = func(string) (map[string]any, error) {
+		manifestCalls++
+		return map[string]any{
+			"version":           "9.9.9",
+			"download_url":      "https://example.com/feedmedaily.exe",
+			"release_notes_url": "https://example.com/release-notes",
+		}, nil
+	}
+	handler := newTestHandler(t, settings)
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
+	if first.Code != http.StatusOK || !contains(first.Body.String(), `"checked_at":"2026-05-16T07:30:00Z"`) {
+		t.Fatalf("first update response = %d %s", first.Code, first.Body.String())
+	}
+
+	currentTime = currentTime.Add(1 * time.Minute)
+
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/api/app/update?force=1", nil))
+	if second.Code != http.StatusOK || !contains(second.Body.String(), `"checked_at":"2026-05-16T07:31:00Z"`) {
+		t.Fatalf("forced update response = %d %s", second.Code, second.Body.String())
+	}
+	if manifestCalls != 2 {
+		t.Fatalf("expected force update to bypass cache, manifestCalls=%d", manifestCalls)
+	}
+}
+
 func TestAppUpdateCachesFailuresBriefly(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)
@@ -391,6 +431,56 @@ func TestAppUpdateCachesFailuresBriefly(t *testing.T) {
 	}
 	if manifestCalls != 2 {
 		t.Fatalf("expected failure cache expiry, manifestCalls=%d", manifestCalls)
+	}
+}
+
+func TestSettingsConfigUpdateRefreshesUpdateManifestURL(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	settings.UpdateManifestURL = "https://example.com/original-update.json"
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	manifestURLs := make([]string, 0, 2)
+	fetchUpdateManifestFunc = func(manifestURL string) (map[string]any, error) {
+		manifestURLs = append(manifestURLs, manifestURL)
+		return map[string]any{
+			"version":           "9.9.9",
+			"download_url":      "https://example.com/feedmedaily.exe",
+			"release_notes_url": "https://example.com/release-notes",
+		}, nil
+	}
+	handler := newTestHandler(t, settings)
+
+	firstUpdate := httptest.NewRecorder()
+	handler.ServeHTTP(firstUpdate, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
+	if firstUpdate.Code != http.StatusOK {
+		t.Fatalf("first update response = %d %s", firstUpdate.Code, firstUpdate.Body.String())
+	}
+
+	configRecorder := httptest.NewRecorder()
+	configBody := `{"fields":{"FEEDMEDAILY_UPDATE_MANIFEST_URL":{"value":"https://mirror.example.com/update.json"}}}`
+	handler.ServeHTTP(configRecorder, httptest.NewRequest(http.MethodPut, "/api/settings/config", strings.NewReader(configBody)))
+	if configRecorder.Code != http.StatusOK || !contains(configRecorder.Body.String(), `"key":"FEEDMEDAILY_UPDATE_MANIFEST_URL"`) {
+		t.Fatalf("settings update response = %d %s", configRecorder.Code, configRecorder.Body.String())
+	}
+
+	metaRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(metaRecorder, httptest.NewRequest(http.MethodGet, "/api/app/meta", nil))
+	if metaRecorder.Code != http.StatusOK || !contains(metaRecorder.Body.String(), `"update_manifest_url":"https://mirror.example.com/update.json"`) {
+		t.Fatalf("meta response = %d %s", metaRecorder.Code, metaRecorder.Body.String())
+	}
+
+	secondUpdate := httptest.NewRecorder()
+	handler.ServeHTTP(secondUpdate, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
+	if secondUpdate.Code != http.StatusOK {
+		t.Fatalf("second update response = %d %s", secondUpdate.Code, secondUpdate.Body.String())
+	}
+	if len(manifestURLs) != 2 {
+		t.Fatalf("expected cache reset after settings change, manifestURLs=%v", manifestURLs)
+	}
+	if manifestURLs[0] != "https://example.com/original-update.json" || manifestURLs[1] != "https://mirror.example.com/update.json" {
+		t.Fatalf("unexpected manifest URLs: %v", manifestURLs)
 	}
 }
 
