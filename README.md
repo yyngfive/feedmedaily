@@ -14,54 +14,24 @@ FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载
 
 - [FeedMeDaily Releases](https://github.com/yyngfive/feedmedaily/releases/latest)
 
-安装完成后启动托盘程序，再从托盘打开 FeedMeDaily。首次使用时，建议先在应用内的 `Settings` / `Config` 页面填写以下参数并保存：
+安装完成后启动托盘程序，再从托盘打开 FeedMeDaily。首次使用需要填写兴趣描述和LLM的apikey，也可以在高级设置中填写Zotero的apikey用于保存文献
 
-```dotenv
-SCIRSS_CLASSIFIER_API_KEY=
-SCIRSS_CLASSIFIER_BASE_URL=https://api.deepseek.com
-SCIRSS_CLASSIFIER_MODEL=deepseek-v4-flash
-SCIRSS_CLASSIFIER_THINKING=disabled
-
-SCIRSS_PROFILE_API_KEY=
-SCIRSS_PROFILE_BASE_URL=https://api.deepseek.com
-SCIRSS_PROFILE_MODEL=deepseek-v4-pro
-SCIRSS_PROFILE_THINKING=enabled
-
-SCIRSS_ZOTERO_API_KEY=
-SCIRSS_ZOTERO_LIBRARY_TYPE=user
-SCIRSS_ZOTERO_LIBRARY_ID=
-SCIRSS_ZOTERO_COLLECTION_KEY=
-```
+在设置的Feed界面可以添加期刊的RSS订阅地址：参见[部分出版社期刊RSS订阅地址汇总](https://github.com/yyngfive/sci-rss-list)
 
 说明：
 
 - 默认推荐使用 DeepSeek，其他 OpenAI-compatible API 目前没有做系统兼容性测试
-- `SCIRSS_CLASSIFIER_*` 用于论文分类
-- `SCIRSS_PROFILE_*` 用于Profile 生成和 Profile 修订，可以和CLASSIFIER是同一个模型
-- `SCIRSS_ZOTERO_*` 用于 Zotero 保存
-- `FEEDMEDAILY_UPDATE_MANIFEST_URL` 一般不需要手动设置；release build 通常通过这个主地址上的 `update.json` 检查新版本，但安装包下载仍指向 GitHub Releases
-- 已安装的 release build 可以在 `Settings -> Update check` 或页面底部状态栏点击 `Check for updates` 手动立即重查更新信息
 
 ### DeepSeek 设置
 
 1. 在 [DeepSeek Platform](https://platform.deepseek.com/) 注册并登录
 2. 在 [API Keys](https://platform.deepseek.com/api_keys) 页面创建 API Key
-3. 将 API Key 填入 `SCIRSS_CLASSIFIER_API_KEY` 和 `SCIRSS_PROFILE_API_KEY`
-4. 保持默认 `BASE_URL` 为 `https://api.deepseek.com` 即可
 
 ### Zotero 设置
 
-最小必填项：
-
-- `SCIRSS_ZOTERO_API_KEY`
-- `SCIRSS_ZOTERO_LIBRARY_TYPE`
-- `SCIRSS_ZOTERO_LIBRARY_ID`
-
-常见用法：
-
-- 个人库：`SCIRSS_ZOTERO_LIBRARY_TYPE=user`，`SCIRSS_ZOTERO_LIBRARY_ID` 填你的 Zotero `userID`
-- 群组库：`SCIRSS_ZOTERO_LIBRARY_TYPE=group`，`SCIRSS_ZOTERO_LIBRARY_ID` 填对应 `groupID`
-- `SCIRSS_ZOTERO_COLLECTION_KEY` 可留空，表示每次保存时在应用内选择 collection
+- 个人库：`ZOTERO_LIBRARY_TYPE=user`，`ZOTERO_LIBRARY_ID` 填写 Zotero `userID`
+- 群组库：`ZOTERO_LIBRARY_TYPE=group`，`ZOTERO_LIBRARY_ID` 填对应 `groupID`
+- `ZOTERO_COLLECTION_KEY` 可留空，表示每次保存时在应用内选择 collection
 
 相关文档：
 
@@ -72,7 +42,7 @@ SCIRSS_ZOTERO_COLLECTION_KEY=
 
 Linux 目前可以直接使用源码模式运行后端和 Web UI，但当前不提供托盘程序。推荐使用仓库里的辅助脚本。
 
-- `feedmedailyd` 可以在 Linux 上直接运行
+- `feedmedailyd` 可能可以在 Linux 上直接运行
 - `feedmedaily-tray` 当前只支持 Windows
 - 对于需要Cloudflare人类验证的 RSS 地址，手动验证功能只支持 Windows，Linux使用会以Warning提示
 
@@ -166,13 +136,3 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 .\tools\build_release.ps1 -SkipInstaller
 ```
 
-## 下一步更新计划
-
-更详细的计划见 [docs/plans/current-roadmap.md](./docs/plans/current-roadmap.md)。当前优先方向是：
-
-- 增强 Profile 后续维护体验，补充 AI 辅助简化与更易审阅的编辑流程
-- 增加内置 feed list 与 RSS discovery 引导，并继续优化抓取兼容性
-- 提供更清晰的 job 进度表达，而不只是状态文字
-- 补齐 review 页的筛选、排序与批量标记已读能力
-- 继续精简设置页和启动文案与布局
-- 修正 Zotero 剩余体验问题，并逐步完善打包与跨平台后续工作
