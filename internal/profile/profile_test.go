@@ -238,3 +238,25 @@ func TestPrepareUpdatedProfilePreservesCreatedAtAndSourceDescription(t *testing.
 		t.Fatalf("deprecated profile fields should be cleared: %#v", updated)
 	}
 }
+
+func TestValidateProposalChangesNormalizesRestoreOperation(t *testing.T) {
+	changes, err := ValidateProposalChanges([]ProposalChange{
+		{
+			ID:                "restore-negative-boundary",
+			Section:           ProposalSectionUnrelatedRule,
+			Operation:         "restore",
+			Summary:           "Restore a negative boundary.",
+			TextAfter:         []string{"Protein probe papers are unrelated without nucleic acid chemistry."},
+			Rationale:         "Validator required the negative boundary to be restored.",
+			SourceFeedbackIDs: []int64{1},
+			SourcePaperIDs:    []int64{10},
+			Status:            ProposalStatusProposed,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0].Operation != ProposalOperationAdd {
+		t.Fatalf("expected restore to normalize to add, got %#v", changes)
+	}
+}

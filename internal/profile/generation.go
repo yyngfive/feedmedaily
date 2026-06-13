@@ -34,6 +34,20 @@ type ProposalDraft struct {
 	SourceFeedbackIDs  []int64
 }
 
+type ProposalValidationResult struct {
+	Accepted       bool     `json:"accepted"`
+	Summary        string   `json:"summary"`
+	BlockingIssues []string `json:"blocking_issues"`
+	RequiredFixes  []string `json:"required_fixes"`
+}
+
+type compactProposalAttempt struct {
+	Summary          string
+	ProposedProfile  map[string]any
+	ProposedDocument profileDocument
+	Changes          []ProposalChange
+}
+
 var requestProfileModelJSONFunc = requestProfileModelJSON
 
 func GenerateInitialProfileProposal(settings config.Settings, interestDescription string, name *string) (ProposalDraft, error) {
@@ -131,6 +145,96 @@ func GenerateProfileProposal(settings config.Settings, current map[string]any, f
 	if err != nil {
 		return ProposalDraft{}, fmt.Errorf("encode feedback proposal context: %w", err)
 	}
+	prompt := profileProposalPrompt(feedbackItems, compactProfileJSON, feedbackPayload, maintenanceMode)
+	content, err := requestProfileModelJSONFunc(
+		settings,
+		"You compact scientific-literature profiles into maintainable change sets.",
+		prompt,
+		4200,
+	)
+	if err != nil {
+		return ProposalDraft{}, err
+	}
+	attempt, err := buildCompactProposalAttempt(current, currentDocument, content)
+	if err != nil {
+		if !shouldRetryProfileParseWithThinkingDisabled(settings, err) {
+			return ProposalDraft{}, err
+		}
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "warning",
+			Component: "profile",
+			Action:    "proposal_parse_fallback_started",
+			Message:   "Retrying profile proposal generation with thinking disabled after invalid JSON.",
+			Error:     err.Error(),
+			Data:      map[string]any{"model": settings.ProfileModel},
+		})
+		fallbackSettings := settings
+		fallbackSettings.ProfileThinking = "disabled"
+		content, err = requestProfileModelJSONFunc(
+			fallbackSettings,
+			"You compact scientific-literature profiles into maintainable change sets.",
+			prompt,
+			4200,
+		)
+		if err != nil {
+			return ProposalDraft{}, err
+		}
+		attempt, err = buildCompactProposalAttempt(current, currentDocument, content)
+		if err != nil {
+			return ProposalDraft{}, fmt.Errorf("parse profile proposal after thinking-disabled retry: %w", err)
+		}
+	}
+	validation, err := validateGeneratedProfileProposal(settings, currentDocument, feedbackItems, attempt)
+	if err != nil {
+		return ProposalDraft{}, err
+	}
+	if !validation.Accepted {
+		attempt, err = repairProfileProposalFromValidation(settings, currentDocument, feedbackItems, attempt, validation)
+		if err != nil {
+			return ProposalDraft{}, err
+		}
+		validation, err = validateGeneratedProfileProposal(settings, currentDocument, feedbackItems, attempt)
+		if err != nil {
+			return ProposalDraft{}, err
+		}
+		if !validation.Accepted {
+			return ProposalDraft{}, fmt.Errorf("profile proposal rejected by validator after repair: %s", validationFailureSummary(validation))
+		}
+	}
+	ruleDeltaMap, err := proposalDeltaToMap(defaultProposalDelta(attempt.Summary))
+	if err != nil {
+		return ProposalDraft{}, err
+	}
+	sourceFeedbackIDs := make([]int64, 0, len(feedbackItems))
+	for _, item := range feedbackItems {
+		sourceFeedbackIDs = append(sourceFeedbackIDs, item.FeedbackID)
+	}
+	draft := ProposalDraft{
+		BaseProfileVersion: currentDocument.Meta.Version,
+		Summary:            attempt.Summary,
+		ProposedProfile:    attempt.ProposedProfile,
+		Changes:            attempt.Changes,
+		RuleDelta:          ruleDeltaMap,
+		Model:              settings.ProfileModel,
+		SourceFeedbackIDs:  sourceFeedbackIDs,
+	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "info",
+		Component: "profile",
+		Action:    "proposal_completed",
+		Message:   "Generated profile proposal.",
+		Data: map[string]any{
+			"feedback_items": len(feedbackItems),
+			"model":          settings.ProfileModel,
+			"summary":        attempt.Summary,
+			"changes":        len(attempt.Changes),
+			"validation":     validation.Summary,
+		},
+	})
+	return draft, nil
+}
+
+func profileProposalPrompt(feedbackItems []FeedbackProposalContext, compactProfileJSON []byte, feedbackPayload []byte, maintenanceMode bool) string {
 	instructionHeader := "Compact and refine the current scientific-literature classification profile using the human feedback below."
 	contextHeading := "Human feedback:"
 	behaviorLine := "- Use the feedback to sharpen boundaries and reduce future mistakes."
@@ -139,7 +243,7 @@ func GenerateProfileProposal(settings config.Settings, current map[string]any, f
 		contextHeading = "Maintenance context:"
 		behaviorLine = "- There is no new feedback in this run. Focus on profile hygiene: merge overlapping rules, remove stale residue, and compress old object-level leftovers into cleaner reason-level rules."
 	}
-	prompt := strings.TrimSpace(fmt.Sprintf(`
+	return strings.TrimSpace(fmt.Sprintf(`
 %s
 
 Requirements:
@@ -147,10 +251,17 @@ Requirements:
 - Return both:
   1. a compact proposed_profile
   2. a structured changes array
+- Every change operation must be exactly one of: add, remove, rewrite, merge.
+- Do not invent operations such as restore, keep, retain, or update; express restored boundaries as add or rewrite changes.
 - First do a coverage check for every feedback item:
   - ask whether the corrected boundary can be captured by rewriting or merging existing rules
   - only add a brand-new rule when no existing rule can be broadened or merged to cover it safely
 - Infer the shared reasons behind the corrected labels before writing rules.
+- Do not optimize for the fewest rules; optimize for decision clarity and stable future classifications.
+- Compress repeated reasoning, not noun lists.
+- Each rule should express one decision reason. Avoid long enumerations of objects, technologies, or assays.
+- If a rule needs examples, keep them short and subordinate to the reason.
+- Do not merge rules when the merged rule becomes a keyword net.
 - Use reason-first abstraction:
   - prefer rules about why a paper is direct, indirect, or unrelated
   - prefer high-level criteria such as where the core innovation sits
@@ -161,6 +272,10 @@ Requirements:
 - If a proposed merge or rewrite already covers a reason-level boundary, do not also add a second rule that expresses the same boundary in different wording.
 - Merge and add changes must not duplicate each other in substance.
 - If new feedback conflicts with an older rule, the new feedback wins. Resolve the conflict explicitly with rewrite/remove instead of keeping both sides.
+- If the feedback batch is mostly indirect -> unrelated, do not broaden indirect rules unless there is explicit unrelated/direct -> indirect feedback requiring it.
+- Potential future applicability, possible usefulness, or "could impact nucleic acid-related technologies" is not enough for indirect relevance.
+- Before deleting or merging an unrelated rule, preserve the negative boundary it carried and state which replacement rule now covers that boundary.
+- If feedback says indirect -> unrelated, prefer tightening indirect or strengthening unrelated; do not respond by making indirect more permissive.
 - When merging, preserve the salient coverage from the old rules. Do not drop boundary-defining content such as nanostructure, nano-assembly, platform, device, or other key qualifiers if they are still needed for future classification.
 - A pure add should be rare and used only when the current profile is missing an entire reason-level boundary.
 - If multiple candidate rules share the same why-indirect or why-unrelated logic, merge them into one broader rule instead of keeping separate object-level rules.
@@ -179,9 +294,16 @@ Requirements:
 - Keep direct/indirect/unrelated as the only relevance labels.
 - Do not modify few_shots.
 - Only touch scope and relevance rules.
+- Scope rewrites are allowed when repeated same-direction feedback shows stable interest drift or feedback notes explicitly describe a changed interest.
+- Scope rewrites must be short decision policies, not broad catalogs or technology lists.
+- A single feedback item without an explicit note should normally change rules, not scope.
+- Mostly indirect -> unrelated feedback supports narrowing around core contribution, not broadening the user's interests.
 %s
 
 Current compact profile context:
+%s
+
+Feedback direction summary:
 %s
 
 %s
@@ -198,6 +320,9 @@ Bad vs good abstraction examples:
 - Good: abstract them into a higher-level boundary when the shared reason is that the recognition element is not the innovation center and the real novelty is in the material, platform, device, delivery system, or assay format rather than nucleic acid chemistry, directed evolution, proximity labeling, or engineering of nucleic acid-acting enzymes.
 - Bad: add multiple direct rules for specific probes, assays, or constructs that all really mean "the nucleic acid chemistry or enzyme-engineering innovation is central".
 - Good: rewrite or merge them into one reason-level direct rule that states the core direct boundary instead of enumerating object families.
+- Bad: say DNA/RNA/aptamer/probe/biosensor/device/platform/nanostructure papers are indirect because they are nucleic-acid-adjacent.
+- Good: if the nucleic acid is only a recognition element, analyte, payload, or readout and the core innovation is a material, device, diagnostic, ML model, peptide/protein probe, or biological mechanism, classify as unrelated.
+- Good: indirect requires close evidence that the work informs nucleic-acid substrate design, nucleic acid chemistry, or engineering of nucleic-acid-acting enzymes.
 
 Return:
 - summary: one short summary of what changed
@@ -213,65 +338,301 @@ Return:
 
 Required JSON shape:
 %s
-`, instructionHeader, behaviorLine, string(compactProfileJSON), contextHeading, string(feedbackPayload), compactProposalContract()))
+`, instructionHeader, behaviorLine, string(compactProfileJSON), feedbackDirectionSummaryJSON(feedbackItems), contextHeading, string(feedbackPayload), compactProposalContract()))
+}
+
+func buildCompactProposalAttempt(current map[string]any, currentDocument profileDocument, content string) (compactProposalAttempt, error) {
+	summary, changes, err := coerceCompactProposal(content)
+	if err != nil {
+		return compactProposalAttempt{}, err
+	}
+	changes = withoutTopicChanges(changes)
+	if len(changes) == 0 {
+		return compactProposalAttempt{}, fmt.Errorf("model generated a profile proposal without any actionable changes")
+	}
+	proposedProfile, err := BuildProposedProfileFromChanges(current, changes)
+	if err != nil {
+		return compactProposalAttempt{}, err
+	}
+	proposedDocument, err := parseDocumentMap(proposedProfile)
+	if err != nil {
+		return compactProposalAttempt{}, err
+	}
+	if reason := destructiveRevisionReason(currentDocument, proposedDocument); reason != "" {
+		return compactProposalAttempt{}, fmt.Errorf("model generated an unsafe profile proposal. %s Current profile was kept unchanged.", reason)
+	}
+	return compactProposalAttempt{
+		Summary:          summary,
+		ProposedProfile:  proposedProfile,
+		ProposedDocument: proposedDocument,
+		Changes:          changes,
+	}, nil
+}
+
+func validateGeneratedProfileProposal(settings config.Settings, currentDocument profileDocument, feedbackItems []FeedbackProposalContext, attempt compactProposalAttempt) (ProposalValidationResult, error) {
+	// 用第二次模型调用审查 proposal，避免压缩时放大已有错分边界。
+	prompt, err := proposalValidationPrompt(currentDocument, feedbackItems, attempt)
+	if err != nil {
+		return ProposalValidationResult{}, err
+	}
 	content, err := requestProfileModelJSONFunc(
 		settings,
-		"You compact scientific-literature profiles into maintainable change sets.",
+		"You audit scientific-literature classification profile proposals for regression risk.",
+		prompt,
+		2200,
+	)
+	if err != nil {
+		return ProposalValidationResult{}, err
+	}
+	result, err := coerceProposalValidationResult(content)
+	if err != nil {
+		if !shouldRetryProfileParseWithThinkingDisabled(settings, err) {
+			return ProposalValidationResult{}, fmt.Errorf("parse profile proposal validation: %w", err)
+		}
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "warning",
+			Component: "profile",
+			Action:    "proposal_validation_parse_fallback_started",
+			Message:   "Retrying proposal validation with thinking disabled after invalid JSON.",
+			Error:     err.Error(),
+			Data:      map[string]any{"model": settings.ProfileModel},
+		})
+		fallbackSettings := settings
+		fallbackSettings.ProfileThinking = "disabled"
+		content, err = requestProfileModelJSONFunc(
+			fallbackSettings,
+			"You audit scientific-literature classification profile proposals for regression risk.",
+			prompt,
+			2200,
+		)
+		if err != nil {
+			return ProposalValidationResult{}, err
+		}
+		result, err = coerceProposalValidationResult(content)
+		if err != nil {
+			return ProposalValidationResult{}, fmt.Errorf("parse profile proposal validation after thinking-disabled retry: %w", err)
+		}
+	}
+	if !result.Accepted {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "warning",
+			Component: "profile",
+			Action:    "proposal_validation_rejected",
+			Message:   validationFailureSummary(result),
+			Data: map[string]any{
+				"summary": result.Summary,
+				"issues":  result.BlockingIssues,
+				"fixes":   result.RequiredFixes,
+			},
+		})
+	}
+	return result, nil
+}
+
+func repairProfileProposalFromValidation(settings config.Settings, currentDocument profileDocument, feedbackItems []FeedbackProposalContext, attempt compactProposalAttempt, validation ProposalValidationResult) (compactProposalAttempt, error) {
+	// 按 validator 指出的阻断问题只重试一次，防止坏 proposal 入库。
+	prompt, err := proposalRepairPrompt(currentDocument, feedbackItems, attempt, validation)
+	if err != nil {
+		return compactProposalAttempt{}, err
+	}
+	content, err := requestProfileModelJSONFunc(
+		settings,
+		"You repair rejected scientific-literature profile proposals by applying validator fixes.",
 		prompt,
 		4200,
 	)
 	if err != nil {
-		return ProposalDraft{}, err
+		return compactProposalAttempt{}, err
 	}
-	summary, changes, err := coerceCompactProposal(content)
+	currentMap, _, err := compactDocumentMap(currentDocument)
 	if err != nil {
-		return ProposalDraft{}, err
+		return compactProposalAttempt{}, err
 	}
-	changes = withoutTopicChanges(changes)
-	if len(changes) == 0 {
-		return ProposalDraft{}, fmt.Errorf("model generated a profile proposal without any actionable changes")
-	}
-	proposedProfile, err := BuildProposedProfileFromChanges(current, changes)
+	repairedAttempt, err := buildCompactProposalAttempt(currentMap, currentDocument, content)
 	if err != nil {
-		return ProposalDraft{}, err
+		if !shouldRetryProfileParseWithThinkingDisabled(settings, err) {
+			return compactProposalAttempt{}, err
+		}
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "warning",
+			Component: "profile",
+			Action:    "proposal_repair_parse_fallback_started",
+			Message:   "Retrying profile proposal repair with thinking disabled after invalid JSON.",
+			Error:     err.Error(),
+			Data:      map[string]any{"model": settings.ProfileModel},
+		})
+		fallbackSettings := settings
+		fallbackSettings.ProfileThinking = "disabled"
+		content, err = requestProfileModelJSONFunc(
+			fallbackSettings,
+			"You repair rejected scientific-literature profile proposals by applying validator fixes.",
+			prompt,
+			4200,
+		)
+		if err != nil {
+			return compactProposalAttempt{}, err
+		}
+		repairedAttempt, err = buildCompactProposalAttempt(currentMap, currentDocument, content)
+		if err != nil {
+			return compactProposalAttempt{}, fmt.Errorf("parse profile proposal repair after thinking-disabled retry: %w", err)
+		}
 	}
-	proposedDocument, err := parseDocumentMap(proposedProfile)
+	return repairedAttempt, nil
+}
+
+func proposalValidationPrompt(currentDocument profileDocument, feedbackItems []FeedbackProposalContext, attempt compactProposalAttempt) (string, error) {
+	currentJSON, err := json.MarshalIndent(profilePromptPayload(currentDocument, false), "", "  ")
 	if err != nil {
-		return ProposalDraft{}, err
+		return "", fmt.Errorf("encode current profile for validation: %w", err)
 	}
-	if reason := destructiveRevisionReason(currentDocument, proposedDocument); reason != "" {
-		return ProposalDraft{}, fmt.Errorf("model generated an unsafe profile proposal. %s Current profile was kept unchanged.", reason)
-	}
-	ruleDeltaMap, err := proposalDeltaToMap(defaultProposalDelta(summary))
+	feedbackJSON, err := json.MarshalIndent(feedbackPromptPayload(feedbackItems), "", "  ")
 	if err != nil {
-		return ProposalDraft{}, err
+		return "", fmt.Errorf("encode feedback for validation: %w", err)
 	}
-	sourceFeedbackIDs := make([]int64, 0, len(feedbackItems))
-	for _, item := range feedbackItems {
-		sourceFeedbackIDs = append(sourceFeedbackIDs, item.FeedbackID)
+	proposedJSON, err := json.MarshalIndent(profilePromptPayload(attempt.ProposedDocument, false), "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode proposed profile for validation: %w", err)
 	}
-	draft := ProposalDraft{
-		BaseProfileVersion: currentDocument.Meta.Version,
-		Summary:            summary,
-		ProposedProfile:    proposedProfile,
-		Changes:            changes,
-		RuleDelta:          ruleDeltaMap,
-		Model:              settings.ProfileModel,
-		SourceFeedbackIDs:  sourceFeedbackIDs,
+	changesJSON, err := json.MarshalIndent(attempt.Changes, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode changes for validation: %w", err)
 	}
-	_, _ = logging.WriteDefault(logging.Event{
-		Level:     "info",
-		Component: "profile",
-		Action:    "proposal_completed",
-		Message:   "Generated profile proposal.",
-		Data: map[string]any{
-			"feedback_items": len(feedbackItems),
-			"model":          settings.ProfileModel,
-			"summary":        summary,
-			"changes":        len(changes),
-		},
-	})
-	return draft, nil
+	return strings.TrimSpace(fmt.Sprintf(`
+Audit the proposed scientific-literature classification profile.
+
+Return valid JSON only.
+
+Accept only if the proposal is likely to reduce the supplied feedback mistakes.
+Reject when any blocking issue is present:
+- The proposed profile makes any source feedback corrected label harder to explain.
+- Indirect and unrelated rules cover the same boundary without a clear priority.
+- The proposal removes high-value negative boundaries for ML/software, protein or peptide probes, DNA repair or RNA biology mechanisms, platform/device/diagnostic papers, or metabolomics/nucleotide-analyte papers.
+- For a mostly indirect -> unrelated feedback batch, the proposal adds or broadens indirect instead of tightening indirect or strengthening unrelated.
+- Potential future applicability, possible usefulness, or "could impact nucleic acid-related technologies" is treated as enough for indirect relevance.
+- The proposal optimizes for fewer rules at the cost of decision clarity.
+- Scope is rewritten as a broad topic catalog, keyword list, or noun list instead of a short decision policy.
+- Scope is expanded from a single ambiguous feedback item without an explicit note indicating changed interests.
+- Clear negative boundaries are replaced by long noun-list rules or a keyword net.
+- V25-style negative boundaries are deleted without equally clear replacement rules.
+
+Current compact profile:
+%s
+
+Feedback direction summary:
+%s
+
+Human feedback:
+%s
+
+Proposed compact profile:
+%s
+
+Proposed changes:
+%s
+
+Required JSON shape:
+%s
+`, string(currentJSON), feedbackDirectionSummaryJSON(feedbackItems), string(feedbackJSON), string(proposedJSON), string(changesJSON), proposalValidationContract())), nil
+}
+
+func proposalRepairPrompt(currentDocument profileDocument, feedbackItems []FeedbackProposalContext, attempt compactProposalAttempt, validation ProposalValidationResult) (string, error) {
+	currentJSON, err := json.MarshalIndent(profilePromptPayload(currentDocument, false), "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode current profile for repair: %w", err)
+	}
+	feedbackJSON, err := json.MarshalIndent(feedbackPromptPayload(feedbackItems), "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode feedback for repair: %w", err)
+	}
+	proposedJSON, err := json.MarshalIndent(profilePromptPayload(attempt.ProposedDocument, false), "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode rejected profile for repair: %w", err)
+	}
+	changesJSON, err := json.MarshalIndent(attempt.Changes, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode rejected changes for repair: %w", err)
+	}
+	validationJSON, err := json.MarshalIndent(validation, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode validation result for repair: %w", err)
+	}
+	return strings.TrimSpace(fmt.Sprintf(`
+Repair the rejected profile proposal by applying every required fix.
+
+Requirements:
+- Return valid JSON only.
+- Return the same compact proposal shape as the original generator.
+- Every change operation must be exactly one of: add, remove, rewrite, merge.
+- Do not invent operations such as restore, keep, retain, or update; express restored boundaries as add or rewrite changes.
+- Preserve the current profile's specific scientific scope.
+- Optimize for decision clarity rather than the fewest rules.
+- Compress repeated reasoning, not noun lists.
+- Rewrite scope only as a short decision policy; do not turn it into a broad technology catalog.
+- If only a single unnoted feedback item supports a scope expansion, keep scope unchanged and repair rules instead.
+- If feedback is mostly indirect -> unrelated, tighten indirect or strengthen unrelated; do not broaden indirect.
+- Keep negative boundaries for ML/software, protein or peptide probes, DNA repair or RNA biology mechanisms, platform/device/diagnostic papers, and metabolomics/nucleotide-analyte papers.
+- Do not rely on potential future applicability as an indirect criterion.
+- Do not replace clear negative boundaries with a keyword net.
+
+Current compact profile:
+%s
+
+Feedback direction summary:
+%s
+
+Human feedback:
+%s
+
+Rejected proposed profile:
+%s
+
+Rejected changes:
+%s
+
+Validator result:
+%s
+
+Required JSON shape:
+%s
+`, string(currentJSON), feedbackDirectionSummaryJSON(feedbackItems), string(feedbackJSON), string(proposedJSON), string(changesJSON), string(validationJSON), compactProposalContract())), nil
+}
+
+func coerceProposalValidationResult(content string) (ProposalValidationResult, error) {
+	data, err := extractJSONObjectBytes(content)
+	if err != nil {
+		return ProposalValidationResult{}, err
+	}
+	var result ProposalValidationResult
+	if err := decodeStrict(data, &result); err != nil {
+		return ProposalValidationResult{}, fmt.Errorf("parse profile proposal validation: %w", err)
+	}
+	result.Summary = normalizeText(result.Summary)
+	result.BlockingIssues = normalizeRuleList(result.BlockingIssues)
+	result.RequiredFixes = normalizeRuleList(result.RequiredFixes)
+	if result.Summary == "" {
+		if result.Accepted {
+			result.Summary = "Proposal accepted."
+		} else {
+			result.Summary = "Proposal rejected."
+		}
+	}
+	if !result.Accepted && len(result.BlockingIssues) == 0 && len(result.RequiredFixes) == 0 {
+		return ProposalValidationResult{}, fmt.Errorf("rejected profile proposal validation must include blocking_issues or required_fixes")
+	}
+	return result, nil
+}
+
+func validationFailureSummary(result ProposalValidationResult) string {
+	parts := []string{}
+	if strings.TrimSpace(result.Summary) != "" {
+		parts = append(parts, result.Summary)
+	}
+	parts = append(parts, result.BlockingIssues...)
+	parts = append(parts, result.RequiredFixes...)
+	if len(parts) == 0 {
+		return "proposal validation rejected the generated profile"
+	}
+	return strings.Join(parts, "; ")
 }
 
 func requestProfileModelJSONBody(settings config.Settings, endpoint string, body []byte) (string, error) {
@@ -408,6 +769,18 @@ func shouldRetryProfileWithoutThinking(err error) bool {
 		strings.Contains(message, "reasoner") ||
 		strings.Contains(message, "504") ||
 		strings.Contains(message, "502")
+}
+
+func shouldRetryProfileParseWithThinkingDisabled(settings config.Settings, err error) bool {
+	if strings.EqualFold(strings.TrimSpace(settings.ProfileThinking), "disabled") {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "invalid classification profile json") ||
+		strings.Contains(message, "could not find a complete json object") ||
+		strings.Contains(message, "parse compact profile proposal") ||
+		strings.Contains(message, "parse profile proposal validation") ||
+		strings.Contains(message, "unexpected end of json input")
 }
 
 func coerceProfileDocument(settings config.Settings, content string) (profileDocument, error) {
@@ -603,6 +976,15 @@ func compactProposalContract() string {
 }`
 }
 
+func proposalValidationContract() string {
+	return `{
+  "accepted": true,
+  "summary": "short validation summary",
+  "blocking_issues": ["issue that must block saving the proposal"],
+  "required_fixes": ["specific change needed before saving"]
+}`
+}
+
 func profileDeltaContract() string {
 	return `{
   "summary": "short summary of what changed based on feedback",
@@ -649,6 +1031,19 @@ func feedbackPromptPayload(items []FeedbackProposalContext) []map[string]any {
 		})
 	}
 	return payload
+}
+
+func feedbackDirectionSummaryJSON(items []FeedbackProposalContext) string {
+	counts := map[string]int{}
+	for _, item := range items {
+		key := strings.TrimSpace(item.OriginalRelevance) + " -> " + strings.TrimSpace(item.CorrectedRelevance)
+		counts[key]++
+	}
+	data, err := json.MarshalIndent(counts, "", "  ")
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
 }
 
 func profilePromptPayload(document profileDocument, includeFewShots bool) map[string]any {

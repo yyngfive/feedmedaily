@@ -156,7 +156,7 @@ func normalizeProposalChanges(changes []ProposalChange) ([]ProposalChange, error
 		next := item
 		next.ID = strings.TrimSpace(next.ID)
 		next.Section = strings.TrimSpace(next.Section)
-		next.Operation = strings.TrimSpace(next.Operation)
+		next.Operation = normalizeProposalOperation(next.Operation)
 		next.Summary = normalizeText(next.Summary)
 		next.Rationale = normalizeText(next.Rationale)
 		if next.Status == "" {
@@ -179,6 +179,15 @@ func normalizeProposalChanges(changes []ProposalChange) ([]ProposalChange, error
 		result = append(result, next)
 	}
 	return result, nil
+}
+
+func normalizeProposalOperation(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "restore":
+		return ProposalOperationAdd
+	default:
+		return strings.TrimSpace(value)
+	}
 }
 
 func (c ProposalChange) validate() error {

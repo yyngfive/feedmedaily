@@ -1,0 +1,114 @@
+[
+  {
+    "journal": "Angew",
+    "url": "https://onlinelibrary.wiley.com/feed/15213773/most-recent"
+  },
+  {
+    "journal": "JACS",
+    "url": "https://pubs.acs.org/action/showFeed?type=axatoc\u0026feed=rss\u0026jc=jacsat"
+  },
+  {
+    "journal": "Nature",
+    "url": "https://www.nature.com/nature.rss"
+  },
+  {
+    "journal": "Science",
+    "url": "https://www.science.org/action/showFeed?type=etoc\u0026feed=rss\u0026jc=science"
+  },
+  {
+    "journal": "Nature Biotechnology",
+    "url": "https://www.nature.com/nbt.rss"
+  },
+  {
+    "journal": "Nature Methods",
+    "url": "https://www.nature.com/nmeth.rss"
+  },
+  {
+    "journal": "Nature Biomedical Engineering",
+    "url": "https://www.nature.com/natbiomedeng.rss"
+  },
+  {
+    "journal": "Nature Chemical Biology",
+    "url": "https://www.nature.com/nchembio.rss"
+  },
+  {
+    "journal": "Nature Chemistry",
+    "url": "https://www.nature.com/nchem.rss"
+  },
+  {
+    "journal": "Nature Catalysis",
+    "url": "https://www.nature.com/natcatal.rss"
+  },
+  {
+    "journal": "Cell",
+    "url": "https://rss.sciencedirect.com/publication/science/00928674"
+  },
+  {
+    "journal": "Accounts of Chemical Research",
+    "url": "https://pubs.acs.org/action/showFeed?type=axatoc\u0026feed=rss\u0026jc=achre4"
+  },
+  {
+    "journal": "ACS Central Science",
+    "url": "https://pubs.acs.org/action/showFeed?type=axatoc\u0026feed=rss\u0026jc=acscii"
+  },
+  {
+    "journal": "ACS Chemical Biology",
+    "url": "https://pubs.acs.org/action/showFeed?type=axatoc\u0026feed=rss\u0026jc=acbcct"
+  },
+  {
+    "journal": "Chemical Reviews",
+    "url": "https://pubs.acs.org/action/showFeed?type=axatoc\u0026feed=rss\u0026jc=chreay"
+  },
+  {
+    "journal": "Nature Communications",
+    "url": "https://www.nature.com/ncomms.rss"
+  },
+  {
+    "journal": "Nature Protocols",
+    "url": "https://www.nature.com/nprot.rss"
+  },
+  {
+    "journal": "Biorxiv-biochemistry",
+    "url": "https://connect.biorxiv.org/biorxiv_xml.php?subject=biochemistry"
+  },
+  {
+    "journal": "Biorxiv-bioengineering",
+    "url": "https://connect.biorxiv.org/biorxiv_xml.php?subject=bioengineering"
+  },
+  {
+    "journal": "Biorxiv-molecular-biology",
+    "url": "https://connect.biorxiv.org/biorxiv_xml.php?subject=molecular_biology"
+  },
+  {
+    "journal": "Biorxiv-synthetic-biology",
+    "url": "https://connect.biorxiv.org/biorxiv_xml.php?subject=synthetic_biology"
+  },
+  {
+    "journal": "Biorxiv-systems-biology",
+    "url": "https://connect.biorxiv.org/biorxiv_xml.php?subject=systems_biology"
+  },
+  {
+    "journal": "Chemrxiv",
+    "url": "https://chemrxiv.org/action/showFeed?type=latest\u0026format=rss"
+  },
+  {
+    "journal": "NAR",
+    "url": "https://academic.oup.com/rss/site_5127/3091.xml"
+  },
+  {
+    "journal": "Science Advances",
+    "url": "https://www.science.org/action/showFeed?type=etoc\u0026feed=rss\u0026jc=sciadv"
+  },
+  {
+    "journal": "PNAS",
+    "url": "https://www.pnas.org/action/showfeed?type=searchTopic\u0026taxonomyCode=topic\u0026tagCode=bio-sci"
+  },
+  {
+    "journal": "STAR Protocols",
+    "url": "https://www.cell.com/star-protocols/current.rss"
+  },
+  {
+    "journal": "ACS Synthetic Biology",
+    "url": "https://pubs.acs.org/action/showFeed?type=axatoc\u0026feed=rss\u0026jc=asbcd6"
+  }
+]

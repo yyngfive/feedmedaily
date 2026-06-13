@@ -143,6 +143,9 @@ func TestGenerateProfileProposalPromptIncludesConflictAwareCompactionGuidance(t 
 	root := t.TempDir()
 	settings := profileJobSettings(root)
 	prompts := []string{}
+	responseIndex := 0
+	proposalResponse := `{"choices":[{"message":{"content":"{\"summary\":\"Tighten overlap\",\"proposed_profile\":{\"meta\":{\"name\":\"Current\",\"version\":2,\"created_at\":\"2026-05-10T00:00:00Z\",\"updated_at\":\"2026-05-10T00:00:00Z\",\"source_description\":\"current\"},\"scope\":\"RNA biology\",\"relevance_rules\":{\"direct\":[\"RNA chemistry\"],\"indirect\":[],\"unrelated\":[]},\"topic_taxonomy\":[{\"id\":\"rna_bio\",\"label\":\"RNA Bio\"}],\"few_shots\":[]},\"changes\":[{\"id\":\"change-1\",\"section\":\"direct_rule\",\"operation\":\"rewrite\",\"summary\":\"Promote chemistry-first RNA work.\",\"text_before\":[\"RNA\"],\"text_after\":[\"RNA chemistry\"],\"topic_before\":[],\"topic_after\":[],\"rationale\":\"The feedback shows chemistry-first RNA papers should be direct.\",\"source_feedback_ids\":[1],\"source_paper_ids\":[1],\"status\":\"proposed\"}]}"}}]}`
+	validationResponse := `{"choices":[{"message":{"content":"{\"accepted\":true,\"summary\":\"Accepted by test validator.\",\"blocking_issues\":[],\"required_fixes\":[]}"}}]}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		var payload map[string]any
@@ -152,7 +155,12 @@ func TestGenerateProfileProposalPromptIncludesConflictAwareCompactionGuidance(t 
 		messages := payload["messages"].([]any)
 		prompts = append(prompts, messages[1].(map[string]any)["content"].(string))
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"summary\":\"Tighten overlap\",\"proposed_profile\":{\"meta\":{\"name\":\"Current\",\"version\":2,\"created_at\":\"2026-05-10T00:00:00Z\",\"updated_at\":\"2026-05-10T00:00:00Z\",\"source_description\":\"current\"},\"scope\":\"RNA biology\",\"relevance_rules\":{\"direct\":[\"RNA chemistry\"],\"indirect\":[],\"unrelated\":[]},\"topic_taxonomy\":[{\"id\":\"rna_bio\",\"label\":\"RNA Bio\"}],\"few_shots\":[]},\"changes\":[{\"id\":\"change-1\",\"section\":\"direct_rule\",\"operation\":\"rewrite\",\"summary\":\"Promote chemistry-first RNA work.\",\"text_before\":[\"RNA\"],\"text_after\":[\"RNA chemistry\"],\"topic_before\":[],\"topic_after\":[],\"rationale\":\"The feedback shows chemistry-first RNA papers should be direct.\",\"source_feedback_ids\":[1],\"source_paper_ids\":[1],\"status\":\"proposed\"}]}"}}]}`))
+		if responseIndex == 0 {
+			_, _ = w.Write([]byte(proposalResponse))
+		} else {
+			_, _ = w.Write([]byte(validationResponse))
+		}
+		responseIndex++
 	}))
 	defer server.Close()
 	settings.ProfileBaseURL = server.URL
@@ -194,8 +202,8 @@ func TestGenerateProfileProposalPromptIncludesConflictAwareCompactionGuidance(t 
 	if _, err := GenerateProfileProposal(settings, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(prompts) != 1 {
-		t.Fatalf("expected 1 proposal prompt, got %d", len(prompts))
+	if len(prompts) != 2 {
+		t.Fatalf("expected proposal and validator prompts, got %d", len(prompts))
 	}
 	prompt := prompts[0]
 	for _, fragment := range []string{
@@ -214,6 +222,9 @@ func TestGenerateProfileProposalAllowsMaintenanceModeWithoutFeedback(t *testing.
 	root := t.TempDir()
 	settings := profileJobSettings(root)
 	prompts := []string{}
+	responseIndex := 0
+	proposalResponse := `{"choices":[{"message":{"content":"{\"summary\":\"Clean up unrelated rules\",\"proposed_profile\":{\"meta\":{\"name\":\"Current\",\"version\":2,\"created_at\":\"2026-05-10T00:00:00Z\",\"updated_at\":\"2026-05-10T00:00:00Z\",\"source_description\":\"current\"},\"scope\":\"RNA biology\",\"relevance_rules\":{\"direct\":[\"RNA\"],\"indirect\":[],\"unrelated\":[\"General biology without nucleic acid chemistry.\"]},\"topic_taxonomy\":[],\"few_shots\":[]},\"changes\":[{\"id\":\"change-1\",\"section\":\"unrelated_rule\",\"operation\":\"merge\",\"summary\":\"Merge old unrelated residue.\",\"text_before\":[\"Cell biology without nucleic acid chemistry.\",\"Immunology without nucleic acid chemistry.\"],\"text_after\":[\"General biology without nucleic acid chemistry.\"],\"topic_before\":[],\"topic_after\":[],\"rationale\":\"This maintenance pass merges overlapping unrelated rules.\",\"source_feedback_ids\":[],\"source_paper_ids\":[],\"status\":\"proposed\"}]}"}}]}`
+	validationResponse := `{"choices":[{"message":{"content":"{\"accepted\":true,\"summary\":\"Accepted by test validator.\",\"blocking_issues\":[],\"required_fixes\":[]}"}}]}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		var payload map[string]any
@@ -223,7 +234,12 @@ func TestGenerateProfileProposalAllowsMaintenanceModeWithoutFeedback(t *testing.
 		messages := payload["messages"].([]any)
 		prompts = append(prompts, messages[1].(map[string]any)["content"].(string))
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"summary\":\"Clean up unrelated rules\",\"proposed_profile\":{\"meta\":{\"name\":\"Current\",\"version\":2,\"created_at\":\"2026-05-10T00:00:00Z\",\"updated_at\":\"2026-05-10T00:00:00Z\",\"source_description\":\"current\"},\"scope\":\"RNA biology\",\"relevance_rules\":{\"direct\":[\"RNA\"],\"indirect\":[],\"unrelated\":[\"General biology without nucleic acid chemistry.\"]},\"topic_taxonomy\":[],\"few_shots\":[]},\"changes\":[{\"id\":\"change-1\",\"section\":\"unrelated_rule\",\"operation\":\"merge\",\"summary\":\"Merge old unrelated residue.\",\"text_before\":[\"Cell biology without nucleic acid chemistry.\",\"Immunology without nucleic acid chemistry.\"],\"text_after\":[\"General biology without nucleic acid chemistry.\"],\"topic_before\":[],\"topic_after\":[],\"rationale\":\"This maintenance pass merges overlapping unrelated rules.\",\"source_feedback_ids\":[],\"source_paper_ids\":[],\"status\":\"proposed\"}]}"}}]}`))
+		if responseIndex == 0 {
+			_, _ = w.Write([]byte(proposalResponse))
+		} else {
+			_, _ = w.Write([]byte(validationResponse))
+		}
+		responseIndex++
 	}))
 	defer server.Close()
 	settings.ProfileBaseURL = server.URL
@@ -236,8 +252,8 @@ func TestGenerateProfileProposalAllowsMaintenanceModeWithoutFeedback(t *testing.
 	if result["proposal_id"] != int64(1) && result["proposal_id"] != 1 {
 		t.Fatalf("unexpected maintenance proposal result: %#v", result)
 	}
-	if len(prompts) != 1 {
-		t.Fatalf("expected 1 maintenance prompt, got %d", len(prompts))
+	if len(prompts) != 2 {
+		t.Fatalf("expected maintenance and validator prompts, got %d", len(prompts))
 	}
 	if !strings.Contains(prompts[0], "maintenance mode because no new human feedback is available") {
 		t.Fatalf("expected maintenance mode prompt, got %s", prompts[0])
@@ -279,8 +295,9 @@ func profileJobSettings(root string) config.Settings {
 	}
 }
 
-func profileModelTestServer(t *testing.T, content string) *httptest.Server {
+func profileModelTestServer(t *testing.T, contents ...string) *httptest.Server {
 	t.Helper()
+	index := 0
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		var payload map[string]any
@@ -288,6 +305,11 @@ func profileModelTestServer(t *testing.T, content string) *httptest.Server {
 			t.Fatal(err)
 		}
 		_ = payload
+		content := `{"accepted":true,"summary":"Accepted by test validator.","blocking_issues":[],"required_fixes":[]}`
+		if index < len(contents) {
+			content = contents[index]
+		}
+		index++
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":` + quoteJSONString(content) + `}}]}`))
 	}))
