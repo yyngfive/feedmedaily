@@ -28,6 +28,28 @@ func detectFeedFormat(body []byte) (string, string, error) {
 	return "", rootName, nil
 }
 
+func ValidateFeedXML(sourceURL string, body []byte) ([]byte, error) {
+	normalized := normalizeFeedBody(body)
+	format, rootName, err := detectFeedFormat(normalized)
+	if err != nil {
+		return nil, err
+	}
+	if format == "" {
+		if strings.TrimSpace(rootName) == "" {
+			return nil, fmt.Errorf("Feed XML could not be parsed.")
+		}
+		return nil, fmt.Errorf("Feed XML must be RSS, Atom, or RDF. Got root %q.", rootName)
+	}
+	papers, err := parseFeedBody(sourceURL, 0, normalized)
+	if err != nil {
+		return nil, err
+	}
+	if len(papers) == 0 {
+		return nil, fmt.Errorf("Feed XML did not contain any supported items or entries.")
+	}
+	return normalized, nil
+}
+
 func parseRSS(doc rssDoc, sourceURL string) []store.Paper {
 	items := doc.Channel.Items
 	if len(items) == 0 {

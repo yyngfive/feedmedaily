@@ -1235,19 +1235,24 @@ func TestAdminRunWaitsForCloudflareVerificationAndResumes(t *testing.T) {
 	}
 }
 
-func TestAdminRunContinuesWithWarningWhenVerificationRetryFails(t *testing.T) {
+func TestAdminRunCanFallbackToBrowserManualXMLAfterVerifierAbort(t *testing.T) {
 	root := t.TempDir()
 	restore := stubAPIGlobals(t)
 	defer restore()
 
+	opened := ""
+	openExternalTargetFunc = func(target string) error {
+		opened = target
+		return nil
+	}
 	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
-		if got := opts.SkippedFeeds["https://www.cell.com/cell/current.rss"]; contains(got, "Cloudflare challenge was not completed before the window closed.") {
+		if string(opts.FeedBodyOverrides["https://www.cell.com/cell/current.rss"]) == "<rss><channel><title>Cell</title><item><title>Paper</title><link>https://example.com/paper</link></item></channel></rss>" {
 			return jobruntime.RunSummary{
-				Fetched:    0,
-				Inserted:   0,
+				Fetched:    1,
+				Inserted:   1,
 				Updated:    0,
-				Classified: 0,
-				Errors:     []string{"https://www.cell.com/cell/current.rss skipped: " + got},
+				Classified: 1,
+				Errors:     nil,
 			}, nil
 		}
 		if len(opts.FeedBodyOverrides) == 0 {
@@ -1260,7 +1265,7 @@ func TestAdminRunContinuesWithWarningWhenVerificationRetryFails(t *testing.T) {
 				}},
 			}
 		}
-		t.Fatalf("did not expect resumed run with feed overrides after verification warning")
+		t.Fatalf("unexpected resumed run: %#v", opts.FeedBodyOverrides)
 		return jobruntime.RunSummary{}, nil
 	}
 
@@ -1304,17 +1309,34 @@ func TestAdminRunContinuesWithWarningWhenVerificationRetryFails(t *testing.T) {
 	if callbackRecorder.Code != http.StatusOK {
 		t.Fatalf("verification callback = %d %s", callbackRecorder.Code, callbackRecorder.Body.String())
 	}
+
+	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
+	waitingJob, ok := jobByID(runPayload.Job.ID)
+	if !ok || waitingJob.VerificationMethod != verificationMethodWebview {
+		t.Fatalf("expected waiting job after verifier abort: %#v", waitingJob)
+	}
+
+	browserRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(browserRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/browser", strings.NewReader(startBody)))
+	if browserRecorder.Code != http.StatusOK {
+		t.Fatalf("verification browser = %d %s", browserRecorder.Code, browserRecorder.Body.String())
+	}
+	if opened != "https://www.cell.com/cell/current.rss" {
+		t.Fatalf("unexpected opened target: %q", opened)
+	}
+	waitingJob, ok = jobByID(runPayload.Job.ID)
+	if !ok || waitingJob.VerificationMethod != verificationMethodBrowserManual {
+		t.Fatalf("expected browser fallback waiting job: %#v", waitingJob)
+	}
+
+	manualBody := `{"job_id":"` + runPayload.Job.ID + `","feed_url":"https://www.cell.com/cell/current.rss","feed_xml":"<rss><channel><title>Cell</title><item><title>Paper</title><link>https://example.com/paper</link></item></channel></rss>"}`
+	manualRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(manualRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/manual-submit", strings.NewReader(manualBody)))
+	if manualRecorder.Code != http.StatusOK {
+		t.Fatalf("verification manual submit = %d %s", manualRecorder.Code, manualRecorder.Body.String())
+	}
+
 	waitForJobCompletion(t, runPayload.Job.ID)
-	completedJob, ok := jobByID(runPayload.Job.ID)
-	if !ok {
-		t.Fatalf("job not found")
-	}
-	if completedJob.Status != "completed" {
-		t.Fatalf("unexpected job status: %#v", completedJob)
-	}
-	if completedJob.WarningCount == 0 {
-		t.Fatalf("expected warning count on completed job: %#v", completedJob)
-	}
 }
 
 func TestVerificationCompleteRequiresCallbackXML(t *testing.T) {
@@ -1372,6 +1394,169 @@ func TestVerificationCompleteRequiresCallbackXML(t *testing.T) {
 		t.Fatalf("unexpected verification complete error: %s", completeRecorder.Body.String())
 	}
 	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
+}
+
+func TestVerificationManualSubmitRejectsEmptyXML(t *testing.T) {
+	root := t.TempDir()
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		if len(opts.FeedBodyOverrides) == 0 {
+			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
+				Requests: []feeds.VerificationRequest{{
+					URL:     "https://www.cell.com/cell/current.rss",
+					Target:  "cloudflare",
+					Reason:  "challenge",
+					Journal: "Cell",
+				}},
+			}
+		}
+		t.Fatalf("did not expect resumed run")
+		return jobruntime.RunSummary{}, nil
+	}
+	startVerificationFlowFunc = func(_ config.Settings, _ *pendingVerification) error {
+		return nil
+	}
+
+	handler := newTestHandler(t, testSettings(root))
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run launch = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	var runPayload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(runRecorder.Body.Bytes(), &runPayload); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
+
+	manualBody := `{"job_id":"` + runPayload.Job.ID + `","feed_url":"https://www.cell.com/cell/current.rss","feed_xml":"   "}`
+	manualRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(manualRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/manual-submit", strings.NewReader(manualBody)))
+	if manualRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("verification manual submit = %d %s", manualRecorder.Code, manualRecorder.Body.String())
+	}
+	if !contains(manualRecorder.Body.String(), "Feed XML is required.") {
+		t.Fatalf("unexpected manual submit error: %s", manualRecorder.Body.String())
+	}
+	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
+}
+
+func TestVerificationManualSubmitRejectsMalformedXML(t *testing.T) {
+	root := t.TempDir()
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		if len(opts.FeedBodyOverrides) == 0 {
+			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
+				Requests: []feeds.VerificationRequest{{
+					URL:     "https://www.cell.com/cell/current.rss",
+					Target:  "cloudflare",
+					Reason:  "challenge",
+					Journal: "Cell",
+				}},
+			}
+		}
+		t.Fatalf("did not expect resumed run")
+		return jobruntime.RunSummary{}, nil
+	}
+	startVerificationFlowFunc = func(_ config.Settings, _ *pendingVerification) error {
+		return nil
+	}
+
+	handler := newTestHandler(t, testSettings(root))
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run launch = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	var runPayload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(runRecorder.Body.Bytes(), &runPayload); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
+
+	manualBody := `{"job_id":"` + runPayload.Job.ID + `","feed_url":"https://www.cell.com/cell/current.rss","feed_xml":"<html><body>challenge</body></html>"}`
+	manualRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(manualRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/manual-submit", strings.NewReader(manualBody)))
+	if manualRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("verification manual submit = %d %s", manualRecorder.Code, manualRecorder.Body.String())
+	}
+	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
+}
+
+func TestVerificationManualSubmitRejectsWrongFeedURL(t *testing.T) {
+	root := t.TempDir()
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		if len(opts.FeedBodyOverrides) == 0 {
+			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
+				Requests: []feeds.VerificationRequest{{
+					URL:     "https://www.cell.com/cell/current.rss",
+					Target:  "cloudflare",
+					Reason:  "challenge",
+					Journal: "Cell",
+				}},
+			}
+		}
+		t.Fatalf("did not expect resumed run")
+		return jobruntime.RunSummary{}, nil
+	}
+	startVerificationFlowFunc = func(_ config.Settings, _ *pendingVerification) error {
+		return nil
+	}
+
+	handler := newTestHandler(t, testSettings(root))
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run launch = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	var runPayload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(runRecorder.Body.Bytes(), &runPayload); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
+
+	manualBody := `{"job_id":"` + runPayload.Job.ID + `","feed_url":"https://wrong.example/rss","feed_xml":"<rss><channel><title>Cell</title><item><title>Paper</title><link>https://example.com/paper</link></item></channel></rss>"}`
+	manualRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(manualRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/manual-submit", strings.NewReader(manualBody)))
+	if manualRecorder.Code != http.StatusNotFound {
+		t.Fatalf("verification manual submit = %d %s", manualRecorder.Code, manualRecorder.Body.String())
+	}
+}
+
+func TestVerificationManualSubmitRejectsWhenJobNotWaiting(t *testing.T) {
+	root := t.TempDir()
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	handler := newTestHandler(t, testSettings(root))
+	storeJob(jobInfo{
+		ID:        "job-ready",
+		JobType:   "sync",
+		Status:    "completed",
+		CreatedAt: time.Now().UTC(),
+	})
+	manualBody := `{"job_id":"job-ready","feed_url":"https://www.cell.com/cell/current.rss","feed_xml":"<rss><channel><title>Cell</title><item><title>Paper</title><link>https://example.com/paper</link></item></channel></rss>"}`
+	manualRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(manualRecorder, httptest.NewRequest(http.MethodPost, "/api/feeds/verification/manual-submit", strings.NewReader(manualBody)))
+	if manualRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("verification manual submit = %d %s", manualRecorder.Code, manualRecorder.Body.String())
+	}
+	if !contains(manualRecorder.Body.String(), "Job is not waiting for manual verification.") {
+		t.Fatalf("unexpected manual submit error: %s", manualRecorder.Body.String())
+	}
 }
 
 func waitForJobCompletion(t *testing.T, jobID string) {

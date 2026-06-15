@@ -482,15 +482,22 @@ func OpenExternalTarget(target string) error {
 
 func openWithShell(target string) error {
 	// 按平台调用系统壳层命令打开链接或路径。
-	switch goruntime.GOOS {
-	case "windows":
-		cmd := exec.Command("cmd", "/c", "start", "", target)
+	cmd := openWithShellCommand(goruntime.GOOS, target)
+	if goruntime.GOOS == "windows" {
 		cmd.SysProcAttr = hiddenBuildSysProcAttr()
-		return cmd.Start()
+	}
+	return cmd.Start()
+}
+
+func openWithShellCommand(goos string, target string) *exec.Cmd {
+	switch goos {
+	case "windows":
+		// 避免 cmd /c start 把 URL 里的 & 解释成命令分隔符，导致查询参数被截断。
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
 	case "darwin":
-		return exec.Command("open", target).Start()
+		return exec.Command("open", target)
 	default:
-		return exec.Command("xdg-open", target).Start()
+		return exec.Command("xdg-open", target)
 	}
 }
 

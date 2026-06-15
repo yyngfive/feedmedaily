@@ -20,6 +20,7 @@ type pendingVerification struct {
 	Journal          string
 	Target           string
 	Reason           string
+	Method           string
 	CallbackURL      string
 	Result           chan verificationResult
 	Delivered        bool
@@ -44,6 +45,11 @@ var (
 	apiVerifications             = verificationRegistry{items: map[string]*pendingVerification{}}
 	startVerificationFlowFunc    = startVerificationFlow
 	completeVerificationFlowFunc = completeVerificationFlow
+)
+
+const (
+	verificationMethodWebview       = "webview"
+	verificationMethodBrowserManual = "browser_manual"
 )
 
 func launchVerificationAwareSyncJob(settings config.Settings, run func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error)) jobInfo {
@@ -108,11 +114,13 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 						"verification_target":   pending.Target,
 						"verification_feed_url": pending.FeedURL,
 						"verification_journal":  pending.Journal,
+						"verification_method":   pending.Method,
 					}
 					current.VerificationRequired = true
 					current.VerificationTarget = pending.Target
 					current.VerificationFeedURL = pending.FeedURL
 					current.VerificationJournal = pending.Journal
+					current.VerificationMethod = pending.Method
 				})
 			},
 			OnVerificationStartFailed: func(pending *pendingVerification, err error) {
@@ -130,6 +138,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					current.VerificationTarget = ""
 					current.VerificationFeedURL = ""
 					current.VerificationJournal = ""
+					current.VerificationMethod = ""
 				})
 			},
 			OnVerificationStarted: func(pending *pendingVerification) {
@@ -154,6 +163,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					current.VerificationTarget = ""
 					current.VerificationFeedURL = ""
 					current.VerificationJournal = ""
+					current.VerificationMethod = ""
 				})
 			},
 			OnVerificationResumed: func(_ *pendingVerification) {
@@ -167,6 +177,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					current.VerificationTarget = ""
 					current.VerificationFeedURL = ""
 					current.VerificationJournal = ""
+					current.VerificationMethod = ""
 				})
 			},
 		})
@@ -186,6 +197,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 				current.VerificationTarget = ""
 				current.VerificationFeedURL = ""
 				current.VerificationJournal = ""
+				current.VerificationMethod = ""
 			})
 			return
 		}
@@ -201,6 +213,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 			current.VerificationTarget = ""
 			current.VerificationFeedURL = ""
 			current.VerificationJournal = ""
+			current.VerificationMethod = ""
 		})
 		return
 	}()
@@ -220,6 +233,7 @@ func storePendingVerificationWithCallback(jobID string, request feeds.Verificati
 		Journal:     request.Journal,
 		Target:      request.Target,
 		Reason:      request.Reason,
+		Method:      verificationMethodWebview,
 		CallbackURL: strings.TrimSpace(callbackURL),
 		Result:      make(chan verificationResult, 1),
 	}
@@ -272,9 +286,7 @@ func startVerificationFlow(settings config.Settings, pending *pendingVerificatio
 	if verificationTargetForFeedURL(pending.FeedURL) != "cloudflare" {
 		return fmt.Errorf("unsupported verification target")
 	}
-	pending.Delivered = false
-	pending.CallbackReceived = false
-	pending.CallbackResult = verificationResult{}
+	resetPendingVerificationAttempt(pending, verificationMethodWebview)
 	return startVerificationWindowFlow(settings, pending)
 }
 
@@ -313,6 +325,20 @@ func verificationTargetForFeedURL(feedURL string) string {
 		return "cloudflare"
 	default:
 		return ""
+	}
+}
+
+func resetPendingVerificationAttempt(pending *pendingVerification, method string) {
+	if pending == nil {
+		return
+	}
+	apiVerifications.mu.Lock()
+	defer apiVerifications.mu.Unlock()
+	pending.Delivered = false
+	pending.CallbackReceived = false
+	pending.CallbackResult = verificationResult{}
+	if strings.TrimSpace(method) != "" {
+		pending.Method = strings.TrimSpace(method)
 	}
 }
 

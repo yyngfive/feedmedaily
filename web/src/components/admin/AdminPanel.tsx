@@ -46,6 +46,8 @@ export function AdminPanel({
   onFeedChange,
   onGenerateProposal,
   onStartVerification,
+  onOpenVerificationInBrowser,
+  onSubmitVerificationXML,
   onReclassifyAll,
   onReclassifyFeedback,
   onReclassifyRecent,
@@ -65,6 +67,8 @@ export function AdminPanel({
   proposals,
   scheduler,
   schedulerSaving,
+  verificationSubmitting,
+  verificationSubmitError,
 }: {
   activeTab: AdminTab;
   appMeta: AppMeta | null;
@@ -88,6 +92,8 @@ export function AdminPanel({
   onFeedChange: (index: number, field: "journal" | "url", value: string) => void;
   onGenerateProposal: () => void;
   onStartVerification: (job: JobInfo) => void;
+  onOpenVerificationInBrowser: (job: JobInfo) => void;
+  onSubmitVerificationXML: (job: JobInfo, xml: string) => Promise<void> | void;
   onReclassifyAll: () => void;
   onReclassifyFeedback: () => void;
   onReclassifyRecent: () => void;
@@ -107,6 +113,8 @@ export function AdminPanel({
   proposals: ProfileProposal[];
   scheduler: SchedulerSettings | null;
   schedulerSaving: boolean;
+  verificationSubmitting: boolean;
+  verificationSubmitError: string | null;
 }) {
   if (!open) {
     return null;
@@ -120,6 +128,7 @@ export function AdminPanel({
         job.verification_required,
     ) ?? null;
   const [schedulerTime, setSchedulerTime] = React.useState("10:00");
+  const [verificationXML, setVerificationXML] = React.useState("");
   const schedulerAdvisory = scheduler?.advisory?.trim() ?? "";
   const showSchedulerAdvisory = schedulerAdvisory.length > 0;
   const lastCheckedLabel =
@@ -130,6 +139,10 @@ export function AdminPanel({
   React.useEffect(() => {
     setSchedulerTime(scheduler?.scheduled_time ?? "10:00");
   }, [scheduler?.scheduled_time]);
+
+  React.useEffect(() => {
+    setVerificationXML("");
+  }, [verificationJob?.id]);
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/20">
@@ -200,17 +213,62 @@ export function AdminPanel({
                     {(verificationJob.verification_journal?.trim() || "This feed")} needs manual verification
                   </p>
                   <p className="mt-1 leading-6">
-                    A verification window should already be open. Finish the Cloudflare check there and wait for the feed XML to appear. This sync will resume automatically once the XML is captured. If you close the window first, this run will continue without that feed and record a warning.
+                    The in-app verifier can still capture feeds that automatically drop to XML after the challenge page. If Cloudflare keeps looping or never reaches XML, open the feed in your browser, finish the check there, and paste the final RSS/XML here.
+                  </p>
+                  <p className="mt-1 leading-6 text-amber-900/80">
+                    If the browser shows a rendered feed page instead of raw XML, use the page source and paste the original
+                    <code className="mx-1">&lt;rss&gt;</code>
+                    <code className="mr-1">&lt;feed&gt;</code>
+                    or
+                    <code className="ml-1">&lt;rdf:RDF&gt;</code>
+                    markup rather than copied page text.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button size="sm" variant="secondary" onPress={() => onStartVerification(verificationJob)}>
                       Reopen Verification Window
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onPress={() => onOpenVerificationInBrowser(verificationJob)}
+                    >
+                      Open in Browser
                     </Button>
                     {verificationJob.verification_feed_url ? (
                       <code className="self-center break-all text-xs text-amber-900/80">
                         {verificationJob.verification_feed_url}
                       </code>
                     ) : null}
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-amber-900/80">
+                      Paste final RSS/XML
+                    </label>
+                    <textarea
+                      className="min-h-40 w-full rounded-lg border border-amber-300/70 bg-white px-3 py-2 font-mono text-xs leading-5 text-amber-950 outline-none transition focus:border-amber-500"
+                      placeholder="Paste the raw RSS, Atom, or RDF XML source here, not the rendered page text."
+                      value={verificationXML}
+                      onChange={(event) => setVerificationXML(event.target.value)}
+                    />
+                    {verificationSubmitError ? (
+                      <p className="text-sm leading-6 text-rose-700">{verificationSubmitError}</p>
+                    ) : (
+                      <p className="text-xs leading-5 text-amber-900/80">
+                        The sync stays paused until valid XML is submitted or the job times out.
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        isDisabled={verificationSubmitting || !verificationXML.trim()}
+                        size="sm"
+                        onPress={() => void onSubmitVerificationXML(verificationJob, verificationXML)}
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          {verificationSubmitting ? <Spinner color="current" size="sm" /> : null}
+                          Submit XML
+                        </span>
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ) : null}

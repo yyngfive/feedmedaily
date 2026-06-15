@@ -55,6 +55,8 @@ const catalog = {
   "job.started": {text: "Job started.", tone: "info"},
   "job.reclassify.started": {text: "Reclassification job started.", tone: "info"},
   "job.verification.started": {text: "Opened the feed verification window.", tone: "info"},
+  "job.verification.browser.started": {text: "Opened the protected feed in your browser.", tone: "info"},
+  "job.verification.manual.accepted": {text: "Submitted protected feed XML.", tone: "info"},
   "job.verification.completed": {text: "Trying the captured feed XML again.", tone: "info"},
   "job.completed": {text: "Completed.", tone: "success"},
   "job.failed": {text: "Job failed.", tone: "danger"},

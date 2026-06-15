@@ -59,16 +59,19 @@ The API service reuses long-lived SQLite stores across requests instead of reope
 
 ### Protected-feed verification
 
-Cloudflare-protected or challenge-gated feeds use a Windows-only verification assist flow:
+Cloudflare-protected or challenge-gated feeds use a Windows-first verification assist flow:
 
 - a fetch job can move to `waiting_for_user` when the backend detects a challenge page or a Cloudflare-style `403`
-- the UI opens `feedmedaily-verifier`, a dedicated verifier window with its own temporary WebView2 session
+- the UI first opens `feedmedaily-verifier`, a dedicated verifier window with its own temporary WebView2 session
 - once the protected page resolves to RSS/Atom/RDF content, the verifier POSTs the captured XML back to `/api/feeds/verification/callback`
 - the backend resumes the paused job by injecting that XML into the normal Go feed parser
+- if the verifier exits without captured XML, the job stays in `waiting_for_user` and the admin panel can switch that same verification into a system-browser fallback via `/api/feeds/verification/browser`
+- browser fallback does not try to reuse browser cookies automatically; instead the user completes the challenge in their normal browser, copies the final raw RSS/Atom/RDF source, and submits it to `/api/feeds/verification/manual-submit`
+- successful manual submissions are validated through the same feed parser path as normal fetches before the paused sync resumes
 
 This verifier session is intentionally temporary and non-persistent. Its WebView2 user-data directory is scoped to the current verification step and removed on exit.
 
-Current limitation: publisher challenges that depend on a previously trusted browser profile, such as ACS RSS feeds returning a Cloudflare human-verification loop, may pass in the user's normal browser but fail to resolve inside the temporary WebView2 session. The next verifier design should use an app-owned persistent WebView2 profile for protected-feed verification so successful challenges can leave cookies and device trust for later runs, while still keeping those browser artifacts out of Git and user-facing config exports. A system-browser or manual XML import fallback should remain available for publishers that refuse embedded WebView verification.
+Current limitation: publisher challenges that depend on a previously trusted browser profile, such as ACS RSS feeds returning a Cloudflare human-verification loop, may pass in the user's normal browser but still fail to resolve inside the temporary WebView2 session. The current product answer is the manual browser/XML fallback above. A future verifier design may still add an app-owned persistent WebView2 profile so successful challenges can leave cookies and device trust for later runs, while keeping those browser artifacts out of Git and user-facing config exports.
 
 ### Windows tray runtime
 

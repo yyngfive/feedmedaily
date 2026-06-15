@@ -440,6 +440,39 @@ export async function startFeedVerification(input: {
   );
 }
 
+export async function openFeedVerificationInBrowser(input: {
+  job_id: string;
+  feed_url: string;
+}): Promise<{ok: boolean; verification_id: string}> {
+  return localJSONRequest(
+    "/api/feeds/verification/browser",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(input),
+    },
+    "open the protected feed in the system browser",
+    "Could not open the protected feed in the system browser",
+  );
+}
+
+export async function submitFeedVerificationXML(input: {
+  job_id: string;
+  feed_url: string;
+  feed_xml: string;
+}): Promise<{ok: boolean; verification_id: string}> {
+  return localJSONRequest(
+    "/api/feeds/verification/manual-submit",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(input),
+    },
+    "submit protected feed XML",
+    "Could not submit protected feed XML",
+  );
+}
+
 export async function completeFeedVerification(input: {
   job_id: string;
   feed_url: string;

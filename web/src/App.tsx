@@ -23,6 +23,7 @@ import {
   launchProfileProposalGeneration,
   launchReclassifyJob,
   markPaperRead,
+  openFeedVerificationInBrowser,
   openAppTarget,
   rejectProfileProposal,
   saveFeedSubscriptions,
@@ -31,6 +32,7 @@ import {
   saveSettingsConfig,
   saveToZotero,
   startFeedVerification,
+  submitFeedVerificationXML,
 } from "./reportData";
 import {
   matchesDateFilter,
@@ -114,6 +116,8 @@ export function App() {
   const [profileResolved, setProfileResolved] = React.useState(false);
   const [reportLoading, setReportLoading] = React.useState(false);
   const [adminDataLoading, setAdminDataLoading] = React.useState(false);
+  const [verificationSubmitting, setVerificationSubmitting] = React.useState(false);
+  const [verificationSubmitError, setVerificationSubmitError] = React.useState<string | null>(null);
   const [reportLoadError, setReportLoadError] = React.useState<string | null>(null);
   const [adminHydrationWarning, setAdminHydrationWarning] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<UiMessage | null>(null);
@@ -1476,6 +1480,7 @@ export function App() {
       pushMessage("app.service.unavailable", {text: "Verification feed URL is missing.", tone: "danger"});
       return;
     }
+    setVerificationSubmitError(null);
     try {
       await startFeedVerification({job_id: job.id, feed_url: job.verification_feed_url});
       pushMessage("job.verification.started", {
@@ -1486,6 +1491,47 @@ export function App() {
       pushErrorMessage("app.service.unavailable", error, "Could not start feed verification.");
     }
   }, [pushErrorMessage, pushMessage]);
+
+  const handleOpenVerificationInBrowser = React.useCallback(async (job: JobInfo) => {
+    if (!job.verification_feed_url) {
+      pushMessage("app.service.unavailable", {text: "Verification feed URL is missing.", tone: "danger"});
+      return;
+    }
+    setVerificationSubmitError(null);
+    try {
+      await openFeedVerificationInBrowser({job_id: job.id, feed_url: job.verification_feed_url});
+      pushMessage("job.verification.browser.started", {
+        text: "Opened the protected feed in your browser. Finish the check there, then paste the final RSS/XML here.",
+        tone: "info",
+      });
+    } catch (error) {
+      pushErrorMessage("app.service.unavailable", error, "Could not open the protected feed in your browser.");
+    }
+  }, [pushErrorMessage, pushMessage]);
+
+  const handleSubmitVerificationXML = React.useCallback(async (job: JobInfo, xml: string) => {
+    if (!job.verification_feed_url) {
+      setVerificationSubmitError("Verification feed URL is missing.");
+      return;
+    }
+    try {
+      setVerificationSubmitting(true);
+      setVerificationSubmitError(null);
+      await submitFeedVerificationXML({
+        job_id: job.id,
+        feed_url: job.verification_feed_url,
+        feed_xml: xml,
+      });
+      pushMessage("job.verification.manual.accepted", {
+        text: "Accepted the pasted RSS/XML. The sync is resuming now.",
+        tone: "info",
+      });
+    } catch (error) {
+      setVerificationSubmitError(errorText(error, "Could not submit protected feed XML."));
+    } finally {
+      setVerificationSubmitting(false);
+    }
+  }, [errorText, pushMessage]);
 
   const handleReclassify = async (scope: "recent" | "feedback" | "all") => {
     try {
@@ -1604,9 +1650,11 @@ export function App() {
         onSaveScheduler={handleSaveScheduler}
         onSaveFeeds={() => void handleSaveFeeds()}
         onTabChange={setAdminTab}
-          onDeleteScheduler={handleDeleteScheduler}
-          onGenerateProposal={() => void handleGenerateProposal()}
-          onStartVerification={(job) => void handleStartVerification(job)}
+        onDeleteScheduler={handleDeleteScheduler}
+        onGenerateProposal={() => void handleGenerateProposal()}
+        onStartVerification={(job) => void handleStartVerification(job)}
+        onOpenVerificationInBrowser={(job) => void handleOpenVerificationInBrowser(job)}
+        onSubmitVerificationXML={(job, xml) => handleSubmitVerificationXML(job, xml)}
         onApplyProposal={(id, selection) => void handleApplyProposal(id, selection)}
         onRejectProposal={(id) => void handleRejectProposal(id)}
         onRunSync={() => void handleRunAdminJob("/api/admin/run")}
@@ -1616,6 +1664,8 @@ export function App() {
         onDeleteFeedback={(id) => void handleDeleteFeedback(id)}
         scheduler={scheduler}
         schedulerSaving={schedulerSaving}
+        verificationSubmitting={verificationSubmitting}
+        verificationSubmitError={verificationSubmitError}
       />
       <FeedbackModal
         paper={feedbackPaper}

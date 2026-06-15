@@ -150,9 +150,20 @@ func processVerificationCallback(settings config.Settings, payload verificationC
 		logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_callback_received", "pipeline.feeds.verification_required", "Verification window captured protected feed XML.", "", logData)
 	} else {
 		logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "warning", "verification_callback_failed", "pipeline.feeds.verification_required", "", result.Warning, logData)
+		updateJob(pending.JobID, func(current *jobInfo) {
+			current.Status = "waiting_for_user"
+			current.MessageKey = "pipeline.feeds.verification_required"
+			current.Message = "The verification window did not reach feed XML. Reopen it or use browser fallback and paste the final RSS XML."
+			current.VerificationRequired = true
+			current.VerificationTarget = pending.Target
+			current.VerificationFeedURL = pending.FeedURL
+			current.VerificationJournal = pending.Journal
+			current.VerificationMethod = pending.Method
+		})
 	}
 
-	if markVerificationDelivered(pending.ID) {
+	shouldDeliver := result.Status == "success"
+	if shouldDeliver && markVerificationDelivered(pending.ID) {
 		if result.Status == "success" {
 			logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification received. Re-running RSS fetch with verified XML.", "", logData)
 			go func(logsDir string, jobID string, verificationID string, feedURL string, journal string) {

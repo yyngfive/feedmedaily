@@ -14,12 +14,17 @@ Changes since `0.3.1`:
 - Changed onboarding acceptance so accepting the initial proposal now applies it and immediately saves the user's edited draft as the live classification profile.
 - Added manual `Check for updates` actions in Settings and the footer status bar so release builds can force-refresh the update manifest on demand, while keeping the normal background update check cached.
 - Changed paper classification to apply unrelated exclusions before direct and indirect rules, with a non-persisted decision trace in the model response contract to reduce false-positive indirect matches from surface profile terms.
-- Documented the current protected-feed verifier limitation after ACS RSS feeds began returning Cloudflare human-verification challenges that can loop inside the temporary WebView2 session, and recorded the planned move toward a persistent verifier browser profile plus a system-browser/manual XML fallback.
+- Changed protected-feed verification to keep the current Wails/WebView verifier as the first path for auto-drop-to-XML feeds, while adding a system-browser plus manual XML fallback for Cloudflare human-verification loops such as recent ACS RSS challenges.
 
 ### Fixed
 
 - Fixed source-mode tray startup so `.env` or environment-based `SCIRSS_SERVER_HOST` and `SCIRSS_SERVER_PORT` values are respected when launching the local backend.
 - Fixed release-mode update-manifest changes so saving a new `FEEDMEDAILY_UPDATE_MANIFEST_URL` now takes effect immediately without restarting the local service.
+- Fixed Windows external URL opening so feed links with query parameters like `&feed=rss&jc=jacsat` are opened intact instead of being truncated before the default browser receives them.
+
+### Added
+
+- Added a protected-feed browser fallback flow in Settings: users can now reopen the in-app verifier, open the protected feed in their normal browser, and manually submit the final RSS/Atom/RDF XML back into the paused sync job without restarting the whole run.
 
 ## 0.3.1 (2026-06-03)
 

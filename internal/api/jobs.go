@@ -26,6 +26,7 @@ type jobInfo struct {
 	VerificationTarget   string         `json:"verification_target,omitempty"`
 	VerificationFeedURL  string         `json:"verification_feed_url,omitempty"`
 	VerificationJournal  string         `json:"verification_journal,omitempty"`
+	VerificationMethod   string         `json:"verification_method,omitempty"`
 	Result               map[string]any `json:"result,omitempty"`
 	LogPath              string         `json:"log_path,omitempty"`
 	WarningCount         int            `json:"warning_count,omitempty"`
