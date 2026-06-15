@@ -69,6 +69,11 @@ func startVerificationWindowFlow(settings config.Settings, pending *pendingVerif
 		"--logs-dir", settings.LogsDir,
 		"--app-version", version,
 	}
+	userDataDir, err := verificationUserDataDir(settings, pending.FeedURL)
+	if err != nil {
+		return err
+	}
+	commandArgs = append(commandArgs, "--user-data-dir", userDataDir)
 	cmd := exec.Command(
 		binaryPath,
 		commandArgs...,
@@ -97,6 +102,7 @@ func startVerificationWindowFlow(settings config.Settings, pending *pendingVerif
 		"verification_journal":  pending.Journal,
 		"verification_binary":   binaryPath,
 		"verification_pid":      process.PID,
+		"verification_profile":  userDataDir,
 		"verification_command":  strings.Join(process.Command, " "),
 	})
 
@@ -159,6 +165,38 @@ func verificationCallbackHost(host string) string {
 		return "127.0.0.1"
 	}
 	return clean
+}
+
+func verificationUserDataDir(settings config.Settings, feedURL string) (string, error) {
+	host := verificationProfileHost(feedURL)
+	userDataDir := filepath.Join(settings.DataDir, "verification-profiles", host)
+	if err := os.MkdirAll(userDataDir, 0o755); err != nil {
+		return "", fmt.Errorf("create verification browser profile dir: %w", err)
+	}
+	return userDataDir, nil
+}
+
+func verificationProfileHost(feedURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(feedURL))
+	if err != nil {
+		return "default"
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return "default"
+	}
+	var normalized strings.Builder
+	for _, char := range strings.ToLower(host) {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '.' || char == '-' {
+			normalized.WriteRune(char)
+			continue
+		}
+		normalized.WriteRune('_')
+	}
+	if normalized.Len() == 0 {
+		return "default"
+	}
+	return normalized.String()
 }
 
 func verifierPID(cmd *exec.Cmd) int {

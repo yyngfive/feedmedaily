@@ -25,6 +25,7 @@ Changes since `0.3.1`:
 ### Added
 
 - Added a protected-feed browser fallback flow in Settings: users can now reopen the in-app verifier, open the protected feed in their normal browser, and manually submit the final RSS/Atom/RDF XML back into the paused sync job without restarting the whole run.
+- Added host-scoped persistent WebView2 verifier profiles under local app data so Cloudflare-style human-verification state can survive across protected-feed retries instead of starting from a blank temporary browser session every time.
 
 ## 0.3.1 (2026-06-03)
 

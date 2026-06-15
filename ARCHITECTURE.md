@@ -69,9 +69,9 @@ Cloudflare-protected or challenge-gated feeds use a Windows-first verification a
 - browser fallback does not try to reuse browser cookies automatically; instead the user completes the challenge in their normal browser, copies the final raw RSS/Atom/RDF source, and submits it to `/api/feeds/verification/manual-submit`
 - successful manual submissions are validated through the same feed parser path as normal fetches before the paused sync resumes
 
-This verifier session is intentionally temporary and non-persistent. Its WebView2 user-data directory is scoped to the current verification step and removed on exit.
+The verifier now uses an app-owned persistent WebView2 profile directory under local data storage, scoped by protected-feed host such as `pubs.acs.org`. That lets Cloudflare or publisher trust state survive across retries while keeping verifier browser artifacts out of Git and out of exported user configuration.
 
-Current limitation: publisher challenges that depend on a previously trusted browser profile, such as ACS RSS feeds returning a Cloudflare human-verification loop, may pass in the user's normal browser but still fail to resolve inside the temporary WebView2 session. The current product answer is the manual browser/XML fallback above. A future verifier design may still add an app-owned persistent WebView2 profile so successful challenges can leave cookies and device trust for later runs, while keeping those browser artifacts out of Git and user-facing config exports.
+Current limitation: even with a persistent verifier profile, some publisher challenges may still trust the user's full system browser more than an embedded WebView2 surface. The manual browser/XML fallback therefore remains part of the supported recovery path for protected feeds.
 
 ### Windows tray runtime
 

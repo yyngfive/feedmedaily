@@ -79,7 +79,7 @@ func (a *verifierApp) shutdown(ctx context.Context) {
 	if a.controlSrv != nil {
 		_ = a.controlSrv.Shutdown(ctx)
 	}
-	if strings.TrimSpace(a.cfg.UserDataDir) != "" {
+	if a.cfg.CleanupProfile && strings.TrimSpace(a.cfg.UserDataDir) != "" {
 		_ = osRemoveAll(a.cfg.UserDataDir)
 	}
 }
@@ -371,7 +371,7 @@ func introHTML(feedURL string, eventURL string) string {
     <section class="card">
       <h1>Finish the protected feed check for ` + label + `</h1>
       <p>
-        This window uses its own WebView2 session. If Cloudflare asks for a human check,
+        This window uses a dedicated WebView2 browser profile for this publisher. If Cloudflare asks for a human check,
         complete it here and wait until the protected feed page opens. The app will keep
         probing this window and capture the XML automatically once it becomes available.
       </p>
