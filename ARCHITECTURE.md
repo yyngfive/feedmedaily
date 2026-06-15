@@ -68,6 +68,8 @@ Cloudflare-protected or challenge-gated feeds use a Windows-only verification as
 
 This verifier session is intentionally temporary and non-persistent. Its WebView2 user-data directory is scoped to the current verification step and removed on exit.
 
+Current limitation: publisher challenges that depend on a previously trusted browser profile, such as ACS RSS feeds returning a Cloudflare human-verification loop, may pass in the user's normal browser but fail to resolve inside the temporary WebView2 session. The next verifier design should use an app-owned persistent WebView2 profile for protected-feed verification so successful challenges can leave cookies and device trust for later runs, while still keeping those browser artifacts out of Git and user-facing config exports. A system-browser or manual XML import fallback should remain available for publishers that refuse embedded WebView verification.
+
 ### Windows tray runtime
 
 `cmd/feedmedaily-tray/` is the Windows app shell. It is responsible for:

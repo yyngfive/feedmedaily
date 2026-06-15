@@ -14,6 +14,7 @@ Changes since `0.3.1`:
 - Changed onboarding acceptance so accepting the initial proposal now applies it and immediately saves the user's edited draft as the live classification profile.
 - Added manual `Check for updates` actions in Settings and the footer status bar so release builds can force-refresh the update manifest on demand, while keeping the normal background update check cached.
 - Changed paper classification to apply unrelated exclusions before direct and indirect rules, with a non-persisted decision trace in the model response contract to reduce false-positive indirect matches from surface profile terms.
+- Documented the current protected-feed verifier limitation after ACS RSS feeds began returning Cloudflare human-verification challenges that can loop inside the temporary WebView2 session, and recorded the planned move toward a persistent verifier browser profile plus a system-browser/manual XML fallback.
 
 ### Fixed
 
