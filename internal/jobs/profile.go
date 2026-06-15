@@ -120,6 +120,22 @@ func GenerateProfileProposal(settings config.Settings, progress ProgressFunc) (m
 	if err != nil {
 		return nil, err
 	}
+	if draft.Rejection != nil {
+		EmitProgress(progress, StepProgress(
+			"profile.proposal.rejected",
+			"profile-proposal",
+			3,
+			4,
+			"Profile proposal rejected by safety review.",
+		))
+		return map[string]any{
+			"accepted":        false,
+			"hard_rejected":   draft.Rejection.HardRejected,
+			"summary":         draft.Rejection.Summary,
+			"blocking_issues": draft.Rejection.BlockingIssues,
+			"required_fixes":  draft.Rejection.RequiredFixes,
+		}, nil
+	}
 	EmitProgress(progress, StepProgress(
 		"profile.proposal.validating",
 		"profile-proposal",
@@ -147,5 +163,5 @@ func GenerateProfileProposal(settings config.Settings, progress ProgressFunc) (m
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"proposal_id": item.ID}, nil
+	return map[string]any{"accepted": true, "proposal_id": item.ID}, nil
 }

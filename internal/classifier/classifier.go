@@ -22,12 +22,19 @@ Judge relevance from the current scope and relevance rules only.
 Do not let broad examples, topic labels, or surface object similarity expand direct relevance.
 If two historical cues appear to conflict, follow the current profile rules as written.
 
+Classify by priority and core contribution:
+1. Apply unrelated exclusion rules first. If any unrelated rule fits the paper's core contribution, choose unrelated even if the paper mentions DNA, RNA, aptamer, probe, CRISPR, sequencing, polymerase, engineering, or other profile-adjacent terms.
+2. If not excluded, choose direct only when the paper's core contribution satisfies the direct rules.
+3. If not direct, choose indirect only when the work closely informs the direct-rule areas.
+4. If uncertain between indirect and unrelated, choose unrelated unless the paper directly informs nucleic-acid chemistry, substrate design, or nucleic-acid-enzyme engineering under the supplied profile.
+
 Labels are fixed:
 - direct
 - indirect
 - unrelated
 
-Return concise, evidence-based reasoning grounded in the title and abstract.`
+Return concise, evidence-based reasoning grounded in the title and abstract.
+Use decision_trace to show that you applied the priority order; it is an internal audit aid and must be consistent with the final relevance.`
 
 type LLMConfig struct {
 	APIKey   string
@@ -375,7 +382,13 @@ Return valid JSON only, with this exact shape:
       "confidence": 0.0,
       "reason": "one concise sentence",
       "recommended_action": "read | scan | skip",
-      "translated_title_zh": "concise Chinese title translation"
+      "translated_title_zh": "concise Chinese title translation",
+      "decision_trace": {
+        "exclusion_check": "whether unrelated exclusions apply first",
+        "direct_check": "whether direct rules apply after exclusions",
+        "indirect_check": "whether indirect rules apply after direct",
+        "priority_resolution": "how the priority order determined the final label"
+      }
     }
   ]
 }

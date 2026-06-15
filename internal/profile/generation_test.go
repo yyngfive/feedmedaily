@@ -26,14 +26,21 @@ func TestGenerateProfileProposalValidatesAcceptedProposal(t *testing.T) {
 	if len(*prompts) != 2 {
 		t.Fatalf("expected generator and validator prompts, got %d", len(*prompts))
 	}
-	if !strings.Contains((*prompts)[0], "mostly indirect -> unrelated") {
+	if !strings.Contains((*prompts)[0], "For indirect -> unrelated feedback, default repairs are") {
 		t.Fatalf("generator prompt missing feedback-direction guard: %s", (*prompts)[0])
 	}
 	for _, fragment := range []string{
-		"Do not optimize for the fewest rules; optimize for decision clarity",
+		"Before proposing changes, classify each feedback item into one error type",
+		"surface-term false positive, indirect too broad, unrelated boundary missing, direct boundary missing, scope drift",
+		"Propose changes only for repeated error types",
+		"For indirect -> unrelated feedback, default repairs are: strengthen unrelated exclusions, narrow indirect entry criteria",
+		"Do not merge rules unless the same error type affects the same decision axis",
+		"Do not collapse different decision axes into one rule",
 		"Compress repeated reasoning, not noun lists",
-		"Do not merge rules when the merged rule becomes a keyword net",
+		"Prefer 2-3 clear indirect rules over one comprehensive indirect rule",
+		"group feedback by error type first",
 		"Scope rewrites are allowed when repeated same-direction feedback shows stable interest drift",
+		"If a current unrelated rule says surface adjacency alone is unrelated",
 	} {
 		if !strings.Contains((*prompts)[0], fragment) {
 			t.Fatalf("generator prompt missing %q: %s", fragment, (*prompts)[0])
@@ -43,9 +50,15 @@ func TestGenerateProfileProposalValidatesAcceptedProposal(t *testing.T) {
 		t.Fatalf("validator prompt missing regression guard or feedback context: %s", (*prompts)[1])
 	}
 	for _, fragment := range []string{
+		"The proposal is not grounded in repeated feedback error types",
+		"The proposal skips error-type analysis and performs broad profile cleanup",
+		"For indirect -> unrelated feedback, the proposal does not use the default repairs",
 		"Scope is rewritten as a broad topic catalog",
 		"Scope is expanded from a single ambiguous feedback item",
 		"Clear negative boundaries are replaced by long noun-list rules",
+		"The proposal collapses distinct decision axes into one umbrella rule",
+		"The proposal merges rules even though the same error type does not affect the same decision axis",
+		"enzyme characterization, nucleic-acid substrate/readout context, and selection/screening platform relevance",
 	} {
 		if !strings.Contains((*prompts)[1], fragment) {
 			t.Fatalf("validator prompt missing %q: %s", fragment, (*prompts)[1])
@@ -56,10 +69,10 @@ func TestGenerateProfileProposalValidatesAcceptedProposal(t *testing.T) {
 func TestGenerateProfileProposalRepairsRejectedValidation(t *testing.T) {
 	current := profileGenerationCurrentFixture()
 	responses := []string{
-		profileProposalFixture("change-1", ProposalSectionIndirectRule, ProposalOperationAdd, []string{}, []string{"Papers that could impact nucleic acid-related technologies are indirect."}),
-		`{"accepted":false,"summary":"Broadens indirect.","blocking_issues":["Mostly indirect -> unrelated feedback cannot broaden indirect."],"required_fixes":["Remove future-applicability indirect rule and add unrelated negative boundaries."]}`,
+		profileProposalFixture("change-1", ProposalSectionUnrelatedRule, ProposalOperationAdd, []string{}, []string{"Surface-adjacent platform papers are unrelated without a core nucleic-acid-method contribution."}),
+		`{"accepted":false,"hard_rejected":false,"summary":"Needs clearer rationale.","blocking_issues":["The rule is directionally safe but too terse."],"required_fixes":["Explain the corrected feedback boundary more explicitly."]}`,
 		profileProposalFixture("change-2", ProposalSectionUnrelatedRule, ProposalOperationAdd, []string{}, []string{"Protein or peptide probes, ML drug-target models, DNA repair mechanisms, RNA-binding machinery, and metabolomics papers are unrelated unless they develop nucleic acid chemistry or nucleic-acid enzyme engineering."}),
-		`{"accepted":true,"summary":"Repair covers negative boundaries.","blocking_issues":[],"required_fixes":[]}`,
+		`{"accepted":true,"hard_rejected":false,"summary":"Repair covers negative boundaries.","blocking_issues":[],"required_fixes":[]}`,
 	}
 	prompts := stubProfileModelResponses(t, responses...)
 
@@ -73,14 +86,58 @@ func TestGenerateProfileProposalRepairsRejectedValidation(t *testing.T) {
 	if len(*prompts) != 4 {
 		t.Fatalf("expected generator, validator, repair, validator prompts, got %d", len(*prompts))
 	}
-	if !strings.Contains((*prompts)[2], "Validator result") || !strings.Contains((*prompts)[2], "Remove future-applicability indirect rule") {
+	if !strings.Contains((*prompts)[2], "Validator result") || !strings.Contains((*prompts)[2], "Explain the corrected feedback boundary") {
 		t.Fatalf("repair prompt missing validator fixes: %s", (*prompts)[2])
 	}
 	for _, fragment := range []string{
+		"Repair around the feedback error type that caused the rejection",
+		"For indirect -> unrelated feedback, repair by strengthening unrelated exclusions, narrowing indirect entry criteria",
 		"Optimize for decision clarity rather than the fewest rules",
 		"Rewrite scope only as a short decision policy",
 		"single unnoted feedback item supports a scope expansion",
 		"Do not replace clear negative boundaries with a keyword net",
+		"Keep any current unrelated rule that says surface adjacency alone is unrelated",
+		"If validator flags collapsed decision axes, split the rule back into separate decision-axis rules",
+		"Do not repair an axis-collapse rejection by adding examples to a broad umbrella rule",
+		"Do not merge rules unless the same error type affects the same decision axis",
+	} {
+		if !strings.Contains((*prompts)[2], fragment) {
+			t.Fatalf("repair prompt missing %q: %s", fragment, (*prompts)[2])
+		}
+	}
+}
+
+func TestGenerateProfileProposalRepairPromptSplitsCollapsedIndirectAxes(t *testing.T) {
+	current := profileGenerationCurrentWithIndirectAxesFixture()
+	oldRules := profileGenerationIndirectAxisRules()
+	collapsedRule := "The paper provides close methodological or mechanistic context that directly informs nucleic acid chemistry, nucleic-acid substrate design, or engineering of nucleic-acid-acting enzymes, including enzyme characterization, substrate/readout context, and selection or screening platforms."
+	repairedRules := []string{
+		"The paper characterizes a nucleic-acid-acting enzyme in a way that directly informs engineering, catalytic mechanism, fidelity, or substrate specificity.",
+		"The paper provides close nucleic-acid substrate, modified-nucleotide, probe, aptamer, sequencing, or chemical-probing context that directly informs nucleic acid chemistry or substrate design.",
+		"The paper develops a selection, display, or screening platform explicitly demonstrated on nucleic-acid-acting enzymes, aptamers, XNA/TNA systems, or nucleic-acid substrate engineering.",
+	}
+	responses := []string{
+		profileProposalFixture("change-1", ProposalSectionIndirectRule, ProposalOperationRewrite, oldRules, []string{collapsedRule}),
+		`{"accepted":false,"hard_rejected":false,"summary":"Collapsed indirect decision axes.","blocking_issues":["The proposal collapses distinct decision axes into one umbrella rule."],"required_fixes":["Split enzyme characterization, substrate/readout context, and selection/screening platform relevance back into separate indirect rules."]}`,
+		profileProposalFixture("change-2", ProposalSectionIndirectRule, ProposalOperationRewrite, oldRules, repairedRules),
+		`{"accepted":true,"hard_rejected":false,"summary":"Indirect axes remain separate.","blocking_issues":[],"required_fixes":[]}`,
+	}
+	prompts := stubProfileModelResponses(t, responses...)
+
+	draft, err := GenerateProfileProposal(profileGenerationSettings(), current, profileGenerationFeedbackFixtures())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(draft.Changes) != 1 || len(draft.Changes[0].TextAfter) != 3 {
+		t.Fatalf("expected repaired split indirect rules, got %#v", draft.Changes)
+	}
+	if len(*prompts) != 4 {
+		t.Fatalf("expected generator, validator, repair, validator prompts, got %d", len(*prompts))
+	}
+	for _, fragment := range []string{
+		"Split enzyme characterization, substrate/readout context, and selection/screening platform relevance",
+		"split the rule back into separate decision-axis rules",
+		"Do not repair an axis-collapse rejection by adding examples to a broad umbrella rule",
 	} {
 		if !strings.Contains((*prompts)[2], fragment) {
 			t.Fatalf("repair prompt missing %q: %s", fragment, (*prompts)[2])
@@ -118,19 +175,84 @@ func TestGenerateProfileProposalRetriesInvalidValidatorJSONWithThinkingDisabled(
 func TestGenerateProfileProposalRejectsAfterFailedRepair(t *testing.T) {
 	current := profileGenerationCurrentFixture()
 	responses := []string{
-		profileProposalFixture("change-1", ProposalSectionIndirectRule, ProposalOperationAdd, []string{}, []string{"Papers that could impact nucleic acid-related technologies are indirect."}),
-		`{"accepted":false,"summary":"Broadens indirect.","blocking_issues":["Mostly indirect -> unrelated feedback cannot broaden indirect."],"required_fixes":["Remove indirect expansion."]}`,
-		profileProposalFixture("change-2", ProposalSectionIndirectRule, ProposalOperationAdd, []string{}, []string{"Potentially useful nucleic-acid-adjacent platforms are indirect."}),
-		`{"accepted":false,"summary":"Still broadens indirect.","blocking_issues":["Potential usefulness remains an indirect criterion."],"required_fixes":["Strengthen unrelated instead."]}`,
+		profileProposalFixture("change-1", ProposalSectionUnrelatedRule, ProposalOperationAdd, []string{}, []string{"Surface-adjacent platform papers are unrelated without a core nucleic-acid-method contribution."}),
+		`{"accepted":false,"hard_rejected":false,"summary":"Needs clearer rationale.","blocking_issues":["The rule is directionally safe but too terse."],"required_fixes":["Make the negative boundary explicit."]}`,
+		profileProposalFixture("change-2", ProposalSectionUnrelatedRule, ProposalOperationAdd, []string{}, []string{"Surface-adjacent platform papers are usually unrelated."}),
+		`{"accepted":false,"hard_rejected":false,"summary":"Still too vague.","blocking_issues":["The repaired rule still lacks a clear decision reason."],"required_fixes":["Name the core contribution priority."]}`,
 	}
-	_ = stubProfileModelResponses(t, responses...)
+	prompts := stubProfileModelResponses(t, responses...)
 
-	_, err := GenerateProfileProposal(profileGenerationSettings(), current, profileGenerationFeedbackFixtures())
-	if err == nil {
-		t.Fatal("expected validator rejection after repair")
+	draft, err := GenerateProfileProposal(profileGenerationSettings(), current, profileGenerationFeedbackFixtures())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "profile proposal rejected by validator after repair") {
-		t.Fatalf("unexpected error: %v", err)
+	if draft.Rejection == nil || draft.Rejection.Accepted || draft.Rejection.HardRejected {
+		t.Fatalf("expected handled soft rejection after repair, got %#v", draft.Rejection)
+	}
+	if len(*prompts) != 4 {
+		t.Fatalf("expected generator, validator, repair, validator prompts, got %d", len(*prompts))
+	}
+}
+
+func TestGenerateProfileProposalHardRejectsBroadenedIndirectWithoutRepair(t *testing.T) {
+	current := profileGenerationCurrentFixture()
+	responses := []string{
+		profileProposalFixture("change-1", ProposalSectionIndirectRule, ProposalOperationAdd, []string{}, []string{"Papers that could impact nucleic acid-related technologies are indirect."}),
+	}
+	prompts := stubProfileModelResponses(t, responses...)
+
+	draft, err := GenerateProfileProposal(profileGenerationSettings(), current, profileGenerationFeedbackFixtures())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Rejection == nil || !draft.Rejection.HardRejected {
+		t.Fatalf("expected hard rejection, got %#v", draft.Rejection)
+	}
+	if len(*prompts) != 1 {
+		t.Fatalf("hard rejection should not call validator or repair, got %d prompts", len(*prompts))
+	}
+}
+
+func TestGenerateProfileProposalHardValidatorRejectionDoesNotRepair(t *testing.T) {
+	current := profileGenerationCurrentFixture()
+	responses := []string{
+		profileProposalFixture("change-1", ProposalSectionUnrelatedRule, ProposalOperationAdd, []string{}, []string{"Surface-adjacent platform papers are unrelated without a core nucleic-acid-method contribution."}),
+		`{"accepted":false,"hard_rejected":true,"summary":"Removed key boundary.","blocking_issues":["The proposal removes high-value negative boundaries."],"required_fixes":["Preserve the negative boundaries."]}`,
+	}
+	prompts := stubProfileModelResponses(t, responses...)
+
+	draft, err := GenerateProfileProposal(profileGenerationSettings(), current, profileGenerationFeedbackFixtures())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Rejection == nil || !draft.Rejection.HardRejected {
+		t.Fatalf("expected hard validator rejection, got %#v", draft.Rejection)
+	}
+	if len(*prompts) != 2 {
+		t.Fatalf("hard validator rejection should not repair, got %d prompts", len(*prompts))
+	}
+}
+
+func TestGenerateProfileProposalHardRejectsRemovedSurfaceBoundary(t *testing.T) {
+	current := profileGenerationCurrentFixture()
+	current["relevance_rules"].(map[string]any)["unrelated"] = []any{
+		"General biology without nucleic acid chemistry.",
+		"Surface adjacency alone is unrelated unless the core contribution is nucleic acid chemistry or nucleic-acid-enzyme engineering.",
+	}
+	responses := []string{
+		profileProposalFixture("change-1", ProposalSectionUnrelatedRule, ProposalOperationRewrite, []string{"Surface adjacency alone is unrelated unless the core contribution is nucleic acid chemistry or nucleic-acid-enzyme engineering."}, []string{"General platform papers are unrelated."}),
+	}
+	prompts := stubProfileModelResponses(t, responses...)
+
+	draft, err := GenerateProfileProposal(profileGenerationSettings(), current, profileGenerationFeedbackFixtures())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Rejection == nil || !draft.Rejection.HardRejected {
+		t.Fatalf("expected removed boundary hard rejection, got %#v", draft.Rejection)
+	}
+	if len(*prompts) != 1 {
+		t.Fatalf("deterministic hard rejection should not call validator, got %d prompts", len(*prompts))
 	}
 }
 
@@ -158,7 +280,7 @@ func TestGenerateProfileProposalAllowsRepeatedFeedbackScopeNarrowing(t *testing.
 	}
 }
 
-func TestGenerateProfileProposalRepairsSingleFeedbackScopeExpansion(t *testing.T) {
+func TestGenerateProfileProposalHardRejectsSingleFeedbackScopeExpansion(t *testing.T) {
 	current := profileGenerationCurrentFixture()
 	responses := []string{
 		profileScopeProposalFixture(
@@ -166,8 +288,6 @@ func TestGenerateProfileProposalRepairsSingleFeedbackScopeExpansion(t *testing.T
 			"Expand scope from a single ambiguous feedback item.",
 		),
 		`{"accepted":false,"summary":"Scope expansion is not supported.","blocking_issues":["Single unnoted feedback item cannot justify scope expansion.","Scope is a noun list."],"required_fixes":["Keep scope unchanged and add a narrow rule instead."]}`,
-		profileProposalFixture("change-2", ProposalSectionUnrelatedRule, ProposalOperationAdd, []string{}, []string{"Surface nucleic-acid adjacency is unrelated unless the core contribution is nucleic acid chemistry or nucleic-acid-enzyme engineering."}),
-		`{"accepted":true,"summary":"Repaired with rule-only change.","blocking_issues":[],"required_fixes":[]}`,
 	}
 	prompts := stubProfileModelResponses(t, responses...)
 
@@ -177,11 +297,28 @@ func TestGenerateProfileProposalRepairsSingleFeedbackScopeExpansion(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if testString(draft.ProposedProfile["scope"]) != "Nucleic acid chemistry and nucleic-acid enzyme engineering." {
-		t.Fatalf("repair should keep original scope, got %s", testString(draft.ProposedProfile["scope"]))
+	if draft.Rejection == nil || !draft.Rejection.HardRejected {
+		t.Fatalf("expected hard scope rejection, got %#v", draft.Rejection)
 	}
-	if len(*prompts) != 4 || !strings.Contains((*prompts)[2], "Keep scope unchanged") {
-		t.Fatalf("repair prompt did not receive scope fix: %#v", prompts)
+	if len(*prompts) != 2 {
+		t.Fatalf("hard scope rejection should not repair, got %#v", prompts)
+	}
+}
+
+func TestGenerateProfileProposalAcceptsChangesOnlyPayload(t *testing.T) {
+	current := profileGenerationCurrentFixture()
+	responses := []string{
+		profileProposalChangesOnlyFixture("change-1", ProposalSectionUnrelatedRule, ProposalOperationAdd, []string{}, []string{"ML/software papers are unrelated without nucleic acid chemistry."}),
+		`{"accepted":true,"hard_rejected":false,"summary":"Looks safe.","blocking_issues":[],"required_fixes":[]}`,
+	}
+	_ = stubProfileModelResponses(t, responses...)
+
+	draft, err := GenerateProfileProposal(profileGenerationSettings(), current, profileGenerationFeedbackFixtures())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Rejection != nil || len(draft.Changes) != 1 {
+		t.Fatalf("unexpected draft: %#v", draft)
 	}
 }
 
@@ -239,6 +376,25 @@ func profileGenerationCurrentFixture() map[string]any {
 	}
 }
 
+func profileGenerationCurrentWithIndirectAxesFixture() map[string]any {
+	current := profileGenerationCurrentFixture()
+	rules := profileGenerationIndirectAxisRules()
+	current["relevance_rules"].(map[string]any)["indirect"] = []any{
+		rules[0],
+		rules[1],
+		rules[2],
+	}
+	return current
+}
+
+func profileGenerationIndirectAxisRules() []string {
+	return []string{
+		"The paper characterizes a nucleic-acid-acting enzyme in a way that directly informs catalytic mechanism, fidelity, substrate recognition, inhibitor resistance, or future enzyme engineering.",
+		"The paper provides close nucleic-acid substrate, modified-nucleotide, probe, aptamer, sequencing, or chemical-probing context without introducing new nucleic acid chemistry or enzyme engineering.",
+		"The paper develops a selection, display, or screening platform explicitly demonstrated on nucleic-acid-acting enzymes, aptamers, XNA/TNA systems, or nucleic-acid substrate engineering.",
+	}
+}
+
 func profileGenerationFeedbackFixtures() []FeedbackProposalContext {
 	return []FeedbackProposalContext{
 		{FeedbackID: 1, PaperID: 10, PaperTitle: "A 19F MRI/NIR-FL peptide nanoprobe", OriginalRelevance: "indirect", CorrectedRelevance: "unrelated"},
@@ -274,6 +430,28 @@ func profileProposalFixture(changeID string, section string, operation string, b
     "topic_taxonomy":[],
     "few_shots":[]
   },
+  "changes":[` + changeJSON + `]
+}`
+}
+
+func profileProposalChangesOnlyFixture(changeID string, section string, operation string, before []string, after []string) string {
+	change := ProposalChange{
+		ID:                changeID,
+		Section:           section,
+		Operation:         operation,
+		Summary:           "Tighten unrelated boundaries.",
+		TextBefore:        before,
+		TextAfter:         after,
+		TopicBefore:       []topicDefinition{},
+		TopicAfter:        []topicDefinition{},
+		Rationale:         "The feedback requires core contribution boundaries instead of surface nucleic-acid adjacency.",
+		SourceFeedbackIDs: []int64{1, 2, 3, 4, 5},
+		SourcePaperIDs:    []int64{10, 11, 12, 13, 14},
+		Status:            ProposalStatusProposed,
+	}
+	changeJSON, _ := jsonMarshal(change)
+	return `{
+  "summary":"Tighten unrelated boundaries",
   "changes":[` + changeJSON + `]
 }`
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -271,6 +272,13 @@ func summarizeResult(jobType string, result map[string]any) string {
 	case "profile-bootstrap":
 		return fmt.Sprintf("Initial profile proposal completed. proposal_id=%v.", result["proposal_id"])
 	case "profile-proposal":
+		if accepted, ok := result["accepted"].(bool); ok && !accepted {
+			summary := strings.TrimSpace(fmt.Sprint(result["summary"]))
+			if summary == "" || summary == "<nil>" {
+				summary = "See validator details for required fixes."
+			}
+			return fmt.Sprintf("Profile proposal rejected by safety review. %s", summary)
+		}
 		return fmt.Sprintf("Profile proposal completed. proposal_id=%v.", result["proposal_id"])
 	default:
 		return "Completed."

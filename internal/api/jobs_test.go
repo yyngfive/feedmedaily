@@ -3,6 +3,7 @@ package api
 import (
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"testing"
 
 	"github.com/yyngfive/scirssagent/internal/config"
@@ -46,5 +47,18 @@ func TestBackendRunCommandUnsupportedPlatforms(t *testing.T) {
 	}
 	if len(command) != 0 {
 		t.Fatalf("expected non-linux platform to omit helper command, got %#v", command)
+	}
+}
+
+func TestSummarizeProfileProposalRejectedResult(t *testing.T) {
+	message := summarizeResult("profile-proposal", map[string]any{
+		"accepted":        false,
+		"hard_rejected":   true,
+		"summary":         "Removed key negative boundary.",
+		"blocking_issues": []string{"Surface adjacency boundary was removed."},
+		"required_fixes":  []string{"Preserve the boundary."},
+	})
+	if !strings.Contains(message, "Profile proposal rejected by safety review.") || !strings.Contains(message, "Removed key negative boundary.") {
+		t.Fatalf("unexpected summary: %s", message)
 	}
 }

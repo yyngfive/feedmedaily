@@ -32,10 +32,12 @@ type ProposalDraft struct {
 	RuleDelta          map[string]any
 	Model              string
 	SourceFeedbackIDs  []int64
+	Rejection          *ProposalValidationResult
 }
 
 type ProposalValidationResult struct {
 	Accepted       bool     `json:"accepted"`
+	HardRejected   bool     `json:"hard_rejected"`
 	Summary        string   `json:"summary"`
 	BlockingIssues []string `json:"blocking_issues"`
 	RequiredFixes  []string `json:"required_fixes"`
@@ -184,30 +186,37 @@ func GenerateProfileProposal(settings config.Settings, current map[string]any, f
 			return ProposalDraft{}, fmt.Errorf("parse profile proposal after thinking-disabled retry: %w", err)
 		}
 	}
+	sourceFeedbackIDs := proposalSourceFeedbackIDs(feedbackItems)
+	if audit := deterministicProposalAudit(currentDocument, feedbackItems, attempt); !audit.Accepted {
+		return rejectedProposalDraft(currentDocument, settings.ProfileModel, sourceFeedbackIDs, audit), nil
+	}
 	validation, err := validateGeneratedProfileProposal(settings, currentDocument, feedbackItems, attempt)
 	if err != nil {
 		return ProposalDraft{}, err
 	}
 	if !validation.Accepted {
+		if isHardValidationRejection(validation) {
+			return rejectedProposalDraft(currentDocument, settings.ProfileModel, sourceFeedbackIDs, validation), nil
+		}
 		attempt, err = repairProfileProposalFromValidation(settings, currentDocument, feedbackItems, attempt, validation)
 		if err != nil {
 			return ProposalDraft{}, err
+		}
+		if audit := deterministicProposalAudit(currentDocument, feedbackItems, attempt); !audit.Accepted {
+			return rejectedProposalDraft(currentDocument, settings.ProfileModel, sourceFeedbackIDs, audit), nil
 		}
 		validation, err = validateGeneratedProfileProposal(settings, currentDocument, feedbackItems, attempt)
 		if err != nil {
 			return ProposalDraft{}, err
 		}
 		if !validation.Accepted {
-			return ProposalDraft{}, fmt.Errorf("profile proposal rejected by validator after repair: %s", validationFailureSummary(validation))
+			validation.HardRejected = isHardValidationRejection(validation)
+			return rejectedProposalDraft(currentDocument, settings.ProfileModel, sourceFeedbackIDs, validation), nil
 		}
 	}
 	ruleDeltaMap, err := proposalDeltaToMap(defaultProposalDelta(attempt.Summary))
 	if err != nil {
 		return ProposalDraft{}, err
-	}
-	sourceFeedbackIDs := make([]int64, 0, len(feedbackItems))
-	for _, item := range feedbackItems {
-		sourceFeedbackIDs = append(sourceFeedbackIDs, item.FeedbackID)
 	}
 	draft := ProposalDraft{
 		BaseProfileVersion: currentDocument.Meta.Version,
@@ -234,6 +243,124 @@ func GenerateProfileProposal(settings config.Settings, current map[string]any, f
 	return draft, nil
 }
 
+func proposalSourceFeedbackIDs(feedbackItems []FeedbackProposalContext) []int64 {
+	ids := make([]int64, 0, len(feedbackItems))
+	for _, item := range feedbackItems {
+		ids = append(ids, item.FeedbackID)
+	}
+	return ids
+}
+
+func rejectedProposalDraft(currentDocument profileDocument, model string, sourceFeedbackIDs []int64, validation ProposalValidationResult) ProposalDraft {
+	if !validation.Accepted {
+		validation.HardRejected = isHardValidationRejection(validation)
+	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "warning",
+		Component: "profile",
+		Action:    "proposal_rejected_handled",
+		Message:   validationFailureSummary(validation),
+		Data: map[string]any{
+			"hard_rejected": validation.HardRejected,
+			"summary":       validation.Summary,
+			"issues":        validation.BlockingIssues,
+			"fixes":         validation.RequiredFixes,
+		},
+	})
+	return ProposalDraft{
+		BaseProfileVersion: currentDocument.Meta.Version,
+		Summary:            validation.Summary,
+		Model:              model,
+		SourceFeedbackIDs:  sourceFeedbackIDs,
+		Rejection:          &validation,
+	}
+}
+
+func deterministicProposalAudit(currentDocument profileDocument, feedbackItems []FeedbackProposalContext, attempt compactProposalAttempt) ProposalValidationResult {
+	if missingProtectedBoundary(currentDocument.RelevanceRules.Unrelated, attempt.ProposedDocument.RelevanceRules.Unrelated, "surface adjacency") {
+		return ProposalValidationResult{
+			Accepted:     false,
+			HardRejected: true,
+			Summary:      "Profile proposal rejected by deterministic safety audit.",
+			BlockingIssues: []string{
+				"Proposed profile removes the current surface-adjacency unrelated boundary.",
+			},
+			RequiredFixes: []string{
+				"Preserve an explicit unrelated rule for surface DNA/RNA/probe adjacency when the core contribution is outside nucleic acid chemistry or nucleic-acid-enzyme engineering.",
+			},
+		}
+	}
+	if mostlyDirection(feedbackItems, "indirect", "unrelated") && proposalBroadensIndirect(attempt.Changes) {
+		return ProposalValidationResult{
+			Accepted:     false,
+			HardRejected: true,
+			Summary:      "Profile proposal rejected by deterministic safety audit.",
+			BlockingIssues: []string{
+				"Mostly indirect -> unrelated feedback cannot be handled by broadening indirect.",
+			},
+			RequiredFixes: []string{
+				"Remove the indirect expansion and strengthen unrelated or narrow indirect instead.",
+			},
+		}
+	}
+	return ProposalValidationResult{Accepted: true, Summary: "Deterministic audit passed."}
+}
+
+func missingProtectedBoundary(currentRules []string, proposedRules []string, phrase string) bool {
+	needle := strings.ToLower(strings.TrimSpace(phrase))
+	if needle == "" || !rulesContainPhrase(currentRules, needle) {
+		return false
+	}
+	return !rulesContainPhrase(proposedRules, needle)
+}
+
+func rulesContainPhrase(rules []string, phrase string) bool {
+	for _, rule := range rules {
+		if strings.Contains(strings.ToLower(rule), phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func mostlyDirection(feedbackItems []FeedbackProposalContext, original string, corrected string) bool {
+	if len(feedbackItems) == 0 {
+		return false
+	}
+	matches := 0
+	for _, item := range feedbackItems {
+		if strings.EqualFold(item.OriginalRelevance, original) && strings.EqualFold(item.CorrectedRelevance, corrected) {
+			matches++
+		}
+	}
+	return matches > len(feedbackItems)/2
+}
+
+func proposalBroadensIndirect(changes []ProposalChange) bool {
+	for _, change := range changes {
+		if change.Section != ProposalSectionIndirectRule {
+			continue
+		}
+		if change.Operation != ProposalOperationAdd && change.Operation != ProposalOperationRewrite && change.Operation != ProposalOperationMerge {
+			continue
+		}
+		text := strings.ToLower(strings.Join(change.TextAfter, " "))
+		for _, phrase := range []string{
+			"could impact",
+			"potentially useful",
+			"potential usefulness",
+			"future applicability",
+			"nucleic-acid-adjacent",
+			"surface adjacency",
+		} {
+			if strings.Contains(text, phrase) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func profileProposalPrompt(feedbackItems []FeedbackProposalContext, compactProfileJSON []byte, feedbackPayload []byte, maintenanceMode bool) string {
 	instructionHeader := "Compact and refine the current scientific-literature classification profile using the human feedback below."
 	contextHeading := "Human feedback:"
@@ -249,46 +376,48 @@ func profileProposalPrompt(feedbackItems []FeedbackProposalContext, compactProfi
 Requirements:
 - Return valid JSON only.
 - Return both:
-  1. a compact proposed_profile
+  1. one short summary
   2. a structured changes array
+- The application will build the proposed profile from changes; do not rely on a hand-written proposed_profile to carry behavior.
 - Every change operation must be exactly one of: add, remove, rewrite, merge.
 - Do not invent operations such as restore, keep, retain, or update; express restored boundaries as add or rewrite changes.
-- First do a coverage check for every feedback item:
-  - ask whether the corrected boundary can be captured by rewriting or merging existing rules
-  - only add a brand-new rule when no existing rule can be broadened or merged to cover it safely
-- Infer the shared reasons behind the corrected labels before writing rules.
-- Do not optimize for the fewest rules; optimize for decision clarity and stable future classifications.
+
+Feedback error-type workflow:
+- Before proposing changes, classify each feedback item into one error type in your private analysis.
+- Error types are: surface-term false positive, indirect too broad, unrelated boundary missing, direct boundary missing, scope drift, and ambiguous or insufficient evidence.
+- Propose changes only for repeated error types or explicit feedback notes that show a changed interest.
+- For indirect -> unrelated feedback, default repairs are: strengthen unrelated exclusions, narrow indirect entry criteria, and preserve direct/indirect decision axes.
+- Do not merge rules unless the same error type affects the same decision axis.
+- If feedback conflicts with an older rule, the feedback direction wins. Resolve the conflict explicitly with rewrite/remove instead of keeping both sides.
+
+Rule style:
+- Optimize for classification clarity and stable future decisions, not for fewer rules.
+- One rule should answer one classification question.
+- Do not collapse different decision axes into one rule.
 - Compress repeated reasoning, not noun lists.
-- Each rule should express one decision reason. Avoid long enumerations of objects, technologies, or assays.
+- Prefer 2-3 clear indirect rules over one comprehensive indirect rule.
+- Keep or increase rule count when needed to preserve distinct decision axes.
+- Avoid long enumerations of objects, technologies, or assays.
 - If a rule needs examples, keep them short and subordinate to the reason.
-- Do not merge rules when the merged rule becomes a keyword net.
-- Use reason-first abstraction:
-  - prefer rules about why a paper is direct, indirect, or unrelated
-  - prefer high-level criteria such as where the core innovation sits
-  - do not split rules by object family when multiple object families share the same reason
-- Apply the same reason-first compaction standard to direct rules, not only indirect or unrelated rules.
-- Prefer merge/remove/rewrite over pure add whenever an existing rule can be edited.
-- Rewrite existing indirect/unrelated rules first when the new feedback reveals a broader boundary that can absorb older object-specific rules.
-- If a proposed merge or rewrite already covers a reason-level boundary, do not also add a second rule that expresses the same boundary in different wording.
-- Merge and add changes must not duplicate each other in substance.
-- If new feedback conflicts with an older rule, the new feedback wins. Resolve the conflict explicitly with rewrite/remove instead of keeping both sides.
-- If the feedback batch is mostly indirect -> unrelated, do not broaden indirect rules unless there is explicit unrelated/direct -> indirect feedback requiring it.
+- Do not replace clear boundaries with keyword nets or broad umbrella rules.
 - Potential future applicability, possible usefulness, or "could impact nucleic acid-related technologies" is not enough for indirect relevance.
+
+Merge policy:
+- Prefer rewrite when one existing rule can be clarified.
+- Use merge only when old rules share the same decision test and differ only by wording or examples.
+- A merge is allowed only when old rules share the same decision test.
+- Do not merge enzyme characterization, nucleic-acid substrate/readout context, and selection/screening platform relevance into one indirect rule.
+- A 3 -> 1 indirect rewrite is invalid when the source rules represent different classification axes.
+- If a proposed merge already covers a boundary, do not also add a duplicate rule in different wording.
+- A pure add should be rare and used only when the current profile is missing an entire decision-axis boundary.
+
+Protected boundaries:
 - Before deleting or merging an unrelated rule, preserve the negative boundary it carried and state which replacement rule now covers that boundary.
-- If feedback says indirect -> unrelated, prefer tightening indirect or strengthening unrelated; do not respond by making indirect more permissive.
-- When merging, preserve the salient coverage from the old rules. Do not drop boundary-defining content such as nanostructure, nano-assembly, platform, device, or other key qualifiers if they are still needed for future classification.
-- A pure add should be rare and used only when the current profile is missing an entire reason-level boundary.
-- If multiple candidate rules share the same why-indirect or why-unrelated logic, merge them into one broader rule instead of keeping separate object-level rules.
-- If you add a new rule, explain in rationale:
-  - which current rule was the closest match
-  - why that rule was still insufficient
-  - why rewrite/merge would lose a necessary boundary
-- If you merge rules, explain in rationale:
-  - which old boundaries were preserved
-  - why no important coverage was lost
-- Try to reduce the total number of relevance rules, or at least keep the total flat.
-- The goal is not to record every example; the goal is to explain more feedback with fewer, stabler rules.
-- Keep the profile compact and easier to maintain than the current version.
+- Preserve protected unrelated boundaries unless feedback explicitly and repeatedly contradicts them.
+- If a current unrelated rule says surface adjacency alone is unrelated, every rewrite or merge touching that rule must preserve that decision in equally clear wording.
+- Do not replace protected negative boundaries with vague generalities such as "platform papers are unrelated"; keep the reason and priority test explicit.
+
+Scope and fields:
 - Do not replace a specific scientific-interest profile with a generic
   or placeholder profile.
 - Keep direct/indirect/unrelated as the only relevance labels.
@@ -297,7 +426,6 @@ Requirements:
 - Scope rewrites are allowed when repeated same-direction feedback shows stable interest drift or feedback notes explicitly describe a changed interest.
 - Scope rewrites must be short decision policies, not broad catalogs or technology lists.
 - A single feedback item without an explicit note should normally change rules, not scope.
-- Mostly indirect -> unrelated feedback supports narrowing around core contribution, not broadening the user's interests.
 %s
 
 Current compact profile context:
@@ -310,26 +438,26 @@ Feedback direction summary:
 %s
 
 Bad vs good abstraction examples:
-- Bad: keep one unrelated rule for MOF/COF/HOF papers, then add another unrelated rule for nucleic-acid biosensors using gold nanoparticles or silicon nanowires.
-- Good: rewrite or merge them into one broader reason-level rule when the shared reason is that the paper targets nucleic acids but the core innovation is in non-nucleic acid materials, device architecture, sensing platform, or nano-assembly, while the nucleic acid element is only a recognition element and is not itself chemically or methodologically developed.
-- Bad: merge several nanomaterial/device rules into a shorter rule, but accidentally drop important coverage such as DNA nanostructure, nano-assembly, carbon nanotube functionalization, or platform-level boundaries that the old rules were carrying.
-- Good: produce a broader merged rule only if it still preserves those salient boundaries in higher-level wording, or keep a narrower rewrite when that coverage would otherwise be lost.
+- Bad: directly rewrite the profile before deciding whether feedback is a surface-term false positive, indirect-too-broad error, missing unrelated boundary, direct-boundary miss, scope drift, or ambiguous evidence.
+- Good: group feedback by error type first, then propose the smallest rule changes that address repeated error types.
+- Bad: treat indirect -> unrelated feedback as a reason to add broader indirect criteria.
+- Good: for indirect -> unrelated feedback, strengthen unrelated exclusions, narrow indirect entry criteria, and preserve direct/indirect decision axes.
+- Bad: merge enzyme characterization, nucleic-acid substrate/readout context, and selection/screening platform relevance into one indirect sentence.
+- Good: keep separate indirect rules for nucleic-acid-acting enzyme characterization that directly informs engineering or substrate specificity; close nucleic-acid substrate/probe/readout context that informs chemistry or substrate design; and selection/screening platforms explicitly demonstrated on nucleic-acid-acting enzymes, aptamers, XNA/TNA systems, or nucleic-acid substrate engineering.
+- Bad: change three clear indirect rules into one broad rule about close methodological or mechanistic context.
+- Good: keep 2-3 clear rules when they answer different classification questions.
+- Bad: rewrite "Surface adjacency alone is unrelated" into "General platform papers are unrelated" and lose the explicit priority rule.
+- Good: preserve the boundary with wording such as "If nucleic acid terms are only recognition elements, analytes, payloads, readouts, validation tools, or surface adjacency, classify as unrelated unless the core contribution is nucleic acid chemistry or nucleic-acid-enzyme engineering."
 - Bad: create one merge change and one add change that both say the same boundary in slightly different words.
 - Good: either produce one rewrite/merge that absorbs the boundary, or produce one truly non-overlapping add if a separate boundary is genuinely missing.
-- Bad: create separate rules for peptide biosensors, protein sensors, and aptamer-platform papers just because the surface objects differ.
-- Good: abstract them into a higher-level boundary when the shared reason is that the recognition element is not the innovation center and the real novelty is in the material, platform, device, delivery system, or assay format rather than nucleic acid chemistry, directed evolution, proximity labeling, or engineering of nucleic acid-acting enzymes.
-- Bad: add multiple direct rules for specific probes, assays, or constructs that all really mean "the nucleic acid chemistry or enzyme-engineering innovation is central".
-- Good: rewrite or merge them into one reason-level direct rule that states the core direct boundary instead of enumerating object families.
 - Bad: say DNA/RNA/aptamer/probe/biosensor/device/platform/nanostructure papers are indirect because they are nucleic-acid-adjacent.
 - Good: if the nucleic acid is only a recognition element, analyte, payload, or readout and the core innovation is a material, device, diagnostic, ML model, peptide/protein probe, or biological mechanism, classify as unrelated.
-- Good: indirect requires close evidence that the work informs nucleic-acid substrate design, nucleic acid chemistry, or engineering of nucleic-acid-acting enzymes.
 
 Return:
 - summary: one short summary of what changed
-- proposed_profile: the compact full next profile
 - changes: a list of per-change items using add/remove/rewrite/merge
-- consolidate related feedback into fewer, broader changes when they point to the same reason-level boundary
-- prefer rewrite and merge changes that absorb old object-specific rules into broader reason-based rules
+- consolidate related feedback only when they share the same error type and decision test
+- prefer rewrite and merge changes only when they preserve all distinct decision axes
 - every change must include before/after content, rationale, and source ids
 - text_before/text_after are only for scope and relevance rules
 - use empty source_feedback_ids and source_paper_ids when running maintenance mode without feedback
@@ -501,19 +629,30 @@ func proposalValidationPrompt(currentDocument profileDocument, feedbackItems []F
 Audit the proposed scientific-literature classification profile.
 
 Return valid JSON only.
+Set hard_rejected=true for unsafe profile behavior that should not be repaired by another model pass.
+Set hard_rejected=false only for mechanical or schema-adjacent issues that are directionally safe to repair once.
 
 Accept only if the proposal is likely to reduce the supplied feedback mistakes.
 Reject when any blocking issue is present:
 - The proposed profile makes any source feedback corrected label harder to explain.
+- The proposal is not grounded in repeated feedback error types or explicit feedback notes.
+- The proposal skips error-type analysis and performs broad profile cleanup or structural compaction instead.
 - Indirect and unrelated rules cover the same boundary without a clear priority.
 - The proposal removes high-value negative boundaries for ML/software, protein or peptide probes, DNA repair or RNA biology mechanisms, platform/device/diagnostic papers, or metabolomics/nucleotide-analyte papers.
 - For a mostly indirect -> unrelated feedback batch, the proposal adds or broadens indirect instead of tightening indirect or strengthening unrelated.
+- For indirect -> unrelated feedback, the proposal does not use the default repairs: strengthen unrelated exclusions, narrow indirect entry criteria, and preserve direct/indirect decision axes.
 - Potential future applicability, possible usefulness, or "could impact nucleic acid-related technologies" is treated as enough for indirect relevance.
 - The proposal optimizes for fewer rules at the cost of decision clarity.
 - Scope is rewritten as a broad topic catalog, keyword list, or noun list instead of a short decision policy.
 - Scope is expanded from a single ambiguous feedback item without an explicit note indicating changed interests.
 - Clear negative boundaries are replaced by long noun-list rules or a keyword net.
 - V25-style negative boundaries are deleted without equally clear replacement rules.
+- The proposal collapses distinct decision axes into one umbrella rule.
+- The proposal merges rules even though the same error type does not affect the same decision axis.
+- A 3 -> 1 indirect rewrite merges enzyme characterization, nucleic-acid substrate/readout context, and selection/screening platform relevance even though they answer different classification questions.
+- The proposal is shorter but less discriminative, even if protected unrelated boundaries are preserved.
+- Hard rejection examples: removed key negative boundaries, broadened indirect for indirect -> unrelated feedback, noun-list scope, contradictory changes, or failure to explain corrected feedback.
+- Soft rejection examples: missing rationale, overly verbose but directionally correct rules, unsupported operation wording, or schema-adjacent formatting that can be repaired without changing the decision direction.
 
 Current compact profile:
 %s
@@ -569,10 +708,18 @@ Requirements:
 - Compress repeated reasoning, not noun lists.
 - Rewrite scope only as a short decision policy; do not turn it into a broad technology catalog.
 - If only a single unnoted feedback item supports a scope expansion, keep scope unchanged and repair rules instead.
+- Repair around the feedback error type that caused the rejection, not broad profile cleanup.
+- For indirect -> unrelated feedback, repair by strengthening unrelated exclusions, narrowing indirect entry criteria, and preserving direct/indirect decision axes.
 - If feedback is mostly indirect -> unrelated, tighten indirect or strengthen unrelated; do not broaden indirect.
 - Keep negative boundaries for ML/software, protein or peptide probes, DNA repair or RNA biology mechanisms, platform/device/diagnostic papers, and metabolomics/nucleotide-analyte papers.
+- Keep any current unrelated rule that says surface adjacency alone is unrelated, or rewrite it only into an equally explicit priority rule.
+- Do not repair a rejected proposal by replacing protected negative boundaries with vague generalities.
 - Do not rely on potential future applicability as an indirect criterion.
 - Do not replace clear negative boundaries with a keyword net.
+- If validator flags collapsed decision axes, split the rule back into separate decision-axis rules.
+- Do not repair an axis-collapse rejection by adding examples to a broad umbrella rule.
+- Keep enzyme characterization, nucleic-acid substrate/readout context, and selection/screening platform relevance separate when they answer different indirect classification questions.
+- Do not merge rules unless the same error type affects the same decision axis.
 
 Current compact profile:
 %s
@@ -619,7 +766,43 @@ func coerceProposalValidationResult(content string) (ProposalValidationResult, e
 	if !result.Accepted && len(result.BlockingIssues) == 0 && len(result.RequiredFixes) == 0 {
 		return ProposalValidationResult{}, fmt.Errorf("rejected profile proposal validation must include blocking_issues or required_fixes")
 	}
+	if !result.Accepted {
+		result.HardRejected = isHardValidationRejection(result)
+	}
 	return result, nil
+}
+
+func isHardValidationRejection(result ProposalValidationResult) bool {
+	if result.Accepted {
+		return false
+	}
+	if result.HardRejected {
+		return true
+	}
+	text := strings.ToLower(validationFailureSummary(result))
+	for _, phrase := range []string{
+		"removed high-value negative",
+		"removes high-value negative",
+		"removes the current surface-adjacency",
+		"removes the explicit surface-adjacency",
+		"surface-adjacency unrelated",
+		"broadened indirect",
+		"broadens indirect",
+		"cannot broaden indirect",
+		"noun-list scope",
+		"scope is a noun list",
+		"keyword net",
+		"contradictory",
+		"hard rejection",
+		"hard_rejected",
+		"v25-style negative boundaries are deleted",
+		"makes any source feedback corrected label harder to explain",
+	} {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func validationFailureSummary(result ProposalValidationResult) string {
@@ -882,16 +1065,6 @@ func coerceCompactProposal(content string) (string, []ProposalChange, error) {
 	if summary == "" {
 		return "", nil, fmt.Errorf("compact profile proposal summary cannot be blank")
 	}
-	if len(payload.ProposedProfile) == 0 || string(payload.ProposedProfile) == "null" {
-		return "", nil, fmt.Errorf("compact profile proposal must include proposed_profile")
-	}
-	var proposedProfile map[string]any
-	if err := json.Unmarshal(payload.ProposedProfile, &proposedProfile); err != nil {
-		return "", nil, fmt.Errorf("parse compact profile proposal proposed_profile: %w", err)
-	}
-	if _, err := ValidateMap(proposedProfile); err != nil {
-		return "", nil, fmt.Errorf("validate compact profile proposal proposed_profile: %w", err)
-	}
 	changes, err := ValidateProposalChanges(payload.Changes)
 	if err != nil {
 		return "", nil, err
@@ -940,23 +1113,6 @@ func compactProfileContract() string {
 func compactProposalContract() string {
 	return `{
   "summary": "short summary of what changed",
-  "proposed_profile": {
-    "meta": {
-      "name": "same profile name",
-      "version": 2,
-      "created_at": "ISO-8601 datetime",
-      "updated_at": "ISO-8601 datetime",
-      "source_description": "same source description"
-    },
-    "scope": "rewritten scope if needed",
-    "relevance_rules": {
-      "direct": ["compact direct rule"],
-      "indirect": ["compact indirect rule"],
-      "unrelated": ["compact unrelated rule"]
-    },
-    "topic_taxonomy": [],
-    "few_shots": []
-  },
   "changes": [
     {
       "id": "change_id",
@@ -979,6 +1135,7 @@ func compactProposalContract() string {
 func proposalValidationContract() string {
 	return `{
   "accepted": true,
+  "hard_rejected": false,
   "summary": "short validation summary",
   "blocking_issues": ["issue that must block saving the proposal"],
   "required_fixes": ["specific change needed before saving"]

@@ -40,6 +40,70 @@ type ProposalChange struct {
 	Status            string            `json:"status"`
 }
 
+type flexibleStringList []string
+
+func (items *flexibleStringList) UnmarshalJSON(data []byte) error {
+	clean := strings.TrimSpace(string(data))
+	if clean == "" || clean == "null" {
+		*items = []string{}
+		return nil
+	}
+	if strings.HasPrefix(clean, `"`) {
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return err
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			*items = []string{}
+		} else {
+			*items = []string{value}
+		}
+		return nil
+	}
+	var values []string
+	if err := json.Unmarshal(data, &values); err != nil {
+		return err
+	}
+	*items = values
+	return nil
+}
+
+func (change *ProposalChange) UnmarshalJSON(data []byte) error {
+	var payload struct {
+		ID                string             `json:"id"`
+		Section           string             `json:"section"`
+		Operation         string             `json:"operation"`
+		Summary           string             `json:"summary"`
+		TextBefore        flexibleStringList `json:"text_before"`
+		TextAfter         flexibleStringList `json:"text_after"`
+		TopicBefore       []topicDefinition  `json:"topic_before"`
+		TopicAfter        []topicDefinition  `json:"topic_after"`
+		Rationale         string             `json:"rationale"`
+		SourceFeedbackIDs []int64            `json:"source_feedback_ids"`
+		SourcePaperIDs    []int64            `json:"source_paper_ids"`
+		Status            string             `json:"status"`
+	}
+	if err := decodeStrict(data, &payload); err != nil {
+		return err
+	}
+	*change = ProposalChange{
+		ID:                payload.ID,
+		Section:           payload.Section,
+		Operation:         payload.Operation,
+		Summary:           payload.Summary,
+		TextBefore:        []string(payload.TextBefore),
+		TextAfter:         []string(payload.TextAfter),
+		TopicBefore:       payload.TopicBefore,
+		TopicAfter:        payload.TopicAfter,
+		Rationale:         payload.Rationale,
+		SourceFeedbackIDs: payload.SourceFeedbackIDs,
+		SourcePaperIDs:    payload.SourcePaperIDs,
+		Status:            payload.Status,
+	}
+	return nil
+}
+
 func ValidateProposalChangesBytes(data []byte) ([]ProposalChange, error) {
 	clean := strings.TrimSpace(string(data))
 	if clean == "" || clean == "null" {

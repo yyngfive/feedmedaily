@@ -3,6 +3,7 @@ package profile
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -258,5 +259,33 @@ func TestValidateProposalChangesNormalizesRestoreOperation(t *testing.T) {
 	}
 	if len(changes) != 1 || changes[0].Operation != ProposalOperationAdd {
 		t.Fatalf("expected restore to normalize to add, got %#v", changes)
+	}
+}
+
+func TestValidateProposalChangesAcceptsScalarTextFields(t *testing.T) {
+	changes, err := ValidateProposalChangesBytes([]byte(`[
+    {
+      "id":"rewrite-negative-boundary",
+      "section":"unrelated_rule",
+      "operation":"rewrite",
+      "summary":"Clarify negative boundary.",
+      "text_before":"Old broad boundary.",
+      "text_after":"Surface adjacency alone is unrelated without a core nucleic-acid-method contribution.",
+      "topic_before":[],
+      "topic_after":[],
+      "rationale":"The model may emit a scalar string for single-rule rewrites.",
+      "source_feedback_ids":[1],
+      "source_paper_ids":[10],
+      "status":"proposed"
+    }
+  ]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || len(changes[0].TextBefore) != 1 || changes[0].TextBefore[0] != "Old broad boundary." {
+		t.Fatalf("expected scalar text_before to normalize to list, got %#v", changes)
+	}
+	if len(changes[0].TextAfter) != 1 || !strings.Contains(changes[0].TextAfter[0], "Surface adjacency") {
+		t.Fatalf("expected scalar text_after to normalize to list, got %#v", changes)
 	}
 }

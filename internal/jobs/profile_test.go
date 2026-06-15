@@ -139,6 +139,93 @@ func TestGenerateProfileProposalUsesOpenFeedback(t *testing.T) {
 	}
 }
 
+func TestGenerateProfileProposalReturnsHandledRejectionWithoutSaving(t *testing.T) {
+	root := t.TempDir()
+	settings := profileJobSettings(root)
+	server := profileModelTestServer(t, `{
+  "summary":"Tighten RNA rules",
+  "changes":[
+    {
+      "id":"change-1",
+      "section":"direct_rule",
+      "operation":"rewrite",
+      "summary":"Promote chemistry-first RNA work.",
+      "text_before":["RNA"],
+      "text_after":["RNA chemistry"],
+      "topic_before":[],
+      "topic_after":[],
+      "rationale":"The feedback shows chemistry-first RNA papers should be direct.",
+      "source_feedback_ids":[1],
+      "source_paper_ids":[1],
+      "status":"proposed"
+    }
+  ]
+}`, `{"accepted":false,"hard_rejected":true,"summary":"Profile proposal rejected by safety review.","blocking_issues":["The proposal removes high-value negative boundaries."],"required_fixes":["Preserve the negative boundaries."]}`)
+	defer server.Close()
+	settings.ProfileBaseURL = server.URL
+	writeProfileFixture(t, settings.ProfilePath)
+
+	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paperID, _, err := sqliteStore.UpsertPaper(store.Paper{
+		SourceURL:      "https://example.com/rss",
+		Title:          "RNA chemistry paper",
+		URL:            "https://example.com/paper",
+		Authors:        []string{},
+		AbstractSource: "rss",
+		FirstSeenAt:    time.Now().UTC(),
+		Raw:            map[string]any{},
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqliteStore.SaveClassification(paperID, store.Classification{
+		Relevance:         "indirect",
+		Confidence:        0.9,
+		TopicTags:         []string{},
+		Reason:            "fixture",
+		RecommendedAction: "scan",
+		Model:             "fixture",
+	}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqliteStore.CreateFeedback(paperID, "direct", stringPtr("Should be direct"), time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqliteStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := GenerateProfileProposal(settings, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["accepted"] != false || result["hard_rejected"] != true {
+		t.Fatalf("unexpected rejection result: %#v", result)
+	}
+	sqliteStore, err = store.Open(settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqliteStore.Close()
+	items, err := sqliteStore.ListProfileProposals()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("rejected proposal should not be saved: %#v", items)
+	}
+	openFeedback, err := sqliteStore.ListOpenFeedbackContexts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(openFeedback) != 1 {
+		t.Fatalf("rejected proposal should leave feedback open: %#v", openFeedback)
+	}
+}
+
 func TestGenerateProfileProposalPromptIncludesConflictAwareCompactionGuidance(t *testing.T) {
 	root := t.TempDir()
 	settings := profileJobSettings(root)
@@ -207,10 +294,12 @@ func TestGenerateProfileProposalPromptIncludesConflictAwareCompactionGuidance(t 
 	}
 	prompt := prompts[0]
 	for _, fragment := range []string{
-		"do not also add a second rule that expresses the same boundary",
-		"the new feedback wins",
-		"preserve the salient coverage from the old rules",
-		"Apply the same reason-first compaction standard to direct rules",
+		"Before proposing changes, classify each feedback item into one error type",
+		"Propose changes only for repeated error types",
+		"For indirect -> unrelated feedback, default repairs are",
+		"Do not merge rules unless the same error type affects the same decision axis",
+		"Do not collapse different decision axes into one rule",
+		"the feedback direction wins",
 	} {
 		if !strings.Contains(prompt, fragment) {
 			t.Fatalf("proposal prompt missing %q: %s", fragment, prompt)

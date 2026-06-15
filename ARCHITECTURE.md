@@ -104,7 +104,7 @@ Each role can use its own API key and base URL:
 - `SCIRSS_CLASSIFIER_API_KEY` / `SCIRSS_CLASSIFIER_BASE_URL`
 - `SCIRSS_PROFILE_API_KEY` / `SCIRSS_PROFILE_BASE_URL`
 
-The code owns the prompt shell and response schema. User interest boundaries, topic taxonomy, notes, and few-shot guidance live in the profile file.
+The code owns the prompt shell and response schema. User interest boundaries, topic taxonomy, notes, and few-shot guidance live in the profile file. The classifier prompt applies profile rules in priority order: unrelated exclusions are checked first as a veto, then direct rules, then indirect rules; model-returned decision traces are used only to discipline the prompt and are not persisted.
 
 The current classification path stores relevance, confidence, reason, recommended action, and translated title. It does not emit paper-level topic tags.
 

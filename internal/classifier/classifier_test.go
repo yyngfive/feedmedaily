@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -27,7 +28,7 @@ func TestClassifyPapersWithTranslationFallback(t *testing.T) {
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"translated_title_zh\":\"中文标题\"}]}"}}]}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.8,\"reason\":\"Relevant.\",\"recommended_action\":\"read\"}]}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.8,\"reason\":\"Relevant.\",\"recommended_action\":\"read\",\"decision_trace\":{\"exclusion_check\":\"No unrelated exclusion fits.\",\"direct_check\":\"Direct rule fits.\",\"indirect_check\":\"Not needed after direct.\",\"priority_resolution\":\"Direct after exclusion check.\"}}]}"}}]}`))
 	}))
 	defer server.Close()
 
@@ -81,6 +82,21 @@ func TestClassifyPapersWithTranslationFallback(t *testing.T) {
 	if !strings.Contains(userPrompts[0], "Judge relevance from the current scope and relevance rules only.") {
 		t.Fatalf("classification prompt missing rule-only guidance: %s", userPrompts[0])
 	}
+	for _, fragment := range []string{
+		"Apply unrelated exclusion rules first",
+		"If not excluded, choose direct only",
+		"If not direct, choose indirect only",
+		"If uncertain between indirect and unrelated, choose unrelated",
+		"decision_trace",
+		"exclusion_check",
+		"direct_check",
+		"indirect_check",
+		"priority_resolution",
+	} {
+		if !strings.Contains(userPrompts[0], fragment) {
+			t.Fatalf("classification prompt missing %q: %s", fragment, userPrompts[0])
+		}
+	}
 }
 
 func TestClassifyPapersFallbackDisablesThinkingAndClearsTopicTags(t *testing.T) {
@@ -96,7 +112,7 @@ func TestClassifyPapersFallbackDisablesThinkingAndClearsTopicTags(t *testing.T) 
 			http.Error(w, "provider timeout while using thinking mode", http.StatusGatewayTimeout)
 			return
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Relevant.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"RNA 论文\"},{\"id\":\"2\",\"relevance\":\"unrelated\",\"confidence\":0.2,\"reason\":\"Not relevant.\",\"recommended_action\":\"skip\",\"translated_title_zh\":\"无关论文\"}]}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Relevant.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"RNA 论文\",\"decision_trace\":{\"exclusion_check\":\"No exclusion.\",\"direct_check\":\"Direct rule applies.\",\"indirect_check\":\"Not needed.\",\"priority_resolution\":\"Direct.\"}},{\"id\":\"2\",\"relevance\":\"unrelated\",\"confidence\":0.2,\"reason\":\"Not relevant.\",\"recommended_action\":\"skip\",\"translated_title_zh\":\"无关论文\",\"decision_trace\":{\"exclusion_check\":\"Unrelated exclusion applies.\",\"direct_check\":\"Skipped after exclusion.\",\"indirect_check\":\"Skipped after exclusion.\",\"priority_resolution\":\"Unrelated veto.\"}}]}"}}]}`))
 	}))
 	defer server.Close()
 
@@ -138,6 +154,9 @@ func TestClassifyPapersFallbackDisablesThinkingAndClearsTopicTags(t *testing.T) 
 	}
 	if len(results[1].TopicTags) != 0 {
 		t.Fatalf("expected empty topic tags for unrelated paper, got %#v", results[1].TopicTags)
+	}
+	if _, ok := reflect.TypeOf(results[0]).FieldByName("DecisionTrace"); ok {
+		t.Fatalf("decision_trace should not be exposed on stored classification")
 	}
 }
 
