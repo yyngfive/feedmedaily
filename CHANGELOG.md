@@ -8,6 +8,14 @@ The latest released version is `0.3.2`. The next planned release is `0.3.3`, so 
 
 Changes since `0.3.2`:
 
+### Changed
+
+- Changed ACS protected-feed recovery from per-feed manual XML fallback to a host-scoped verification session model. `pubs.acs.org` feeds now share one persistent verification host session and can reuse the same approved browser state across later syncs.
+
+### Added
+
+- Added an ACS-specific native WebView2 helper that can keep one persistent publisher profile, capture multiple ACS feed XML documents in the same session, and hand those XML bodies back to the existing Go sync pipeline without switching to the normal Go HTTP client mid-verification.
+
 ## 0.3.2 (2026-06-15)
 
 Changes since `0.3.1`:

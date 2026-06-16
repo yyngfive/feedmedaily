@@ -11,6 +11,7 @@ $trayBuildScript = Join-Path $root "tools\build_go_tray.ps1"
 $trayBuildOutput = Join-Path $root "build\feedmedaily-tray.exe"
 $daemonBuildOutput = Join-Path $root "build\feedmedailyd.exe"
 $verifierBuildOutput = Join-Path $root "build\FeedMeDailyVerifier.exe"
+$acsVerifierBuildOutput = Join-Path $root "build\FeedMeDailyACSVerifier"
 
 function Invoke-NativeStep {
   param(
@@ -139,6 +140,9 @@ try {
   }
   if (Test-Path $verifierBuildOutput) {
     Copy-Item -Force $verifierBuildOutput (Join-Path $appDist "FeedMeDailyVerifier.exe")
+  }
+  if (Test-Path $acsVerifierBuildOutput) {
+    Copy-Item -Recurse -Force $acsVerifierBuildOutput (Join-Path $appDist "FeedMeDailyACSVerifier")
   }
   Write-UpdateManifest -Version $projectVersion
 

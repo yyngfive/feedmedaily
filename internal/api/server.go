@@ -1092,7 +1092,9 @@ func (s *Server) handleFeedVerificationStart(w http.ResponseWriter, r *http.Requ
 		current.VerificationTarget = pending.Target
 		current.VerificationFeedURL = pending.FeedURL
 		current.VerificationJournal = pending.Journal
+		current.VerificationHost = pending.Host
 		current.VerificationMethod = verificationMethodWebview
+		current.VerificationSessionState = pending.SessionState
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":              true,
@@ -1144,7 +1146,9 @@ func (s *Server) handleFeedVerificationBrowser(w http.ResponseWriter, r *http.Re
 		current.VerificationTarget = pending.Target
 		current.VerificationFeedURL = pending.FeedURL
 		current.VerificationJournal = pending.Journal
+		current.VerificationHost = pending.Host
 		current.VerificationMethod = verificationMethodBrowserManual
+		current.VerificationSessionState = pending.SessionState
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":              true,

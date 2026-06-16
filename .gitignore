@@ -33,9 +33,14 @@ data/*.sqlite
 data/*.sqlite-*
 data/classification_profile.json
 data/rss_feeds.json
+data/verification-profiles/
+data/verification-sessions.json
 logs/
 reports/
 build/
 dist/
 
 *.log
+
+tools/*/bin/
+tools/*/obj/

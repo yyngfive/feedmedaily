@@ -17,10 +17,14 @@ type pendingVerification struct {
 	ID               string
 	JobID            string
 	FeedURL          string
+	FeedURLs         []string
 	Journal          string
+	Host             string
 	Target           string
 	Reason           string
 	Method           string
+	SessionState     string
+	VerifierKind     string
 	CallbackURL      string
 	Result           chan verificationResult
 	Delivered        bool
@@ -32,6 +36,7 @@ type verificationResult struct {
 	Status      string
 	ContentType string
 	FeedXML     []byte
+	FeedBodies  map[string][]byte
 	Err         error
 	Warning     string
 }
@@ -103,6 +108,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					"verification_target":   pending.Target,
 					"verification_feed_url": pending.FeedURL,
 					"verification_journal":  pending.Journal,
+					"verification_host":     pending.Host,
 				})
 				updateJob(job.ID, func(current *jobInfo) {
 					current.Status = "waiting_for_user"
@@ -110,17 +116,21 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					current.Message = "A protected feed needs Cloudflare verification. A verification window should open automatically."
 					clearJobProgress(current)
 					current.Result = map[string]any{
-						"verification_required": true,
-						"verification_target":   pending.Target,
-						"verification_feed_url": pending.FeedURL,
-						"verification_journal":  pending.Journal,
-						"verification_method":   pending.Method,
+						"verification_required":      true,
+						"verification_target":        pending.Target,
+						"verification_feed_url":      pending.FeedURL,
+						"verification_journal":       pending.Journal,
+						"verification_host":          pending.Host,
+						"verification_method":        pending.Method,
+						"verification_session_state": pending.SessionState,
 					}
 					current.VerificationRequired = true
 					current.VerificationTarget = pending.Target
 					current.VerificationFeedURL = pending.FeedURL
 					current.VerificationJournal = pending.Journal
+					current.VerificationHost = pending.Host
 					current.VerificationMethod = pending.Method
+					current.VerificationSessionState = pending.SessionState
 				})
 			},
 			OnVerificationStartFailed: func(pending *pendingVerification, err error) {
@@ -138,7 +148,9 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					current.VerificationTarget = ""
 					current.VerificationFeedURL = ""
 					current.VerificationJournal = ""
+					current.VerificationHost = ""
 					current.VerificationMethod = ""
+					current.VerificationSessionState = ""
 				})
 			},
 			OnVerificationStarted: func(pending *pendingVerification) {
@@ -146,7 +158,22 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					"verification_id":       pending.ID,
 					"verification_feed_url": pending.FeedURL,
 					"verification_journal":  pending.Journal,
+					"verification_host":     pending.Host,
 				})
+				if pending.SessionState == verificationSessionStateVerified {
+					updateJob(job.ID, func(current *jobInfo) {
+						current.Status = "running"
+						current.MessageKey = "pipeline.feeds.verification_required"
+						current.Message = "Reusing the previous ACS verification session and retrying protected feeds."
+						current.VerificationRequired = false
+						current.VerificationTarget = pending.Target
+						current.VerificationFeedURL = pending.FeedURL
+						current.VerificationJournal = pending.Journal
+						current.VerificationHost = pending.Host
+						current.VerificationMethod = pending.Method
+						current.VerificationSessionState = pending.SessionState
+					})
+				}
 			},
 			OnVerificationSkipped: func(pending *pendingVerification, resumeResult verificationResult) {
 				logJobEvent(settings.LogsDir, &job, "warning", "verification_skipped", "pipeline.feeds.fetching", "Verification did not return feed XML. Continuing this sync without that feed.", resumeResult.Warning, map[string]any{
@@ -163,7 +190,9 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					current.VerificationTarget = ""
 					current.VerificationFeedURL = ""
 					current.VerificationJournal = ""
+					current.VerificationHost = ""
 					current.VerificationMethod = ""
+					current.VerificationSessionState = ""
 				})
 			},
 			OnVerificationResumed: func(_ *pendingVerification) {
@@ -177,7 +206,9 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					current.VerificationTarget = ""
 					current.VerificationFeedURL = ""
 					current.VerificationJournal = ""
+					current.VerificationHost = ""
 					current.VerificationMethod = ""
+					current.VerificationSessionState = ""
 				})
 			},
 		})
@@ -197,7 +228,9 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 				current.VerificationTarget = ""
 				current.VerificationFeedURL = ""
 				current.VerificationJournal = ""
+				current.VerificationHost = ""
 				current.VerificationMethod = ""
+				current.VerificationSessionState = ""
 			})
 			return
 		}
@@ -213,7 +246,9 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 			current.VerificationTarget = ""
 			current.VerificationFeedURL = ""
 			current.VerificationJournal = ""
+			current.VerificationHost = ""
 			current.VerificationMethod = ""
+			current.VerificationSessionState = ""
 		})
 		return
 	}()
@@ -222,15 +257,27 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 }
 
 func storePendingVerification(jobID string, request feeds.VerificationRequest) *pendingVerification {
-	return storePendingVerificationWithCallback(jobID, request, "")
+	return storePendingVerificationWithCallback(jobID, request, []feeds.VerificationRequest{request}, "")
 }
 
-func storePendingVerificationWithCallback(jobID string, request feeds.VerificationRequest, callbackURL string) *pendingVerification {
+func storePendingVerificationWithCallback(jobID string, request feeds.VerificationRequest, groupedRequests []feeds.VerificationRequest, callbackURL string) *pendingVerification {
+	feedURLs := make([]string, 0, len(groupedRequests))
+	for _, item := range groupedRequests {
+		if strings.TrimSpace(item.URL) == "" {
+			continue
+		}
+		feedURLs = append(feedURLs, item.URL)
+	}
+	if len(feedURLs) == 0 {
+		feedURLs = append(feedURLs, request.URL)
+	}
 	pending := &pendingVerification{
 		ID:          nextJobID(),
 		JobID:       jobID,
 		FeedURL:     request.URL,
+		FeedURLs:    feedURLs,
 		Journal:     request.Journal,
+		Host:        verificationProfileHost(request.URL),
 		Target:      request.Target,
 		Reason:      request.Reason,
 		Method:      verificationMethodWebview,
@@ -306,7 +353,7 @@ func completeVerificationFlow(settings config.Settings, pending *pendingVerifica
 	if pending.CallbackResult.Err != nil {
 		return verificationResult{}, pending.CallbackResult.Err
 	}
-	if len(pending.CallbackResult.FeedXML) == 0 {
+	if len(pending.CallbackResult.FeedXML) == 0 && len(pending.CallbackResult.FeedBodies) == 0 {
 		return verificationResult{}, fmt.Errorf("verification completed without returning RSS XML")
 	}
 	return pending.CallbackResult, nil
@@ -361,10 +408,22 @@ func storeVerificationCallbackResult(id string, result verificationResult) (*pen
 		Status:      result.Status,
 		ContentType: result.ContentType,
 		FeedXML:     append([]byte(nil), result.FeedXML...),
+		FeedBodies:  cloneFeedBodies(result.FeedBodies),
 		Err:         result.Err,
 		Warning:     result.Warning,
 	}
 	return pending, true, true
+}
+
+func cloneFeedBodies(items map[string][]byte) map[string][]byte {
+	if len(items) == 0 {
+		return nil
+	}
+	cloned := make(map[string][]byte, len(items))
+	for key, value := range items {
+		cloned[key] = append([]byte(nil), value...)
+	}
+	return cloned
 }
 
 func markVerificationDelivered(id string) bool {

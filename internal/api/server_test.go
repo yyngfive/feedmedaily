@@ -1339,6 +1339,69 @@ func TestAdminRunCanFallbackToBrowserManualXMLAfterVerifierAbort(t *testing.T) {
 	waitForJobCompletion(t, runPayload.Job.ID)
 }
 
+func TestAdminRunReusesACSVerificationForMultipleFeeds(t *testing.T) {
+	root := t.TempDir()
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	settings := testSettings(root)
+	if _, err := markVerificationHostSessionVerified(settings, acsVerificationHost, verificationVerifierKindACSNative); err != nil {
+		t.Fatal(err)
+	}
+
+	runCalls := 0
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		runCalls++
+		if len(opts.FeedBodyOverrides) == 0 {
+			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
+				Requests: []feeds.VerificationRequest{
+					{URL: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=jacsat", Target: "cloudflare", Reason: "challenge", Journal: "JACS"},
+					{URL: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ancham", Target: "cloudflare", Reason: "challenge", Journal: "Analytical Chemistry"},
+				},
+			}
+		}
+		if len(opts.FeedBodyOverrides) != 2 {
+			t.Fatalf("expected two overridden ACS feeds, got %#v", opts.FeedBodyOverrides)
+		}
+		return jobruntime.RunSummary{Fetched: 2, Inserted: 2, Classified: 2}, nil
+	}
+	startVerificationFlowFunc = func(_ config.Settings, pending *pendingVerification) error {
+		if pending == nil {
+			t.Fatal("expected pending verification")
+		}
+		if pending.Host != acsVerificationHost || len(pending.FeedURLs) != 2 {
+			t.Fatalf("unexpected ACS pending verification: %#v", pending)
+		}
+		go func() {
+			pending.Result <- verificationResult{
+				Status: "success",
+				FeedBodies: map[string][]byte{
+					"https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=jacsat": []byte("<rss><channel><title>JACS</title><item><title>One</title><link>https://example.com/1</link></item></channel></rss>"),
+					"https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ancham": []byte("<rss><channel><title>Analytical Chemistry</title><item><title>Two</title><link>https://example.com/2</link></item></channel></rss>"),
+				},
+			}
+		}()
+		return nil
+	}
+
+	handler := newTestHandler(t, settings)
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run launch = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	var runPayload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(runRecorder.Body.Bytes(), &runPayload); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobCompletion(t, runPayload.Job.ID)
+	if runCalls != 2 {
+		t.Fatalf("runCalls = %d", runCalls)
+	}
+}
+
 func TestVerificationCompleteRequiresCallbackXML(t *testing.T) {
 	root := t.TempDir()
 	restore := stubAPIGlobals(t)

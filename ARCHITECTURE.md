@@ -71,6 +71,8 @@ Cloudflare-protected or challenge-gated feeds use a Windows-first verification a
 
 The verifier now uses an app-owned persistent WebView2 profile directory under local data storage, scoped by protected-feed host such as `pubs.acs.org`. That lets Cloudflare or publisher trust state survive across retries while keeping verifier browser artifacts out of Git and out of exported user configuration.
 
+For ACS specifically, the product now treats verification as a host-scoped session rather than a single-feed callback. `pubs.acs.org` can launch a dedicated native WebView2 helper, keep one persistent publisher profile, and capture multiple ACS feed XML responses within the same verified session before the backend resumes the paused sync with those XML bodies injected as fetch overrides.
+
 Current limitation: even with a persistent verifier profile, some publisher challenges may still trust the user's full system browser more than an embedded WebView2 surface. The manual browser/XML fallback therefore remains part of the supported recovery path for protected feeds.
 
 ### Windows tray runtime

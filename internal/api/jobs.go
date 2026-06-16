@@ -16,29 +16,31 @@ import (
 )
 
 type jobInfo struct {
-	ID                   string         `json:"id"`
-	JobType              string         `json:"job_type"`
-	Status               string         `json:"status"`
-	MessageKey           string         `json:"message_key,omitempty"`
-	Message              string         `json:"message,omitempty"`
-	Error                string         `json:"error,omitempty"`
-	VerificationRequired bool           `json:"verification_required,omitempty"`
-	VerificationTarget   string         `json:"verification_target,omitempty"`
-	VerificationFeedURL  string         `json:"verification_feed_url,omitempty"`
-	VerificationJournal  string         `json:"verification_journal,omitempty"`
-	VerificationMethod   string         `json:"verification_method,omitempty"`
-	Result               map[string]any `json:"result,omitempty"`
-	LogPath              string         `json:"log_path,omitempty"`
-	WarningCount         int            `json:"warning_count,omitempty"`
-	ProgressStage        string         `json:"progress_stage,omitempty"`
-	ProgressCurrent      *int           `json:"progress_current,omitempty"`
-	ProgressTotal        *int           `json:"progress_total,omitempty"`
-	ProgressPercent      *int           `json:"progress_percent,omitempty"`
-	ProgressLabel        string         `json:"progress_label,omitempty"`
-	ProgressMode         string         `json:"progress_mode,omitempty"`
-	CreatedAt            time.Time      `json:"created_at"`
-	StartedAt            *time.Time     `json:"started_at,omitempty"`
-	FinishedAt           *time.Time     `json:"finished_at,omitempty"`
+	ID                       string         `json:"id"`
+	JobType                  string         `json:"job_type"`
+	Status                   string         `json:"status"`
+	MessageKey               string         `json:"message_key,omitempty"`
+	Message                  string         `json:"message,omitempty"`
+	Error                    string         `json:"error,omitempty"`
+	VerificationRequired     bool           `json:"verification_required,omitempty"`
+	VerificationTarget       string         `json:"verification_target,omitempty"`
+	VerificationFeedURL      string         `json:"verification_feed_url,omitempty"`
+	VerificationJournal      string         `json:"verification_journal,omitempty"`
+	VerificationHost         string         `json:"verification_host,omitempty"`
+	VerificationMethod       string         `json:"verification_method,omitempty"`
+	VerificationSessionState string         `json:"verification_session_state,omitempty"`
+	Result                   map[string]any `json:"result,omitempty"`
+	LogPath                  string         `json:"log_path,omitempty"`
+	WarningCount             int            `json:"warning_count,omitempty"`
+	ProgressStage            string         `json:"progress_stage,omitempty"`
+	ProgressCurrent          *int           `json:"progress_current,omitempty"`
+	ProgressTotal            *int           `json:"progress_total,omitempty"`
+	ProgressPercent          *int           `json:"progress_percent,omitempty"`
+	ProgressLabel            string         `json:"progress_label,omitempty"`
+	ProgressMode             string         `json:"progress_mode,omitempty"`
+	CreatedAt                time.Time      `json:"created_at"`
+	StartedAt                *time.Time     `json:"started_at,omitempty"`
+	FinishedAt               *time.Time     `json:"finished_at,omitempty"`
 }
 
 type jobRegistry struct {

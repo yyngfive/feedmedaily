@@ -17,6 +17,8 @@ import (
 )
 
 const verificationBinaryName = "FeedMeDailyVerifier.exe"
+const acsVerificationBinaryName = "FeedMeDailyACSVerifier.exe"
+const acsVerificationHost = "pubs.acs.org"
 
 type verifierProcess struct {
 	VerificationID string
@@ -40,6 +42,7 @@ var verifierProcesses = struct {
 }
 
 var ensureVerificationBinaryFunc = appruntime.EnsureSourceBinary
+var ensureACSVerificationBinaryFunc = ensureACSVerificationBinary
 
 func startVerificationWindowFlow(settings config.Settings, pending *pendingVerification) error {
 	if pending == nil {
@@ -51,6 +54,10 @@ func startVerificationWindowFlow(settings config.Settings, pending *pendingVerif
 	if !isWindowsRuntime() {
 		return fmt.Errorf("manual Cloudflare feed verification is only supported on Windows")
 	}
+	if pending.Host == acsVerificationHost {
+		return startACSVerificationWindowFlow(settings, pending)
+	}
+	pending.VerifierKind = verificationVerifierKindWails
 
 	binaryPath, err := verificationBinaryPath(settings)
 	if err != nil {
@@ -135,6 +142,93 @@ func startVerificationWindowFlow(settings config.Settings, pending *pendingVerif
 	}
 }
 
+func startACSVerificationWindowFlow(settings config.Settings, pending *pendingVerification) error {
+	pending.VerifierKind = verificationVerifierKindACSNative
+	binaryPath, err := acsVerificationBinaryPath(settings)
+	if err != nil {
+		return err
+	}
+	callbackURL := verificationCallbackURL(settings)
+	if strings.TrimSpace(pending.CallbackURL) != "" {
+		callbackURL = pending.CallbackURL
+	}
+	version := appruntime.PackageVersion(settings.RootDir)
+	commandArgs := []string{
+		"--verification-id", pending.ID,
+		"--job-id", pending.JobID,
+		"--verification-host", pending.Host,
+		"--callback-url", callbackURL,
+		"--logs-dir", settings.LogsDir,
+		"--app-version", version,
+	}
+	userDataDir, err := verificationUserDataDir(settings, pending.FeedURL)
+	if err != nil {
+		return err
+	}
+	commandArgs = append(commandArgs, "--user-data-dir", userDataDir)
+	for _, feedURL := range pending.FeedURLs {
+		commandArgs = append(commandArgs, "--feed-url", feedURL)
+	}
+	cmd := exec.Command(binaryPath, commandArgs...)
+	hideVerificationLauncherWindow(cmd)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("open ACS verification browser: %w", err)
+	}
+	process := &verifierProcess{
+		VerificationID: pending.ID,
+		JobID:          pending.JobID,
+		FeedURL:        pending.FeedURL,
+		Journal:        pending.Journal,
+		BinaryPath:     binaryPath,
+		Command:        append([]string{binaryPath}, commandArgs...),
+		PID:            verifierPID(cmd),
+		StartedAt:      time.Now(),
+	}
+	storeVerifierProcess(process)
+	logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_process_started", "pipeline.feeds.verification_required", "Started the ACS verifier window process.", "", map[string]any{
+		"verification_id":        pending.ID,
+		"verification_feed_url":  pending.FeedURL,
+		"verification_journal":   pending.Journal,
+		"verification_binary":    binaryPath,
+		"verification_pid":       process.PID,
+		"verification_profile":   userDataDir,
+		"verification_host":      pending.Host,
+		"verification_feed_urls": pending.FeedURLs,
+		"verification_command":   strings.Join(process.Command, " "),
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		exitCode := verifierExitCode(cmd, err)
+		markVerifierProcessExited(pending.ID, exitCode, err)
+		logVerificationProcessExit(settings, pending, process, exitCode, err)
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" && err != nil {
+			detail = err.Error()
+		}
+		if detail == "" {
+			detail = "ACS verification window exited immediately"
+		}
+		return fmt.Errorf("open ACS verification browser: %s", detail)
+	case <-time.After(900 * time.Millisecond):
+		go func() {
+			err := <-done
+			exitCode := verifierExitCode(cmd, err)
+			markVerifierProcessExited(pending.ID, exitCode, err)
+			logVerificationProcessExit(settings, pending, process, exitCode, err)
+		}()
+		return nil
+	}
+}
+
 func verificationBinaryPath(settings config.Settings) (string, error) {
 	if settings.Mode == appruntime.ModeRelease {
 		binaryPath := filepath.Join(settings.AppDir, verificationBinaryName)
@@ -144,6 +238,17 @@ func verificationBinaryPath(settings config.Settings) (string, error) {
 		return "", fmt.Errorf("verification helper not found: %s", binaryPath)
 	}
 	return ensureVerificationBinaryFunc(settings.RootDir, "./cmd/feedmedaily-verifier", verificationBinaryName)
+}
+
+func acsVerificationBinaryPath(settings config.Settings) (string, error) {
+	if settings.Mode == appruntime.ModeRelease {
+		binaryPath := filepath.Join(settings.AppDir, "FeedMeDailyACSVerifier", acsVerificationBinaryName)
+		if _, err := os.Stat(binaryPath); err == nil {
+			return binaryPath, nil
+		}
+		return "", fmt.Errorf("ACS verification helper not found: %s", binaryPath)
+	}
+	return ensureACSVerificationBinaryFunc(settings.RootDir)
 }
 
 func verificationCallbackURL(settings config.Settings) string {
@@ -174,6 +279,44 @@ func verificationUserDataDir(settings config.Settings, feedURL string) (string, 
 		return "", fmt.Errorf("create verification browser profile dir: %w", err)
 	}
 	return userDataDir, nil
+}
+
+func ensureACSVerificationBinary(root string) (string, error) {
+	dotnetPath, err := exec.LookPath("dotnet")
+	if err != nil {
+		return "", fmt.Errorf("dotnet command not found; install .NET SDK to build the ACS verifier helper")
+	}
+	projectPath := filepath.Join(root, "tools", "FeedMeDailyACSVerifier", "FeedMeDailyACSVerifier.csproj")
+	outputDir := filepath.Join(root, ".tmp", "runtime-bin", "FeedMeDailyACSVerifier")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return "", fmt.Errorf("create ACS verifier output dir: %w", err)
+	}
+	binaryPath := filepath.Join(outputDir, acsVerificationBinaryName)
+	cmd := exec.Command(
+		dotnetPath,
+		"publish",
+		projectPath,
+		"-c", "Release",
+		"-r", "win-x64",
+		"--self-contained", "false",
+		"-p:PublishSingleFile=false",
+		"-o", outputDir,
+	)
+	cmd.Dir = root
+	hideVerificationLauncherWindow(cmd)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return "", fmt.Errorf("build ACS verifier helper: %s", detail)
+	}
+	if _, err := os.Stat(binaryPath); err != nil {
+		return "", fmt.Errorf("ACS verifier helper build did not produce %s", binaryPath)
+	}
+	return binaryPath, nil
 }
 
 func verificationProfileHost(feedURL string) string {

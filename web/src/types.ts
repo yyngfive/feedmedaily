@@ -306,7 +306,9 @@ export type JobInfo = {
   verification_target?: string | null;
   verification_feed_url?: string | null;
   verification_journal?: string | null;
+  verification_host?: string | null;
   verification_method?: "webview" | "browser_manual" | null;
+  verification_session_state?: "verified" | "needs_reverify" | null;
   log_path?: string | null;
   warning_count?: number;
   result?: Record<string, unknown> | null;

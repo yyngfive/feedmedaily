@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/yyngfive/scirssagent/internal/config"
+	"github.com/yyngfive/scirssagent/internal/feeds"
 )
 
 func TestVerificationProfileHostUsesFeedHostname(t *testing.T) {
@@ -33,5 +34,16 @@ func TestVerificationUserDataDirUsesHostScopedPersistentPath(t *testing.T) {
 	expected := filepath.Join(settings.DataDir, "verification-profiles", "pubs.acs.org")
 	if path != expected {
 		t.Fatalf("path = %q, want %q", path, expected)
+	}
+}
+
+func TestGroupVerificationRequestsGroupsACSFeedsByHost(t *testing.T) {
+	grouped := groupVerificationRequests([]feeds.VerificationRequest{
+		{URL: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=jacsat"},
+		{URL: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ancham"},
+		{URL: "https://example.com/feed.xml"},
+	})
+	if len(grouped) != 2 {
+		t.Fatalf("len(grouped) = %d", len(grouped))
 	}
 }
