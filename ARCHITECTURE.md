@@ -8,8 +8,9 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 
 - `cmd/feedmedailyd/`: production Go backend entrypoint
 - `cmd/feedmedaily-tray/`: Windows tray runtime entrypoint
-- `cmd/feedmedaily-verifier/`: Windows-only protected-feed verifier window
-- `native/FeedMeDailyProtectedVerifier/`: native Windows WebView2 helper for host-scoped protected-feed verification
+- `cmd/feedmedaily-protected-verifier/`: Go native WebView2 helper for host-scoped protected-feed verification
+- `cmd/feedmedaily-verifier/`: deprecated Wails verifier source kept for reference only
+- `native/FeedMeDailyProtectedVerifier/`: deprecated C# helper source kept as a short-term rollback reference
 - `internal/api/`: HTTP API handlers, job endpoints, verification endpoints, and static asset serving
 - `internal/classifier/`: Go classifier client, prompt shaping, and thinking-fallback handling
 - `internal/config/`: settings schema, local config editing, and path resolution
@@ -74,7 +75,7 @@ Cloudflare-protected or challenge-gated feeds use a Windows-first verification a
 
 The backend also persists host-level verification session metadata in `data/verification-sessions.json`, including verifier kind, current session state, and the latest success/failure timestamps. That lets later sync runs try verified hosts optimistically first, then fall back to `needs_reverify` when a site challenges again.
 
-The native helper now serves as the default path for all protected hosts, not just ACS. The product treats verification as a host-scoped session rather than a single-feed callback, so the same verified WebView2 session can capture multiple same-host RSS responses before the backend resumes the paused sync with those XML bodies injected as fetch overrides. Helper diagnostics are written under `logs/protected-verifier/`, and the backend terminates a verifier process if its pending verification request times out so stale helper windows do not accumulate.
+The Go native helper in `cmd/feedmedaily-protected-verifier/` now serves as the default path for all protected hosts, not just ACS. The product treats verification as a host-scoped session rather than a single-feed callback, so the same verified WebView2 session can capture multiple same-host RSS responses before the backend resumes the paused sync with those XML bodies injected as fetch overrides. Helper diagnostics are written under `logs/protected-verifier/`, and the backend terminates a verifier process if its pending verification request times out so stale helper windows do not accumulate. Release builds package this helper as `{app}\FeedMeDailyProtectedVerifier\FeedMeDailyProtectedVerifier.exe`; source mode builds the same Go helper into `.tmp/runtime-bin/FeedMeDailyProtectedVerifier/FeedMeDailyProtectedVerifier.exe`.
 
 Current limitation: even with a persistent verifier profile, some publisher challenges may still trust the user's full system browser more than an embedded WebView2 surface. The manual browser/XML fallback therefore remains part of the supported recovery path for protected feeds.
 
@@ -128,6 +129,7 @@ Editable local configuration is exposed through the UI:
 - secrets are never echoed back to the frontend in plain text
 - each field reports whether its value comes from local config, the system environment, or a built-in default
 - first-run onboarding presents one shared LLM API key entry plus optional advanced per-role overrides for classifier and profile generation
+- saving local configuration reloads the running backend settings immediately, so follow-up jobs in the same session use the new API keys and model settings
 - changing `FEEDMEDAILY_UPDATE_MANIFEST_URL` takes effect immediately for subsequent in-app update checks without requiring a backend restart
 
 ## UI Architecture
@@ -140,7 +142,7 @@ The main app uses a three-column layout:
 
 Behavioral baseline:
 
-- if no profile exists, onboarding is shown first with split basic/advanced settings, local configuration editing, bootstrap job status, and an editable initial profile review card
+- if no profile exists, onboarding is shown first with split basic/advanced settings, standalone settings saving, bootstrap job status, and an editable initial profile review card
 - if a profile exists, the three-column review shell renders immediately and the paper list begins loading as soon as the report request starts
 - if a profile exists but no feeds exist, the app switches into a feed-initialization empty state once feed loading resolves
 - the default review view is `Unread + Last 30 days`

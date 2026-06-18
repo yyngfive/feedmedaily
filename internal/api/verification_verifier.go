@@ -201,26 +201,17 @@ func verificationUserDataDir(settings config.Settings, feedURL string) (string, 
 }
 
 func ensureProtectedFeedVerificationBinary(root string) (string, error) {
-	dotnetPath, err := exec.LookPath("dotnet")
+	goPath, err := exec.LookPath("go")
 	if err != nil {
-		return "", fmt.Errorf("dotnet command not found; install .NET SDK to build the protected-feed verifier helper")
+		return "", fmt.Errorf("go command not found; install Go to build the protected-feed verifier helper")
 	}
-	projectPath := filepath.Join(root, "native", "FeedMeDailyProtectedVerifier", "FeedMeDailyProtectedVerifier.csproj")
 	outputDir := filepath.Join(root, ".tmp", "runtime-bin", "FeedMeDailyProtectedVerifier")
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return "", fmt.Errorf("create protected-feed verifier output dir: %w", err)
 	}
 	binaryPath := filepath.Join(outputDir, protectedFeedVerificationBinaryName)
-	cmd := exec.Command(
-		dotnetPath,
-		"publish",
-		projectPath,
-		"-c", "Release",
-		"-r", "win-x64",
-		"--self-contained", "false",
-		"-p:PublishSingleFile=false",
-		"-o", outputDir,
-	)
+	version := appruntime.PackageVersion(root)
+	cmd := exec.Command(goPath, protectedFeedVerificationBuildArgs(binaryPath, version)...)
 	cmd.Dir = root
 	hideVerificationLauncherWindow(cmd)
 	var stderr bytes.Buffer
@@ -236,6 +227,16 @@ func ensureProtectedFeedVerificationBinary(root string) (string, error) {
 		return "", fmt.Errorf("protected-feed verifier helper build did not produce %s", binaryPath)
 	}
 	return binaryPath, nil
+}
+
+func protectedFeedVerificationBuildArgs(binaryPath string, version string) []string {
+	return []string{
+		"build",
+		"-tags", "production",
+		"-ldflags", fmt.Sprintf("-H=windowsgui -X github.com/yyngfive/scirssagent/internal/runtime.buildVersion=%s", version),
+		"-o", binaryPath,
+		".\\cmd\\feedmedaily-protected-verifier",
+	}
 }
 
 func verificationProfileHost(feedURL string) string {

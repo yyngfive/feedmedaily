@@ -2,6 +2,7 @@ package api
 
 import (
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -73,5 +74,20 @@ func TestNewVerifierCommandKeepsWindowVisible(t *testing.T) {
 	cmd := newVerifierCommand("FeedMeDailyProtectedVerifier.exe", []string{"--verification-id", "verify-1"})
 	if cmd.SysProcAttr != nil {
 		t.Fatalf("verifier command should not hide the visible verification window: %#v", cmd.SysProcAttr)
+	}
+}
+
+func TestProtectedFeedVerificationBuildArgsUseGoNativeHelper(t *testing.T) {
+	binaryPath := filepath.Join("build", "FeedMeDailyProtectedVerifier", "FeedMeDailyProtectedVerifier.exe")
+	args := protectedFeedVerificationBuildArgs(binaryPath, "0.3.3")
+	expected := []string{
+		"build",
+		"-tags", "production",
+		"-ldflags", "-H=windowsgui -X github.com/yyngfive/scirssagent/internal/runtime.buildVersion=0.3.3",
+		"-o", binaryPath,
+		".\\cmd\\feedmedaily-protected-verifier",
+	}
+	if !reflect.DeepEqual(args, expected) {
+		t.Fatalf("args = %#v, want %#v", args, expected)
 	}
 }

@@ -483,6 +483,51 @@ func TestSettingsConfigUpdateRefreshesUpdateManifestURL(t *testing.T) {
 	}
 }
 
+func TestSettingsConfigUpdateRefreshesSettingsForBootstrap(t *testing.T) {
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "user-data")
+	t.Setenv("FEEDMEDAILY_RUNTIME_MODE", "release")
+	t.Setenv("FEEDMEDAILY_DATA_ROOT", dataRoot)
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	seenProfileKey := make(chan string, 1)
+	bootstrapProfileFunc = func(settings config.Settings, _ string, _ *string, _ jobruntime.ProgressFunc) (map[string]any, error) {
+		seenProfileKey <- settings.ProfileAPIKey
+		return map[string]any{"proposal_id": 1}, nil
+	}
+	handler := newTestHandler(t, testSettings(root))
+
+	configRecorder := httptest.NewRecorder()
+	configBody := `{"fields":{"SCIRSS_PROFILE_API_KEY":{"value":"release-profile-key"}}}`
+	handler.ServeHTTP(configRecorder, httptest.NewRequest(http.MethodPut, "/api/settings/config", strings.NewReader(configBody)))
+	if configRecorder.Code != http.StatusOK {
+		t.Fatalf("settings update response = %d %s", configRecorder.Code, configRecorder.Body.String())
+	}
+
+	bootstrapRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(bootstrapRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/bootstrap", strings.NewReader(`{"interest_description":"RNA biology"}`)))
+	if bootstrapRecorder.Code != http.StatusOK {
+		t.Fatalf("bootstrap response = %d %s", bootstrapRecorder.Code, bootstrapRecorder.Body.String())
+	}
+	var bootstrapPayload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(bootstrapRecorder.Body.Bytes(), &bootstrapPayload); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobCompletion(t, bootstrapPayload.Job.ID)
+
+	select {
+	case profileKey := <-seenProfileKey:
+		if profileKey != "release-profile-key" {
+			t.Fatalf("bootstrap saw stale profile key %q", profileKey)
+		}
+	default:
+		t.Fatal("bootstrap did not receive settings")
+	}
+}
+
 func TestAdminSyncJob(t *testing.T) {
 	root := t.TempDir()
 	restore := stubAPIGlobals(t)

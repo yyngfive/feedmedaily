@@ -399,6 +399,7 @@ Invoke-RestMethod "$base/api/settings/config" -Method Put -ContentType "applicat
 
 - 返回更新后的 `fields`
 - 页面刷新后仍能读到同值
+- 继续启动同步、profile generation、Zotero 等后台任务时，新保存的运行时设置无需重启服务即可生效
 
 ### 7.2.3 `GET /api/settings/feeds`
 
@@ -673,15 +674,18 @@ Invoke-RestMethod "$base/api/admin/jobs/$($job.id)"
 
 1. 打开页面
 2. 看到 onboarding
-3. 在 `Profile name` 输入任意名称
-4. 在 interests 文本框输入研究兴趣
-5. 点击 `Generate initial profile`
+3. 在 `LLM API Key` 输入测试用 DeepSeek/OpenAI-compatible key
+4. 点击 `Save Settings`
+5. 看到保存成功提示；刷新页面后 secret 字段应显示为已配置但不回显明文
+6. 在 `Profile Prompt` 文本框输入研究兴趣
+7. 点击 `Save and Generate`
 
 预期结果：
 
 - 页面提示 profile generation job 已启动
-- 生成成功后，`Latest proposal` 区出现 proposal
-- 点击 `Apply` 后，profile 生效
+- release 模式下不需要重启应用，刚保存的 shared key 会同时供 classifier/profile role 使用
+- 生成成功后，`Pending initial profile proposal` 区出现 proposal
+- 点击 `Accept` 后，profile 生效
 
 ## 8.2 Settings / Config
 

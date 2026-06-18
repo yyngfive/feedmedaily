@@ -444,6 +444,7 @@ export function Onboarding({
   jobs,
   onAcceptDraft,
   onRejectProposal,
+  onSaveSettings,
   onSaveAndBootstrap,
   proposals,
 }: {
@@ -453,6 +454,9 @@ export function Onboarding({
   jobs: JobInfo[];
   onAcceptDraft: (proposalId: number, draftProfile: ClassificationProfile) => Promise<ActionResult>;
   onRejectProposal: (proposalId: number) => Promise<ActionResult>;
+  onSaveSettings: (
+    fields: Record<string, SettingsConfigUpdate>,
+  ) => Promise<{message: string; ok: boolean; tone: StatusTone}>;
   onSaveAndBootstrap: (
     fields: Record<string, SettingsConfigUpdate>,
     interestDescription: string,
@@ -563,6 +567,18 @@ export function Onboarding({
     }
   };
 
+  const handleSaveSettings = async () => {
+    setSettingsMessage(null);
+    setProposalMessage(null);
+    const result = await onSaveSettings(
+      buildSettingsPayload(editableSettingsFields, advancedValues, sharedApiKey),
+    );
+    setSettingsMessage({tone: result.tone, text: result.message});
+    if (result.ok) {
+      setSharedApiKey("");
+    }
+  };
+
   const handleAcceptDraft = async () => {
     if (!pendingProposal || !profileDraft) {
       return;
@@ -661,6 +677,13 @@ export function Onboarding({
               ) : null}
             </Card.Content>
             <Card.Footer className="flex flex-wrap items-center justify-end gap-3">
+              <Button
+                isDisabled={busy || configSaving || bootstrapRunning}
+                variant="outline"
+                onPress={() => void handleSaveSettings()}
+              >
+                {configSaving ? "Saving..." : "Save Settings"}
+              </Button>
               <Button
                 isDisabled={busy || configSaving || bootstrapRunning || !interestDescription.trim()}
                 onPress={() => void handleSaveAndGenerate()}

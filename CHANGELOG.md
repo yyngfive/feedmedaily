@@ -12,14 +12,17 @@ Changes since `0.3.2`:
 
 - Changed protected-feed recovery from an ACS-only path into a host-scoped verification session model for all challenge-gated publishers. Protected feeds now reuse one persistent host session per site, so later feeds on the same host can ride the same verified state within a run and across later runs.
 - Renamed and moved the native protected-feed helper from the ACS-specific `tools/FeedMeDailyACSVerifier` project to the runtime component project `native/FeedMeDailyProtectedVerifier`, with release builds now packaging it under `FeedMeDailyProtectedVerifier`.
+- Migrated the protected-feed verifier runtime from the C# helper to a Go native WebView2 helper while keeping the packaged binary path and callback protocol unchanged. Source and release builds no longer require the .NET SDK for the default protected-feed verifier, and the old Wails verifier is no longer built or packaged.
 - Removed the legacy Python backend package and old pytest suite now that the Go tray plus Go backend service are the maintained runtime path.
 
 ### Added
 
 - Added a native WebView2 protected-feed helper as the default verifier path for protected hosts. It can keep one persistent host profile, capture multiple same-host feed XML documents in one session, and hand those XML bodies back to the existing Go sync pipeline without switching to the normal Go HTTP client mid-verification.
+- Added a standalone `Save Settings` action to first-run onboarding, so users can save LLM, Zotero, and local settings before generating the initial profile.
 
 ### Fixed
 
+- Fixed first-run release onboarding so saving a shared DeepSeek/API key refreshes the running backend settings immediately. Initial profile generation now sees the just-saved `SCIRSS_PROFILE_API_KEY` without requiring an app restart.
 - Fixed source-mode duplicate verifier launches so one `verification_id` can no longer start multiple helper processes for the same protected host. Duplicate callbacks are now acknowledged and ignored cleanly instead of generating follow-up `404` noise after the first successful XML capture.
 - Fixed native verifier stalls so a protected-feed helper that cannot capture XML reports `needs_user` after a short watchdog interval, writes its own diagnostic log under `logs/protected-verifier/`, and is terminated by the backend if the verification request eventually times out.
 - Fixed the admin `Reopen Verification Window` action so stale protected-feed verifier process records are cleared before relaunching, and the backend now launches the visible WinForms/WebView2 verifier window instead of accidentally applying hidden-window launcher settings to the verifier process itself.

@@ -349,6 +349,12 @@ func (s *Server) handleSettingsConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		updatedSettings, err := config.Load(s.settings.RootDir)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		s.settings = updatedSettings
 		s.setUpdateManifestURL(settingsConfigFieldValue(response.Fields, "FEEDMEDAILY_UPDATE_MANIFEST_URL"))
 		writeJSON(w, http.StatusOK, response)
 	default:

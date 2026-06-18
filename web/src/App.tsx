@@ -1363,6 +1363,35 @@ export function App() {
     }
   }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore]);
 
+  // 在首次 onboarding 中单独保存本地设置，不强制立即生成 profile。
+  const handleOnboardingSaveSettings = React.useCallback(async (
+    fields: Record<string, {value?: string | null; clear?: boolean}>,
+  ) => {
+    try {
+      setSettingsConfigSaving(true);
+      const saved = await saveSettingsConfig(fields);
+      setSettingsConfig(saved.fields);
+      const currentProfile = await refreshProfileGate();
+      await Promise.all([
+        refreshAdminData(),
+        currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve(),
+      ]);
+      return {
+        ok: true,
+        tone: "success" as const,
+        message: "Local settings saved.",
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        tone: "danger" as const,
+        message: errorText(error, "Could not save local settings."),
+      };
+    } finally {
+      setSettingsConfigSaving(false);
+    }
+  }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore]);
+
   const handleGenerateProposal = async () => {
     try {
       registerJob(await launchProfileProposalGeneration());
@@ -1603,6 +1632,7 @@ export function App() {
           proposals={profileProposals}
           onAcceptDraft={handleOnboardingAcceptDraft}
           onRejectProposal={handleOnboardingRejectProposal}
+          onSaveSettings={handleOnboardingSaveSettings}
           onSaveAndBootstrap={handleOnboardingSaveAndBootstrap}
         />
       </>

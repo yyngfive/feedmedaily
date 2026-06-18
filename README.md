@@ -14,7 +14,7 @@ FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载
 
 - [FeedMeDaily Releases](https://github.com/yyngfive/feedmedaily/releases/latest)
 
-安装完成后启动托盘程序，再从托盘打开 FeedMeDaily。首次使用需要填写兴趣描述和LLM的apikey，也可以在高级设置中填写Zotero的apikey用于保存文献
+安装完成后启动托盘程序，再从托盘打开 FeedMeDaily。首次使用需要填写兴趣描述和 LLM API key，然后生成初始 Profile；也可以先点击 `Save Settings` 单独保存 API key 和高级设置，再生成 Profile。高级设置中可以填写 Zotero API key 用于保存文献。
 
 在设置的Feed界面可以添加期刊的RSS订阅地址：参见[部分出版社期刊RSS订阅地址汇总](https://github.com/yyngfive/sci-rss-list)
 
