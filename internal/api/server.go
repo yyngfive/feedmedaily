@@ -1093,7 +1093,7 @@ func (s *Server) handleFeedVerificationStart(w http.ResponseWriter, r *http.Requ
 		current.VerificationFeedURL = pending.FeedURL
 		current.VerificationJournal = pending.Journal
 		current.VerificationHost = pending.Host
-		current.VerificationMethod = verificationMethodWebview
+		current.VerificationMethod = verificationMethodNativeWebview
 		current.VerificationSessionState = pending.SessionState
 	})
 	writeJSON(w, http.StatusOK, map[string]any{

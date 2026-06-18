@@ -2,6 +2,7 @@ package api
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/yyngfive/scirssagent/internal/config"
@@ -37,13 +38,33 @@ func TestVerificationUserDataDirUsesHostScopedPersistentPath(t *testing.T) {
 	}
 }
 
-func TestGroupVerificationRequestsGroupsACSFeedsByHost(t *testing.T) {
+func TestGroupVerificationRequestsGroupsFeedsByHost(t *testing.T) {
 	grouped := groupVerificationRequests([]feeds.VerificationRequest{
-		{URL: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=jacsat"},
-		{URL: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ancham"},
+		{URL: "https://chemrxiv.org/action/showFeed?type=latest&format=rss"},
+		{URL: "https://chemrxiv.org/action/showFeed?type=current&format=rss"},
 		{URL: "https://example.com/feed.xml"},
 	})
 	if len(grouped) != 2 {
 		t.Fatalf("len(grouped) = %d", len(grouped))
+	}
+}
+
+func TestBeginVerifierProcessStartBlocksDuplicateActiveRequest(t *testing.T) {
+	verifierProcesses = struct {
+		mu    sync.Mutex
+		items map[string]*verifierProcess
+	}{
+		items: map[string]*verifierProcess{},
+	}
+
+	started, existing := beginVerifierProcessStart("verify-1")
+	if !started || existing != nil {
+		t.Fatalf("first begin = %v %#v", started, existing)
+	}
+	finishVerifierProcessStart(&verifierProcess{VerificationID: "verify-1", PID: 42})
+
+	started, existing = beginVerifierProcessStart("verify-1")
+	if started || existing == nil || existing.PID != 42 {
+		t.Fatalf("second begin = %v %#v", started, existing)
 	}
 }

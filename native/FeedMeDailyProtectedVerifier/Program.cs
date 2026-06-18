@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
-namespace FeedMeDailyACSVerifier;
+namespace FeedMeDailyProtectedVerifier;
 
 internal static class Program
 {
@@ -105,6 +105,8 @@ internal sealed class VerificationForm : Form
     private readonly CliOptions _options;
     private readonly WebView2 _webView;
     private readonly Label _statusLabel;
+    private readonly string _logPath;
+    private readonly System.Windows.Forms.Timer _needsUserTimer;
     private readonly Queue<string> _remainingFeedUrls;
     private readonly Dictionary<string, CapturedFeed> _capturedFeeds = new(StringComparer.OrdinalIgnoreCase);
     private bool _completionPosted;
@@ -115,7 +117,8 @@ internal sealed class VerificationForm : Form
     {
         _options = options;
         _remainingFeedUrls = new Queue<string>(options.FeedUrls);
-        Text = "ACS Feed Verification";
+        _logPath = BuildLogPath(options.LogsDir);
+        Text = "Protected Feed Verification";
         Width = 1240;
         Height = 920;
         StartPosition = FormStartPosition.CenterScreen;
@@ -125,12 +128,15 @@ internal sealed class VerificationForm : Form
             Dock = DockStyle.Top,
             Height = 64,
             Padding = new Padding(14, 12, 14, 12),
-            Text = "FeedMeDaily is opening ACS feeds in a persistent WebView2 profile. If Cloudflare asks for a human check, complete it here and leave the window open while the remaining feeds load.",
+            Text = "FeedMeDaily is opening protected feeds in a persistent WebView2 profile. If Cloudflare asks for a human check, complete it here and leave the window open while the remaining feeds load.",
         };
         _webView = new WebView2 { Dock = DockStyle.Fill };
+        _needsUserTimer = new System.Windows.Forms.Timer { Interval = 60_000 };
+        _needsUserTimer.Tick += OnNeedsUserTimerTick;
 
         Controls.Add(_webView);
         Controls.Add(_statusLabel);
+        Log($"started verification_id={_options.VerificationId} host={_options.VerificationHost} feeds={_options.FeedUrls.Count}");
     }
 
     protected override async void OnShown(EventArgs e)
@@ -146,10 +152,12 @@ internal sealed class VerificationForm : Form
             _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
             _webView.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
             _webView.CoreWebView2.WebResourceResponseReceived += OnWebResourceResponseReceived;
+            _needsUserTimer.Start();
             NavigateNextFeed();
         }
         catch (Exception ex)
         {
+            Log($"startup failed: {ex.Message}");
             await PostTerminalResultAsync("failed", false, ex.Message);
             Close();
         }
@@ -159,8 +167,10 @@ internal sealed class VerificationForm : Form
     {
         if (!_completionPosted)
         {
-            await PostTerminalResultAsync("aborted", _capturedFeeds.Count > 0, "the ACS verification window was closed before all feed XML was captured");
+            Log("window closed before completion");
+            await PostTerminalResultAsync("aborted", _capturedFeeds.Count > 0, "the protected-feed verification window was closed before all feed XML was captured");
         }
+        _needsUserTimer.Stop();
         base.OnFormClosing(e);
     }
 
@@ -173,7 +183,8 @@ internal sealed class VerificationForm : Form
         }
 
         _currentFeedUrl = _remainingFeedUrls.Dequeue();
-        _statusLabel.Text = $"Opening ACS feed {_capturedFeeds.Count + 1}/{_options.FeedUrls.Count}. If Cloudflare appears, complete the check and keep this window open.";
+        _statusLabel.Text = $"Opening protected feed {_capturedFeeds.Count + 1}/{_options.FeedUrls.Count}. If Cloudflare appears, complete the check and keep this window open.";
+        Log($"navigate feed={_currentFeedUrl}");
         _webView.Source = new Uri(_currentFeedUrl);
     }
 
@@ -186,14 +197,31 @@ internal sealed class VerificationForm : Form
 
         if (e.IsSuccess)
         {
+            Log($"navigation completed feed={_currentFeedUrl}");
             _statusLabel.Text = _needsUserPosted
-                ? "Cloudflare approval received. FeedMeDaily is now collecting the remaining ACS XML feeds."
-                : "Checking whether this ACS feed now resolves to XML.";
+                ? "Cloudflare approval received. FeedMeDaily is now collecting the remaining protected-feed XML documents."
+                : "Checking whether this protected feed now resolves to XML.";
         }
         else
         {
+            Log($"navigation failed feed={_currentFeedUrl} status={e.WebErrorStatus}");
             _statusLabel.Text = "The page has not fully loaded yet. If Cloudflare appears, complete the human verification and keep the window open.";
         }
+    }
+
+    private async void OnNeedsUserTimerTick(object? sender, EventArgs e)
+    {
+        if (_completionPosted || _needsUserPosted)
+        {
+            _needsUserTimer.Stop();
+            return;
+        }
+
+        _needsUserPosted = true;
+        _needsUserTimer.Stop();
+        _statusLabel.Text = "FeedMeDaily has not captured XML yet. If this page is asking for verification, complete it here or use the browser fallback in the app.";
+        Log($"needs_user watchdog fired feed={_currentFeedUrl}");
+        await PostNeedsUserAsync();
     }
 
     private async void OnWebResourceResponseReceived(object? sender, CoreWebView2WebResourceResponseReceivedEventArgs e)
@@ -221,6 +249,7 @@ internal sealed class VerificationForm : Form
             await using var stream = await response.GetContentAsync();
             using var reader = new StreamReader(stream, Encoding.UTF8);
             var body = await reader.ReadToEndAsync();
+            Log($"response feed={_currentFeedUrl} content_type={contentType} bytes={body.Length}");
 
             if (LooksLikeXml(contentType, body))
             {
@@ -231,23 +260,27 @@ internal sealed class VerificationForm : Form
                     FeedXml = body,
                 };
 
-                _statusLabel.Text = $"Captured {_capturedFeeds.Count}/{_options.FeedUrls.Count} ACS feed XML documents.";
+                _statusLabel.Text = $"Captured {_capturedFeeds.Count}/{_options.FeedUrls.Count} protected-feed XML documents.";
+                Log($"captured xml feed={_currentFeedUrl} captured={_capturedFeeds.Count}/{_options.FeedUrls.Count}");
                 BeginInvoke(new Action(NavigateNextFeed));
                 return;
             }
 
             if (LooksLikeChallenge(contentType, body))
             {
-                _statusLabel.Text = "Cloudflare still needs a human check in this window. Complete it once and FeedMeDaily will keep trying the remaining ACS feeds automatically.";
+                _statusLabel.Text = "Cloudflare still needs a human check in this window. Complete it once and FeedMeDaily will keep trying the remaining protected feeds automatically.";
+                Log($"challenge detected feed={_currentFeedUrl}");
                 if (!_needsUserPosted)
                 {
                     _needsUserPosted = true;
+                    _needsUserTimer.Stop();
                     await PostNeedsUserAsync();
                 }
             }
         }
         catch (Exception ex)
         {
+            Log($"response handling failed: {ex.Message}");
             await PostTerminalResultAsync("failed", _capturedFeeds.Count > 0, ex.Message);
             BeginInvoke(new Action(Close));
         }
@@ -262,11 +295,13 @@ internal sealed class VerificationForm : Form
 
         if (_capturedFeeds.Count == 0)
         {
-            await PostTerminalResultAsync("failed", false, "the ACS verifier did not capture any feed XML");
+            Log("complete without captured xml");
+            await PostTerminalResultAsync("failed", false, "the protected-feed verifier did not capture any feed XML");
             Close();
             return;
         }
 
+        Log($"complete captured={_capturedFeeds.Count}");
         await PostTerminalResultAsync("success", true, string.Empty);
         BeginInvoke(new Action(Close));
     }
@@ -283,6 +318,7 @@ internal sealed class VerificationForm : Form
             SessionVerified = false,
             CapturedFeeds = new List<CapturedFeed>(),
         };
+        Log($"post needs_user feed={payload.FeedUrl}");
         await PostPayloadAsync(payload);
     }
 
@@ -294,6 +330,7 @@ internal sealed class VerificationForm : Form
         }
 
         _completionPosted = true;
+        _needsUserTimer.Stop();
         var payload = new CallbackPayload
         {
             VerificationId = _options.VerificationId,
@@ -304,6 +341,7 @@ internal sealed class VerificationForm : Form
             SessionVerified = sessionVerified,
             CapturedFeeds = _capturedFeeds.Values.OrderBy(item => item.FeedUrl, StringComparer.OrdinalIgnoreCase).ToList(),
         };
+        Log($"post terminal status={status} session_verified={sessionVerified} captured={payload.CapturedFeeds.Count} error={error}");
         await PostPayloadAsync(payload);
     }
 
@@ -312,7 +350,34 @@ internal sealed class VerificationForm : Form
         using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         try
         {
-            await Http.PostAsync(_options.CallbackUrl, content);
+            using var response = await Http.PostAsync(_options.CallbackUrl, content);
+            Log($"callback status={(int)response.StatusCode} reason={response.ReasonPhrase}");
+        }
+        catch (Exception ex)
+        {
+            Log($"callback failed: {ex.Message}");
+        }
+    }
+
+    private static string BuildLogPath(string logsDir)
+    {
+        if (string.IsNullOrWhiteSpace(logsDir))
+        {
+            return string.Empty;
+        }
+        return Path.Combine(logsDir.Trim(), "protected-verifier", DateTime.Now.ToString("yyyy-MM-dd") + ".log");
+    }
+
+    private void Log(string message)
+    {
+        if (string.IsNullOrWhiteSpace(_logPath))
+        {
+            return;
+        }
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_logPath)!);
+            File.AppendAllText(_logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {_options.VerificationId} {message}{Environment.NewLine}", Encoding.UTF8);
         }
         catch
         {

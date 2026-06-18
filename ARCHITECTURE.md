@@ -9,6 +9,7 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 - `cmd/feedmedailyd/`: production Go backend entrypoint
 - `cmd/feedmedaily-tray/`: Windows tray runtime entrypoint
 - `cmd/feedmedaily-verifier/`: Windows-only protected-feed verifier window
+- `native/FeedMeDailyProtectedVerifier/`: native Windows WebView2 helper for host-scoped protected-feed verification
 - `internal/api/`: HTTP API handlers, job endpoints, verification endpoints, and static asset serving
 - `internal/classifier/`: Go classifier client, prompt shaping, and thinking-fallback handling
 - `internal/config/`: settings schema, local config editing, and path resolution
@@ -62,16 +63,18 @@ The API service reuses long-lived SQLite stores across requests instead of reope
 Cloudflare-protected or challenge-gated feeds use a Windows-first verification assist flow:
 
 - a fetch job can move to `waiting_for_user` when the backend detects a challenge page or a Cloudflare-style `403`
-- the UI first opens `feedmedaily-verifier`, a dedicated verifier window with its own temporary WebView2 session
+- the UI opens a dedicated native WebView2 verifier helper with a persistent host-scoped profile under `data/verification-profiles/<host>`
+- protected-feed requests are grouped by `verification_host`, so one verifier session can walk multiple feeds on the same host without reopening a fresh challenge flow for each feed
 - once the protected page resolves to RSS/Atom/RDF content, the verifier POSTs the captured XML back to `/api/feeds/verification/callback`
+- if the native helper cannot capture XML quickly, it posts a `needs_user` callback so the admin UI stays in explicit verification mode instead of appearing stuck on the last fetch item
 - the backend resumes the paused job by injecting that XML into the normal Go feed parser
 - if the verifier exits without captured XML, the job stays in `waiting_for_user` and the admin panel can switch that same verification into a system-browser fallback via `/api/feeds/verification/browser`
 - browser fallback does not try to reuse browser cookies automatically; instead the user completes the challenge in their normal browser, copies the final raw RSS/Atom/RDF source, and submits it to `/api/feeds/verification/manual-submit`
 - successful manual submissions are validated through the same feed parser path as normal fetches before the paused sync resumes
 
-The verifier now uses an app-owned persistent WebView2 profile directory under local data storage, scoped by protected-feed host such as `pubs.acs.org`. That lets Cloudflare or publisher trust state survive across retries while keeping verifier browser artifacts out of Git and out of exported user configuration.
+The backend also persists host-level verification session metadata in `data/verification-sessions.json`, including verifier kind, current session state, and the latest success/failure timestamps. That lets later sync runs try verified hosts optimistically first, then fall back to `needs_reverify` when a site challenges again.
 
-For ACS specifically, the product now treats verification as a host-scoped session rather than a single-feed callback. `pubs.acs.org` can launch a dedicated native WebView2 helper, keep one persistent publisher profile, and capture multiple ACS feed XML responses within the same verified session before the backend resumes the paused sync with those XML bodies injected as fetch overrides.
+The native helper now serves as the default path for all protected hosts, not just ACS. The product treats verification as a host-scoped session rather than a single-feed callback, so the same verified WebView2 session can capture multiple same-host RSS responses before the backend resumes the paused sync with those XML bodies injected as fetch overrides. Helper diagnostics are written under `logs/protected-verifier/`, and the backend terminates a verifier process if its pending verification request times out so stale helper windows do not accumulate.
 
 Current limitation: even with a persistent verifier profile, some publisher challenges may still trust the user's full system browser more than an embedded WebView2 surface. The manual browser/XML fallback therefore remains part of the supported recovery path for protected feeds.
 

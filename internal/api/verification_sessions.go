@@ -15,8 +15,8 @@ const (
 	verificationSessionStateVerified      = "verified"
 	verificationSessionStateNeedsReverify = "needs_reverify"
 	verificationSessionStateUnknown       = ""
-	verificationVerifierKindWails         = "wails_webview2"
-	verificationVerifierKindACSNative     = "acs_native_webview2"
+	verificationVerifierKindNativeWebView = "native_webview2"
+	verificationVerifierKindBrowserManual = "browser_manual"
 )
 
 type verificationHostSession struct {

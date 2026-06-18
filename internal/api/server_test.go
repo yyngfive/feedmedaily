@@ -1312,7 +1312,7 @@ func TestAdminRunCanFallbackToBrowserManualXMLAfterVerifierAbort(t *testing.T) {
 
 	waitForJobStatus(t, runPayload.Job.ID, "waiting_for_user")
 	waitingJob, ok := jobByID(runPayload.Job.ID)
-	if !ok || waitingJob.VerificationMethod != verificationMethodWebview {
+	if !ok || waitingJob.VerificationMethod != verificationMethodNativeWebview {
 		t.Fatalf("expected waiting job after verifier abort: %#v", waitingJob)
 	}
 
@@ -1339,13 +1339,13 @@ func TestAdminRunCanFallbackToBrowserManualXMLAfterVerifierAbort(t *testing.T) {
 	waitForJobCompletion(t, runPayload.Job.ID)
 }
 
-func TestAdminRunReusesACSVerificationForMultipleFeeds(t *testing.T) {
+func TestAdminRunReusesHostScopedVerificationForMultipleFeeds(t *testing.T) {
 	root := t.TempDir()
 	restore := stubAPIGlobals(t)
 	defer restore()
 
 	settings := testSettings(root)
-	if _, err := markVerificationHostSessionVerified(settings, acsVerificationHost, verificationVerifierKindACSNative); err != nil {
+	if _, err := markVerificationHostSessionVerified(settings, "pubs.acs.org", verificationVerifierKindNativeWebView); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1369,7 +1369,7 @@ func TestAdminRunReusesACSVerificationForMultipleFeeds(t *testing.T) {
 		if pending == nil {
 			t.Fatal("expected pending verification")
 		}
-		if pending.Host != acsVerificationHost || len(pending.FeedURLs) != 2 {
+		if pending.Host != "pubs.acs.org" || len(pending.FeedURLs) != 2 {
 			t.Fatalf("unexpected ACS pending verification: %#v", pending)
 		}
 		go func() {

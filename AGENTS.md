@@ -30,6 +30,12 @@ go run .\cmd\feedmedaily-tray --root .
 go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 ```
 
+- In source mode, `--root .` means runtime state stays under the project root rather than `%LOCALAPPDATA%`.
+  - Source-mode logs are written under `.\logs\`
+  - Source-mode user/runtime data is written under `.\data\`
+  - When debugging source mode, check the repo-local `logs/` and `data/` folders first
+- In installed/release mode, logs and runtime data live under `%LOCALAPPDATA%\FeedMeDaily\` instead.
+
 - `.env.example` documents the current recommended environment variables and should be kept in sync with README when configuration changes.
 
 ## Repository Conventions
@@ -94,6 +100,7 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 ## Agent Notes
 
 - Do not commit `data/classification_profile.json` or `data/*.sqlite`; they are per-user local state.
+- When investigating logs or runtime state, distinguish source mode from release mode before drawing conclusions: source mode uses repo-local `logs/` and `data/`, while installed/release builds use `%LOCALAPPDATA%\FeedMeDaily\`.
 - When changing the profile proposal UI, optimize for reviewability rather than raw JSON visibility.
 - Keep long-running LLM actions as background jobs with visible status in the UI.
 - Keep review-critical loading paths narrow: the paper list should not wait on app-update, scheduler, settings, proposal, or feedback hydration unless the task explicitly redesigns that behavior.

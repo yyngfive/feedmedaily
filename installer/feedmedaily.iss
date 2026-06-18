@@ -42,6 +42,7 @@ Type: files; Name: "{app}\FeedMeDailyTray.exe"
 Type: files; Name: "{app}\feedmedailyd.exe"
 Type: files; Name: "{app}\FeedMeDailyVerifier.exe"
 Type: filesandordirs; Name: "{app}\FeedMeDailyACSVerifier"
+Type: filesandordirs; Name: "{app}\FeedMeDailyProtectedVerifier"
 Type: files; Name: "{app}\feedmedaily.ico"
 Type: files; Name: "{app}\tray-settings.json"
 

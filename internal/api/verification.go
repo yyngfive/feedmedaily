@@ -53,7 +53,7 @@ var (
 )
 
 const (
-	verificationMethodWebview       = "webview"
+	verificationMethodNativeWebview = "native_webview2"
 	verificationMethodBrowserManual = "browser_manual"
 )
 
@@ -164,7 +164,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 					updateJob(job.ID, func(current *jobInfo) {
 						current.Status = "running"
 						current.MessageKey = "pipeline.feeds.verification_required"
-						current.Message = "Reusing the previous ACS verification session and retrying protected feeds."
+						current.Message = "Reusing the previous protected-feed verification session and retrying this host."
 						current.VerificationRequired = false
 						current.VerificationTarget = pending.Target
 						current.VerificationFeedURL = pending.FeedURL
@@ -280,7 +280,7 @@ func storePendingVerificationWithCallback(jobID string, request feeds.Verificati
 		Host:        verificationProfileHost(request.URL),
 		Target:      request.Target,
 		Reason:      request.Reason,
-		Method:      verificationMethodWebview,
+		Method:      verificationMethodNativeWebview,
 		CallbackURL: strings.TrimSpace(callbackURL),
 		Result:      make(chan verificationResult, 1),
 	}
@@ -333,7 +333,7 @@ func startVerificationFlow(settings config.Settings, pending *pendingVerificatio
 	if verificationTargetForFeedURL(pending.FeedURL) != "cloudflare" {
 		return fmt.Errorf("unsupported verification target")
 	}
-	resetPendingVerificationAttempt(pending, verificationMethodWebview)
+	resetPendingVerificationAttempt(pending, verificationMethodNativeWebview)
 	return startVerificationWindowFlow(settings, pending)
 }
 

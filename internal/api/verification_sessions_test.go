@@ -16,7 +16,7 @@ func TestVerificationHostSessionPersistsVerifiedState(t *testing.T) {
 	}
 	defer func() { nowFunc = time.Now }()
 
-	session, err := markVerificationHostSessionVerified(settings, "pubs.acs.org", verificationVerifierKindACSNative)
+	session, err := markVerificationHostSessionVerified(settings, "pubs.acs.org", verificationVerifierKindNativeWebView)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestVerificationHostSessionPersistsVerifiedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.State != verificationSessionStateVerified || loaded.VerifierKind != verificationVerifierKindACSNative {
+	if loaded.State != verificationSessionStateVerified || loaded.VerifierKind != verificationVerifierKindNativeWebView {
 		t.Fatalf("loaded = %#v", loaded)
 	}
 }
@@ -37,10 +37,10 @@ func TestVerificationHostSessionMarksNeedsReverify(t *testing.T) {
 	root := t.TempDir()
 	settings := config.Settings{DataDir: filepath.Join(root, "data")}
 
-	if _, err := markVerificationHostSessionVerified(settings, "pubs.acs.org", verificationVerifierKindACSNative); err != nil {
+	if _, err := markVerificationHostSessionVerified(settings, "pubs.acs.org", verificationVerifierKindNativeWebView); err != nil {
 		t.Fatal(err)
 	}
-	session, err := markVerificationHostSessionNeedsReverify(settings, "pubs.acs.org", verificationVerifierKindACSNative, "challenge")
+	session, err := markVerificationHostSessionNeedsReverify(settings, "pubs.acs.org", verificationVerifierKindNativeWebView, "challenge")
 	if err != nil {
 		t.Fatal(err)
 	}

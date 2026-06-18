@@ -2,7 +2,7 @@ param(
   [string]$TrayOutput = ".\\build\\feedmedaily-tray.exe",
   [string]$DaemonOutput = ".\\build\\feedmedailyd.exe",
   [string]$VerifierOutput = ".\\build\\FeedMeDailyVerifier.exe",
-  [string]$ACSVerifierOutputDir = ".\\build\\FeedMeDailyACSVerifier",
+  [string]$ProtectedVerifierOutputDir = ".\\build\\FeedMeDailyProtectedVerifier",
   [string]$Version = ""
 )
 
@@ -19,12 +19,12 @@ $root = Split-Path -Parent $PSScriptRoot
 $trayOutputPath = Join-Path $root $TrayOutput
 $daemonOutputPath = Join-Path $root $DaemonOutput
 $verifierOutputPath = Join-Path $root $VerifierOutput
-$acsVerifierOutputDirPath = Join-Path $root $ACSVerifierOutputDir
+$protectedVerifierOutputDirPath = Join-Path $root $ProtectedVerifierOutputDir
 $outputDirs = @(
   (Split-Path -Parent $trayOutputPath),
   (Split-Path -Parent $daemonOutputPath),
   (Split-Path -Parent $verifierOutputPath),
-  $acsVerifierOutputDirPath
+  $protectedVerifierOutputDirPath
 )
 $goCacheDir = Join-Path $root ".tmp\\go-build-cache"
 $goModCacheDir = Join-Path $root ".tmp\\go-mod-cache"
@@ -64,7 +64,7 @@ try {
   if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
   }
-  & dotnet publish .\tools\FeedMeDailyACSVerifier\FeedMeDailyACSVerifier.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=false -o $acsVerifierOutputDirPath
+  & dotnet publish .\native\FeedMeDailyProtectedVerifier\FeedMeDailyProtectedVerifier.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=false -o $protectedVerifierOutputDirPath
 }
 finally {
   Pop-Location

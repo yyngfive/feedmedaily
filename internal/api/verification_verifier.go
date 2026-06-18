@@ -16,9 +16,7 @@ import (
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 )
 
-const verificationBinaryName = "FeedMeDailyVerifier.exe"
-const acsVerificationBinaryName = "FeedMeDailyACSVerifier.exe"
-const acsVerificationHost = "pubs.acs.org"
+const protectedFeedVerificationBinaryName = "FeedMeDailyProtectedVerifier.exe"
 
 type verifierProcess struct {
 	VerificationID string
@@ -41,8 +39,7 @@ var verifierProcesses = struct {
 	items: map[string]*verifierProcess{},
 }
 
-var ensureVerificationBinaryFunc = appruntime.EnsureSourceBinary
-var ensureACSVerificationBinaryFunc = ensureACSVerificationBinary
+var ensureProtectedFeedVerificationBinaryFunc = ensureProtectedFeedVerificationBinary
 
 func startVerificationWindowFlow(settings config.Settings, pending *pendingVerification) error {
 	if pending == nil {
@@ -54,12 +51,8 @@ func startVerificationWindowFlow(settings config.Settings, pending *pendingVerif
 	if !isWindowsRuntime() {
 		return fmt.Errorf("manual Cloudflare feed verification is only supported on Windows")
 	}
-	if pending.Host == acsVerificationHost {
-		return startACSVerificationWindowFlow(settings, pending)
-	}
-	pending.VerifierKind = verificationVerifierKindWails
-
-	binaryPath, err := verificationBinaryPath(settings)
+	pending.VerifierKind = verificationVerifierKindNativeWebView
+	binaryPath, err := protectedFeedVerificationBinaryPath(settings)
 	if err != nil {
 		return err
 	}
@@ -71,7 +64,7 @@ func startVerificationWindowFlow(settings config.Settings, pending *pendingVerif
 	commandArgs := []string{
 		"--verification-id", pending.ID,
 		"--job-id", pending.JobID,
-		"--feed-url", pending.FeedURL,
+		"--verification-host", pending.Host,
 		"--callback-url", callbackURL,
 		"--logs-dir", settings.LogsDir,
 		"--app-version", version,
@@ -81,15 +74,34 @@ func startVerificationWindowFlow(settings config.Settings, pending *pendingVerif
 		return err
 	}
 	commandArgs = append(commandArgs, "--user-data-dir", userDataDir)
-	cmd := exec.Command(
-		binaryPath,
-		commandArgs...,
-	)
+	for _, feedURL := range pending.FeedURLs {
+		commandArgs = append(commandArgs, "--feed-url", feedURL)
+	}
+	return startVerifierProcess(settings, pending, binaryPath, commandArgs, userDataDir, "Started the protected-feed verifier window process.")
+}
+
+func startVerifierProcess(settings config.Settings, pending *pendingVerification, binaryPath string, commandArgs []string, userDataDir string, message string) error {
+	cmd := exec.Command(binaryPath, commandArgs...)
 	hideVerificationLauncherWindow(cmd)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	if started, existing := beginVerifierProcessStart(pending.ID); !started {
+		logData := map[string]any{
+			"verification_id":       pending.ID,
+			"verification_feed_url": pending.FeedURL,
+			"verification_journal":  pending.Journal,
+			"verification_host":     pending.Host,
+		}
+		if existing != nil {
+			logData["verification_pid"] = existing.PID
+			logData["verification_binary"] = existing.BinaryPath
+		}
+		logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "warning", "verification_process_duplicate_blocked", "pipeline.feeds.verification_required", "Skipped launching a duplicate verifier window for the same verification request.", "", logData)
+		return nil
+	}
 	if err := cmd.Start(); err != nil {
+		cancelVerifierProcessStart(pending.ID)
 		return fmt.Errorf("open verification browser: %w", err)
 	}
 	process := &verifierProcess{
@@ -102,15 +114,17 @@ func startVerificationWindowFlow(settings config.Settings, pending *pendingVerif
 		PID:            verifierPID(cmd),
 		StartedAt:      time.Now(),
 	}
-	storeVerifierProcess(process)
-	logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_process_started", "pipeline.feeds.verification_required", "Started the verifier window process.", "", map[string]any{
-		"verification_id":       pending.ID,
-		"verification_feed_url": pending.FeedURL,
-		"verification_journal":  pending.Journal,
-		"verification_binary":   binaryPath,
-		"verification_pid":      process.PID,
-		"verification_profile":  userDataDir,
-		"verification_command":  strings.Join(process.Command, " "),
+	finishVerifierProcessStart(process)
+	logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_process_started", "pipeline.feeds.verification_required", message, "", map[string]any{
+		"verification_id":        pending.ID,
+		"verification_feed_url":  pending.FeedURL,
+		"verification_journal":   pending.Journal,
+		"verification_binary":    binaryPath,
+		"verification_pid":       process.PID,
+		"verification_profile":   userDataDir,
+		"verification_host":      pending.Host,
+		"verification_feed_urls": pending.FeedURLs,
+		"verification_command":   strings.Join(process.Command, " "),
 	})
 
 	done := make(chan error, 1)
@@ -142,113 +156,15 @@ func startVerificationWindowFlow(settings config.Settings, pending *pendingVerif
 	}
 }
 
-func startACSVerificationWindowFlow(settings config.Settings, pending *pendingVerification) error {
-	pending.VerifierKind = verificationVerifierKindACSNative
-	binaryPath, err := acsVerificationBinaryPath(settings)
-	if err != nil {
-		return err
-	}
-	callbackURL := verificationCallbackURL(settings)
-	if strings.TrimSpace(pending.CallbackURL) != "" {
-		callbackURL = pending.CallbackURL
-	}
-	version := appruntime.PackageVersion(settings.RootDir)
-	commandArgs := []string{
-		"--verification-id", pending.ID,
-		"--job-id", pending.JobID,
-		"--verification-host", pending.Host,
-		"--callback-url", callbackURL,
-		"--logs-dir", settings.LogsDir,
-		"--app-version", version,
-	}
-	userDataDir, err := verificationUserDataDir(settings, pending.FeedURL)
-	if err != nil {
-		return err
-	}
-	commandArgs = append(commandArgs, "--user-data-dir", userDataDir)
-	for _, feedURL := range pending.FeedURLs {
-		commandArgs = append(commandArgs, "--feed-url", feedURL)
-	}
-	cmd := exec.Command(binaryPath, commandArgs...)
-	hideVerificationLauncherWindow(cmd)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("open ACS verification browser: %w", err)
-	}
-	process := &verifierProcess{
-		VerificationID: pending.ID,
-		JobID:          pending.JobID,
-		FeedURL:        pending.FeedURL,
-		Journal:        pending.Journal,
-		BinaryPath:     binaryPath,
-		Command:        append([]string{binaryPath}, commandArgs...),
-		PID:            verifierPID(cmd),
-		StartedAt:      time.Now(),
-	}
-	storeVerifierProcess(process)
-	logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_process_started", "pipeline.feeds.verification_required", "Started the ACS verifier window process.", "", map[string]any{
-		"verification_id":        pending.ID,
-		"verification_feed_url":  pending.FeedURL,
-		"verification_journal":   pending.Journal,
-		"verification_binary":    binaryPath,
-		"verification_pid":       process.PID,
-		"verification_profile":   userDataDir,
-		"verification_host":      pending.Host,
-		"verification_feed_urls": pending.FeedURLs,
-		"verification_command":   strings.Join(process.Command, " "),
-	})
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case err := <-done:
-		exitCode := verifierExitCode(cmd, err)
-		markVerifierProcessExited(pending.ID, exitCode, err)
-		logVerificationProcessExit(settings, pending, process, exitCode, err)
-		detail := strings.TrimSpace(stderr.String())
-		if detail == "" && err != nil {
-			detail = err.Error()
-		}
-		if detail == "" {
-			detail = "ACS verification window exited immediately"
-		}
-		return fmt.Errorf("open ACS verification browser: %s", detail)
-	case <-time.After(900 * time.Millisecond):
-		go func() {
-			err := <-done
-			exitCode := verifierExitCode(cmd, err)
-			markVerifierProcessExited(pending.ID, exitCode, err)
-			logVerificationProcessExit(settings, pending, process, exitCode, err)
-		}()
-		return nil
-	}
-}
-
-func verificationBinaryPath(settings config.Settings) (string, error) {
+func protectedFeedVerificationBinaryPath(settings config.Settings) (string, error) {
 	if settings.Mode == appruntime.ModeRelease {
-		binaryPath := filepath.Join(settings.AppDir, verificationBinaryName)
+		binaryPath := filepath.Join(settings.AppDir, "FeedMeDailyProtectedVerifier", protectedFeedVerificationBinaryName)
 		if _, err := os.Stat(binaryPath); err == nil {
 			return binaryPath, nil
 		}
-		return "", fmt.Errorf("verification helper not found: %s", binaryPath)
+		return "", fmt.Errorf("protected feed verification helper not found: %s", binaryPath)
 	}
-	return ensureVerificationBinaryFunc(settings.RootDir, "./cmd/feedmedaily-verifier", verificationBinaryName)
-}
-
-func acsVerificationBinaryPath(settings config.Settings) (string, error) {
-	if settings.Mode == appruntime.ModeRelease {
-		binaryPath := filepath.Join(settings.AppDir, "FeedMeDailyACSVerifier", acsVerificationBinaryName)
-		if _, err := os.Stat(binaryPath); err == nil {
-			return binaryPath, nil
-		}
-		return "", fmt.Errorf("ACS verification helper not found: %s", binaryPath)
-	}
-	return ensureACSVerificationBinaryFunc(settings.RootDir)
+	return ensureProtectedFeedVerificationBinaryFunc(settings.RootDir)
 }
 
 func verificationCallbackURL(settings config.Settings) string {
@@ -281,17 +197,17 @@ func verificationUserDataDir(settings config.Settings, feedURL string) (string, 
 	return userDataDir, nil
 }
 
-func ensureACSVerificationBinary(root string) (string, error) {
+func ensureProtectedFeedVerificationBinary(root string) (string, error) {
 	dotnetPath, err := exec.LookPath("dotnet")
 	if err != nil {
-		return "", fmt.Errorf("dotnet command not found; install .NET SDK to build the ACS verifier helper")
+		return "", fmt.Errorf("dotnet command not found; install .NET SDK to build the protected-feed verifier helper")
 	}
-	projectPath := filepath.Join(root, "tools", "FeedMeDailyACSVerifier", "FeedMeDailyACSVerifier.csproj")
-	outputDir := filepath.Join(root, ".tmp", "runtime-bin", "FeedMeDailyACSVerifier")
+	projectPath := filepath.Join(root, "native", "FeedMeDailyProtectedVerifier", "FeedMeDailyProtectedVerifier.csproj")
+	outputDir := filepath.Join(root, ".tmp", "runtime-bin", "FeedMeDailyProtectedVerifier")
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return "", fmt.Errorf("create ACS verifier output dir: %w", err)
+		return "", fmt.Errorf("create protected-feed verifier output dir: %w", err)
 	}
-	binaryPath := filepath.Join(outputDir, acsVerificationBinaryName)
+	binaryPath := filepath.Join(outputDir, protectedFeedVerificationBinaryName)
 	cmd := exec.Command(
 		dotnetPath,
 		"publish",
@@ -311,10 +227,10 @@ func ensureACSVerificationBinary(root string) (string, error) {
 		if detail == "" {
 			detail = err.Error()
 		}
-		return "", fmt.Errorf("build ACS verifier helper: %s", detail)
+		return "", fmt.Errorf("build protected-feed verifier helper: %s", detail)
 	}
 	if _, err := os.Stat(binaryPath); err != nil {
-		return "", fmt.Errorf("ACS verifier helper build did not produce %s", binaryPath)
+		return "", fmt.Errorf("protected-feed verifier helper build did not produce %s", binaryPath)
 	}
 	return binaryPath, nil
 }
@@ -359,7 +275,29 @@ func verifierExitCode(cmd *exec.Cmd, err error) int {
 	return -1
 }
 
-func storeVerifierProcess(process *verifierProcess) {
+func beginVerifierProcessStart(verificationID string) (bool, *verifierProcess) {
+	verifierProcesses.mu.Lock()
+	defer verifierProcesses.mu.Unlock()
+	process, ok := verifierProcesses.items[verificationID]
+	if ok && !process.Exited {
+		clone := *process
+		clone.Command = append([]string(nil), process.Command...)
+		return false, &clone
+	}
+	verifierProcesses.items[verificationID] = &verifierProcess{
+		VerificationID: verificationID,
+		StartedAt:      time.Now(),
+	}
+	return true, nil
+}
+
+func cancelVerifierProcessStart(verificationID string) {
+	verifierProcesses.mu.Lock()
+	defer verifierProcesses.mu.Unlock()
+	delete(verifierProcesses.items, verificationID)
+}
+
+func finishVerifierProcessStart(process *verifierProcess) {
 	if process == nil {
 		return
 	}
@@ -396,6 +334,27 @@ func snapshotVerifierProcess(verificationID string) (verifierProcess, bool) {
 	clone := *process
 	clone.Command = append([]string(nil), process.Command...)
 	return clone, true
+}
+
+func terminateVerifierProcess(settings config.Settings, verificationID string) {
+	process, ok := snapshotVerifierProcess(verificationID)
+	if !ok || process.Exited || process.PID <= 0 {
+		return
+	}
+	osProcess, err := os.FindProcess(process.PID)
+	if err != nil {
+		return
+	}
+	if err := osProcess.Kill(); err != nil {
+		return
+	}
+	markVerifierProcessExited(verificationID, -1, fmt.Errorf("verification process terminated after timeout"))
+	logJobEvent(settings.LogsDir, &jobInfo{ID: process.JobID}, "warning", "verification_process_terminated", "pipeline.feeds.verification_required", "Verifier process was still running after verification timed out, so FeedMeDaily closed it.", "", map[string]any{
+		"verification_id":       process.VerificationID,
+		"verification_feed_url": process.FeedURL,
+		"verification_journal":  process.Journal,
+		"verification_pid":      process.PID,
+	})
 }
 
 func logVerificationProcessExit(settings config.Settings, pending *pendingVerification, process *verifierProcess, exitCode int, err error) {

@@ -44,3 +44,5 @@ dist/
 
 tools/*/bin/
 tools/*/obj/
+native/*/bin/
+native/*/obj/

@@ -10,11 +10,17 @@ Changes since `0.3.2`:
 
 ### Changed
 
-- Changed ACS protected-feed recovery from per-feed manual XML fallback to a host-scoped verification session model. `pubs.acs.org` feeds now share one persistent verification host session and can reuse the same approved browser state across later syncs.
+- Changed protected-feed recovery from an ACS-only path into a host-scoped verification session model for all challenge-gated publishers. Protected feeds now reuse one persistent host session per site, so later feeds on the same host can ride the same verified state within a run and across later runs.
+- Renamed and moved the native protected-feed helper from the ACS-specific `tools/FeedMeDailyACSVerifier` project to the runtime component project `native/FeedMeDailyProtectedVerifier`, with release builds now packaging it under `FeedMeDailyProtectedVerifier`.
 
 ### Added
 
-- Added an ACS-specific native WebView2 helper that can keep one persistent publisher profile, capture multiple ACS feed XML documents in the same session, and hand those XML bodies back to the existing Go sync pipeline without switching to the normal Go HTTP client mid-verification.
+- Added a native WebView2 protected-feed helper as the default verifier path for protected hosts. It can keep one persistent host profile, capture multiple same-host feed XML documents in one session, and hand those XML bodies back to the existing Go sync pipeline without switching to the normal Go HTTP client mid-verification.
+
+### Fixed
+
+- Fixed source-mode duplicate verifier launches so one `verification_id` can no longer start multiple helper processes for the same protected host. Duplicate callbacks are now acknowledged and ignored cleanly instead of generating follow-up `404` noise after the first successful XML capture.
+- Fixed native verifier stalls so a protected-feed helper that cannot capture XML reports `needs_user` after a short watchdog interval, writes its own diagnostic log under `logs/protected-verifier/`, and is terminated by the backend if the verification request eventually times out.
 
 ## 0.3.2 (2026-06-15)
 

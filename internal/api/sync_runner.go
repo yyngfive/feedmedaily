@@ -91,6 +91,7 @@ func runVerificationAwareSync(settings config.Settings, jobID string, callbackUR
 		resumeResult := waitForVerification(pending, 20*time.Minute)
 		deletePendingVerification(pending.ID)
 		if strings.TrimSpace(resumeResult.Warning) != "" {
+			terminateVerifierProcess(settings, pending.ID)
 			skippedFeeds[pending.FeedURL] = resumeResult.Warning
 			if callbacks.OnVerificationSkipped != nil {
 				callbacks.OnVerificationSkipped(pending, resumeResult)
@@ -154,7 +155,7 @@ func processVerificationCallback(settings config.Settings, payload verificationC
 		updateJob(pending.JobID, func(current *jobInfo) {
 			current.Status = "waiting_for_user"
 			current.MessageKey = "pipeline.feeds.verification_required"
-			current.Message = "ACS still needs a manual Cloudflare approval in the verification window."
+			current.Message = "This protected feed host still needs a manual Cloudflare approval in the verification window."
 			current.VerificationRequired = true
 			current.VerificationTarget = pending.Target
 			current.VerificationFeedURL = pending.FeedURL
@@ -191,6 +192,13 @@ func processVerificationCallback(settings config.Settings, payload verificationC
 		return verificationCallbackAck{}, fmt.Errorf("Verification request not found.")
 	}
 	if !stored {
+		logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_callback_duplicate_ignored", "pipeline.feeds.verification_required", "Ignored a duplicate verification callback for an already handled request.", "", map[string]any{
+			"verification_id":       pending.ID,
+			"verification_feed_url": pending.FeedURL,
+			"verification_journal":  pending.Journal,
+			"verification_host":     pending.Host,
+			"verification_status":   result.Status,
+		})
 		return verificationCallbackAck{
 			OK:             true,
 			VerificationID: pending.ID,
@@ -274,7 +282,7 @@ func groupVerificationRequests(requests []feeds.VerificationRequest) []feeds.Ver
 	}
 	primary := requests[0]
 	host := verificationProfileHost(primary.URL)
-	if host != acsVerificationHost {
+	if host == "" || host == "default" {
 		return []feeds.VerificationRequest{primary}
 	}
 	grouped := make([]feeds.VerificationRequest, 0, len(requests))
