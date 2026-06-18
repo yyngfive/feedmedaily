@@ -81,8 +81,7 @@ func startVerificationWindowFlow(settings config.Settings, pending *pendingVerif
 }
 
 func startVerifierProcess(settings config.Settings, pending *pendingVerification, binaryPath string, commandArgs []string, userDataDir string, message string) error {
-	cmd := exec.Command(binaryPath, commandArgs...)
-	hideVerificationLauncherWindow(cmd)
+	cmd := newVerifierCommand(binaryPath, commandArgs)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -154,6 +153,10 @@ func startVerifierProcess(settings config.Settings, pending *pendingVerification
 		}()
 		return nil
 	}
+}
+
+func newVerifierCommand(binaryPath string, commandArgs []string) *exec.Cmd {
+	return exec.Command(binaryPath, commandArgs...)
 }
 
 func protectedFeedVerificationBinaryPath(settings config.Settings) (string, error) {

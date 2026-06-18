@@ -68,3 +68,10 @@ func TestBeginVerifierProcessStartBlocksDuplicateActiveRequest(t *testing.T) {
 		t.Fatalf("second begin = %v %#v", started, existing)
 	}
 }
+
+func TestNewVerifierCommandKeepsWindowVisible(t *testing.T) {
+	cmd := newVerifierCommand("FeedMeDailyProtectedVerifier.exe", []string{"--verification-id", "verify-1"})
+	if cmd.SysProcAttr != nil {
+		t.Fatalf("verifier command should not hide the visible verification window: %#v", cmd.SysProcAttr)
+	}
+}

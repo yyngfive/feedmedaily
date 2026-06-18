@@ -12,6 +12,7 @@ Changes since `0.3.2`:
 
 - Changed protected-feed recovery from an ACS-only path into a host-scoped verification session model for all challenge-gated publishers. Protected feeds now reuse one persistent host session per site, so later feeds on the same host can ride the same verified state within a run and across later runs.
 - Renamed and moved the native protected-feed helper from the ACS-specific `tools/FeedMeDailyACSVerifier` project to the runtime component project `native/FeedMeDailyProtectedVerifier`, with release builds now packaging it under `FeedMeDailyProtectedVerifier`.
+- Removed the legacy Python backend package and old pytest suite now that the Go tray plus Go backend service are the maintained runtime path.
 
 ### Added
 
@@ -21,7 +22,7 @@ Changes since `0.3.2`:
 
 - Fixed source-mode duplicate verifier launches so one `verification_id` can no longer start multiple helper processes for the same protected host. Duplicate callbacks are now acknowledged and ignored cleanly instead of generating follow-up `404` noise after the first successful XML capture.
 - Fixed native verifier stalls so a protected-feed helper that cannot capture XML reports `needs_user` after a short watchdog interval, writes its own diagnostic log under `logs/protected-verifier/`, and is terminated by the backend if the verification request eventually times out.
-- Fixed the admin `Reopen Verification Window` action so a stale protected-feed verifier process record is cleared before relaunching, instead of silently blocking the new verifier window.
+- Fixed the admin `Reopen Verification Window` action so stale protected-feed verifier process records are cleared before relaunching, and the backend now launches the visible WinForms/WebView2 verifier window instead of accidentally applying hidden-window launcher settings to the verifier process itself.
 - Fixed the built-in update manifest setting so fresh installs and source-mode `.env.example` now point to the GitHub Releases `latest/download/update.json` asset instead of leaving update checks unset or pointing installer metadata at an example URL.
 
 ## 0.3.2 (2026-06-15)

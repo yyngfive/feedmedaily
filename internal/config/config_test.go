@@ -11,8 +11,7 @@ import (
 
 func TestLoadSourceSettingsFromDotEnv(t *testing.T) {
 	root := t.TempDir()
-	writeConfigTestFile(t, filepath.Join(root, "pyproject.toml"), "[project]\nname = \"scirssagent\"\n")
-	writeConfigTestFile(t, filepath.Join(root, "src", "scirssagent", "__init__.py"), "")
+	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
 	writeConfigTestFile(t, filepath.Join(root, ".env"), "SCIRSS_SERVER_HOST=127.0.0.2\nSCIRSS_SERVER_PORT=8123\n")
 
 	t.Setenv("FEEDMEDAILY_RUNTIME_MODE", "")
@@ -40,8 +39,7 @@ func TestLoadSourceSettingsFromDotEnv(t *testing.T) {
 
 func TestLoadEnvironmentOverridesDotEnv(t *testing.T) {
 	root := t.TempDir()
-	writeConfigTestFile(t, filepath.Join(root, "pyproject.toml"), "[project]\nname = \"scirssagent\"\n")
-	writeConfigTestFile(t, filepath.Join(root, "src", "scirssagent", "__init__.py"), "")
+	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
 	writeConfigTestFile(t, filepath.Join(root, ".env"), "SCIRSS_SERVER_PORT=8123\n")
 
 	t.Setenv("SCIRSS_SERVER_PORT", "9001")
@@ -57,8 +55,7 @@ func TestLoadEnvironmentOverridesDotEnv(t *testing.T) {
 
 func TestSettingsConfigMasksSecretsAndWritesDotEnv(t *testing.T) {
 	root := t.TempDir()
-	writeConfigTestFile(t, filepath.Join(root, "pyproject.toml"), "[project]\nname = \"scirssagent\"\n")
-	writeConfigTestFile(t, filepath.Join(root, "src", "scirssagent", "__init__.py"), "")
+	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
 	writeConfigTestFile(t, filepath.Join(root, ".env"), "SCIRSS_CLASSIFIER_API_KEY=super-secret\nSCIRSS_CLASSIFIER_MODEL=deepseek-v4-flash\n")
 
 	response, err := SettingsConfig(root)
@@ -101,8 +98,7 @@ func TestSettingsConfigMasksSecretsAndWritesDotEnv(t *testing.T) {
 
 func TestSettingsConfigShowsEnvironmentOverrideSource(t *testing.T) {
 	root := t.TempDir()
-	writeConfigTestFile(t, filepath.Join(root, "pyproject.toml"), "[project]\nname = \"scirssagent\"\n")
-	writeConfigTestFile(t, filepath.Join(root, "src", "scirssagent", "__init__.py"), "")
+	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
 	writeConfigTestFile(t, filepath.Join(root, ".env"), "SCIRSS_PROFILE_MODEL=local-profile-model\n")
 	t.Setenv("SCIRSS_PROFILE_MODEL", "system-profile-model")
 
@@ -118,8 +114,7 @@ func TestSettingsConfigShowsEnvironmentOverrideSource(t *testing.T) {
 
 func TestSettingsConfigShowsGitHubUpdateManifestDefault(t *testing.T) {
 	root := t.TempDir()
-	writeConfigTestFile(t, filepath.Join(root, "pyproject.toml"), "[project]\nname = \"scirssagent\"\n")
-	writeConfigTestFile(t, filepath.Join(root, "src", "scirssagent", "__init__.py"), "")
+	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
 
 	response, err := SettingsConfig(root)
 	if err != nil {

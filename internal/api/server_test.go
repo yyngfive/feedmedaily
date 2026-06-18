@@ -88,7 +88,6 @@ func TestSettingsConfigAPI(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "web", "package.json"), `{"version":"1.2.3"}`)
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
-	writeFile(t, filepath.Join(root, "src", "scirssagent", "__init__.py"), "")
 	writeFile(t, filepath.Join(root, ".env"), "SCIRSS_CLASSIFIER_API_KEY=super-secret\n")
 	handler := newTestHandler(t, testSettings(root))
 

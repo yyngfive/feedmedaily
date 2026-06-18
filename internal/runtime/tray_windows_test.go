@@ -35,8 +35,7 @@ func TestTrayLaunchCommandSourceUsesBuiltBinary(t *testing.T) {
 	})
 	defer restore()
 	root := t.TempDir()
-	writeRuntimeTestFile(t, filepath.Join(root, "pyproject.toml"))
-	writeRuntimeTestFile(t, filepath.Join(root, "src", "scirssagent", "__init__.py"))
+	writeRuntimeTestFile(t, filepath.Join(root, "go.mod"))
 
 	command, cwd, err := trayLaunchCommand(root)
 	if err != nil {
@@ -59,7 +58,7 @@ func TestTrayLaunchCommandErrorsWhenNothingCanLaunch(t *testing.T) {
 	defer restore()
 
 	root := t.TempDir()
-	writeRuntimeTestFile(t, filepath.Join(root, "pyproject.toml"))
+	writeRuntimeTestFile(t, filepath.Join(root, "go.mod"))
 	_, _, err := trayLaunchCommand(root)
 	if err == nil || !strings.Contains(err.Error(), "tray launcher not found") {
 		t.Fatalf("err = %v", err)
