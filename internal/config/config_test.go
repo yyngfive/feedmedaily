@@ -33,6 +33,9 @@ func TestLoadSourceSettingsFromDotEnv(t *testing.T) {
 	if settings.FeedsPath != filepath.Join(root, "data", "rss_feeds.json") {
 		t.Fatalf("feeds path = %q", settings.FeedsPath)
 	}
+	if settings.UpdateManifestURL != DefaultUpdateManifestURL {
+		t.Fatalf("update manifest = %q", settings.UpdateManifestURL)
+	}
 }
 
 func TestLoadEnvironmentOverridesDotEnv(t *testing.T) {
@@ -110,6 +113,24 @@ func TestSettingsConfigShowsEnvironmentOverrideSource(t *testing.T) {
 	field := fieldByKey(t, response.Fields, "SCIRSS_PROFILE_MODEL")
 	if field.Value == nil || *field.Value != "system-profile-model" || field.Source != "environment" || !field.StoredInDotenv {
 		t.Fatalf("unexpected profile model field: %#v", field)
+	}
+}
+
+func TestSettingsConfigShowsGitHubUpdateManifestDefault(t *testing.T) {
+	root := t.TempDir()
+	writeConfigTestFile(t, filepath.Join(root, "pyproject.toml"), "[project]\nname = \"scirssagent\"\n")
+	writeConfigTestFile(t, filepath.Join(root, "src", "scirssagent", "__init__.py"), "")
+
+	response, err := SettingsConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	field := fieldByKey(t, response.Fields, "FEEDMEDAILY_UPDATE_MANIFEST_URL")
+	if field.Value == nil || *field.Value != DefaultUpdateManifestURL {
+		t.Fatalf("unexpected update manifest field: %#v", field)
+	}
+	if field.DefaultValue == nil || *field.DefaultValue != DefaultUpdateManifestURL || field.Source != "default" {
+		t.Fatalf("unexpected update manifest default metadata: %#v", field)
 	}
 }
 

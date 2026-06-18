@@ -5,7 +5,7 @@
 
 #define MyAppVersion AppVersion
 #define MyAppPublisher "FeedMeDaily"
-#define MyAppURL "https://example.com/feedmedaily"
+#define MyAppURL "https://github.com/yyngfive/feedmedaily/releases/latest"
 #define MyTrayExeName "FeedMeDailyTray.exe"
 #define MyDaemonExeName "feedmedailyd.exe"
 #define MyBuildDir "..\dist\FeedMeDaily"

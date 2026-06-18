@@ -154,7 +154,8 @@ Behavioral baseline:
 ### Packaged update distribution
 
 - packaged builds still direct installer downloads and release notes to GitHub Releases
-- the update manifest URL can point to a separately hosted `update.json`, so update checks and installer hosting can be split across different origins
+- fresh installs default `FEEDMEDAILY_UPDATE_MANIFEST_URL` to `https://github.com/yyngfive/feedmedaily/releases/latest/download/update.json`
+- the update manifest URL can still be overridden to a separately hosted `update.json`, so update checks and installer hosting can be split across different origins
 
 ## Profile Lifecycle
 

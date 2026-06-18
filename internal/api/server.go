@@ -1070,6 +1070,7 @@ func (s *Server) handleFeedVerificationStart(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusNotFound, "Verification request not found.")
 		return
 	}
+	terminateVerifierProcess(s.settings, pending.ID)
 	if err := startVerificationFlowFunc(s.settings, pending); err != nil {
 		logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "warning", "verification_start_failed", "pipeline.feeds.verification_required", "", err.Error(), map[string]any{
 			"verification_id":       pending.ID,

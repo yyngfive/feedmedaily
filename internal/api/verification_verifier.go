@@ -341,20 +341,24 @@ func terminateVerifierProcess(settings config.Settings, verificationID string) {
 	if !ok || process.Exited || process.PID <= 0 {
 		return
 	}
+	var killErr error
 	osProcess, err := os.FindProcess(process.PID)
-	if err != nil {
-		return
+	if err == nil {
+		killErr = osProcess.Kill()
+	} else {
+		killErr = err
 	}
-	if err := osProcess.Kill(); err != nil {
-		return
-	}
-	markVerifierProcessExited(verificationID, -1, fmt.Errorf("verification process terminated after timeout"))
-	logJobEvent(settings.LogsDir, &jobInfo{ID: process.JobID}, "warning", "verification_process_terminated", "pipeline.feeds.verification_required", "Verifier process was still running after verification timed out, so FeedMeDaily closed it.", "", map[string]any{
+	markVerifierProcessExited(verificationID, -1, fmt.Errorf("verification process termination requested"))
+	logData := map[string]any{
 		"verification_id":       process.VerificationID,
 		"verification_feed_url": process.FeedURL,
 		"verification_journal":  process.Journal,
 		"verification_pid":      process.PID,
-	})
+	}
+	if killErr != nil {
+		logData["termination_error"] = killErr.Error()
+	}
+	logJobEvent(settings.LogsDir, &jobInfo{ID: process.JobID}, "warning", "verification_process_terminated", "pipeline.feeds.verification_required", "Verifier process was still running, so FeedMeDaily cleared it before continuing.", "", logData)
 }
 
 func logVerificationProcessExit(settings config.Settings, pending *pendingVerification, process *verifierProcess, exitCode int, err error) {

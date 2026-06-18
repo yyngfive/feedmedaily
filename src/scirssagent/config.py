@@ -19,6 +19,11 @@ from scirssagent.runtime import (
 from scirssagent.secure_store import load_secret_values, store_secret_values
 
 
+DEFAULT_UPDATE_MANIFEST_URL = (
+    "https://github.com/yyngfive/feedmedaily/releases/latest/download/update.json"
+)
+
+
 @dataclass(frozen=True)
 class Settings:
     mode: str
@@ -209,9 +214,10 @@ CONFIG_OPTIONS: tuple[ConfigOption, ...] = (
     ConfigOption(
         key="FEEDMEDAILY_UPDATE_MANIFEST_URL",
         label="Update manifest URL",
-        description="Optional remote JSON manifest used for in-app update checks.",
+        description="Remote JSON manifest used for in-app update checks.",
         section="Release",
         input_type="url",
+        default=DEFAULT_UPDATE_MANIFEST_URL,
     ),
 )
 
@@ -417,7 +423,10 @@ def load_settings(root: Path | None = None) -> Settings:
         database_path=(data_dir / "literature.sqlite").resolve(),
         profile_path=profile_path.resolve(),
         launch_command_path=Path(sys.executable).resolve(),
-        update_manifest_url=_optional_value(values.get("FEEDMEDAILY_UPDATE_MANIFEST_URL")),
+        update_manifest_url=(
+            _optional_value(values.get("FEEDMEDAILY_UPDATE_MANIFEST_URL"))
+            or DEFAULT_UPDATE_MANIFEST_URL
+        ),
         classifier_api_key=_optional_value(values.get("SCIRSS_CLASSIFIER_API_KEY")),
         classifier_base_url=str(values["SCIRSS_CLASSIFIER_BASE_URL"]),
         classifier_model=str(values["SCIRSS_CLASSIFIER_MODEL"]),

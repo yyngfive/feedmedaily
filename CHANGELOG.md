@@ -21,6 +21,8 @@ Changes since `0.3.2`:
 
 - Fixed source-mode duplicate verifier launches so one `verification_id` can no longer start multiple helper processes for the same protected host. Duplicate callbacks are now acknowledged and ignored cleanly instead of generating follow-up `404` noise after the first successful XML capture.
 - Fixed native verifier stalls so a protected-feed helper that cannot capture XML reports `needs_user` after a short watchdog interval, writes its own diagnostic log under `logs/protected-verifier/`, and is terminated by the backend if the verification request eventually times out.
+- Fixed the admin `Reopen Verification Window` action so a stale protected-feed verifier process record is cleared before relaunching, instead of silently blocking the new verifier window.
+- Fixed the built-in update manifest setting so fresh installs and source-mode `.env.example` now point to the GitHub Releases `latest/download/update.json` asset instead of leaving update checks unset or pointing installer metadata at an example URL.
 
 ## 0.3.2 (2026-06-15)
 
