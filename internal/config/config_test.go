@@ -32,9 +32,6 @@ func TestLoadSourceSettingsFromDotEnv(t *testing.T) {
 	if settings.FeedsPath != filepath.Join(root, "data", "rss_feeds.json") {
 		t.Fatalf("feeds path = %q", settings.FeedsPath)
 	}
-	if settings.UpdateManifestURL != DefaultUpdateManifestURL {
-		t.Fatalf("update manifest = %q", settings.UpdateManifestURL)
-	}
 }
 
 func TestLoadEnvironmentOverridesDotEnv(t *testing.T) {
@@ -112,7 +109,7 @@ func TestSettingsConfigShowsEnvironmentOverrideSource(t *testing.T) {
 	}
 }
 
-func TestSettingsConfigShowsGitHubUpdateManifestDefault(t *testing.T) {
+func TestSettingsConfigDoesNotExposeUpdateManifestURL(t *testing.T) {
 	root := t.TempDir()
 	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
 
@@ -120,12 +117,10 @@ func TestSettingsConfigShowsGitHubUpdateManifestDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	field := fieldByKey(t, response.Fields, "FEEDMEDAILY_UPDATE_MANIFEST_URL")
-	if field.Value == nil || *field.Value != DefaultUpdateManifestURL {
-		t.Fatalf("unexpected update manifest field: %#v", field)
-	}
-	if field.DefaultValue == nil || *field.DefaultValue != DefaultUpdateManifestURL || field.Source != "default" {
-		t.Fatalf("unexpected update manifest default metadata: %#v", field)
+	for _, field := range response.Fields {
+		if field.Key == "FEEDMEDAILY_UPDATE_MANIFEST_URL" {
+			t.Fatalf("update manifest URL should not be configurable: %#v", field)
+		}
 	}
 }
 

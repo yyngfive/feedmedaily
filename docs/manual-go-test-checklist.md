@@ -329,9 +329,9 @@ Invoke-RestMethod "$base/api/app/update?force=1"
 
 检查点：
 
-- 如果没配置更新地址，`status` 通常为 `not_configured`
-- 如果配置了更新地址，会返回 `has_update`
-- `force=1` 会立即重查远程 manifest，而不是继续复用 5 分钟成功缓存
+- 更新检查读取固定 DNS TXT 记录 `feedmedaily-update.stassenger.top`
+- TXT 记录需要包含 `version=<semver>;url=<release-url>`
+- `force=1` 会立即重查 DNS TXT，而不是继续复用 5 分钟成功缓存；它不能绕过上游 DNS TTL
 - 返回体里的 `checked_at` 会反映本次实际检查时间
 
 ### 7.1.4 `POST /api/app/open`
@@ -976,6 +976,7 @@ Invoke-RestMethod "$base/api/admin/jobs/$($job.id)"
 - `corepack pnpm` 可用
 - 前端依赖已安装
 - 如果要生成安装器，Windows 上安装了 Inno Setup 6，并且 `ISCC.exe` 可被 `tools/build_release.ps1` 找到
+- 如果要自动更新发布 DNS TXT，Windows 用户环境变量或仓库根目录 `.env` 里有 `ALIBABA_CLOUD_ACCESS_KEY_ID` 和 `ALIBABA_CLOUD_ACCESS_KEY_SECRET`
 
 可选先确认 Inno Setup：
 
@@ -987,6 +988,22 @@ Get-Command ISCC.exe -ErrorAction SilentlyContinue
 
 - `C:\Program Files (x86)\Inno Setup 6\ISCC.exe`
 - `C:\Program Files\Inno Setup 6\ISCC.exe`
+
+可选设置发布 DNS 所需用户级环境变量：
+
+```powershell
+[Environment]::SetEnvironmentVariable("ALIBABA_CLOUD_ACCESS_KEY_ID", "<access-key-id>", "User")
+[Environment]::SetEnvironmentVariable("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "<access-key-secret>", "User")
+```
+
+设置后重新打开 PowerShell，再确认：
+
+```powershell
+$env:ALIBABA_CLOUD_ACCESS_KEY_ID
+$env:ALIBABA_CLOUD_ACCESS_KEY_SECRET
+```
+
+如果没有设置 Windows 环境变量，`tools/update_release_dns.ps1` 会退回读取仓库根目录 `.env` 中的同名变量。
 
 ## 12.2 只构建 release 目录，不打安装器
 
@@ -1006,14 +1023,12 @@ pwsh -File .\tools\build_release.ps1 -SkipInstaller
 - [dist/FeedMeDaily/feedmedailyd.exe](D:/Codes/Projects/SciRSSAgent/dist/FeedMeDaily/feedmedailyd.exe)
 - [dist/FeedMeDaily/feedmedaily.ico](D:/Codes/Projects/SciRSSAgent/dist/FeedMeDaily/feedmedaily.ico)
 - [dist/FeedMeDaily/web/dist/index.html](D:/Codes/Projects/SciRSSAgent/dist/FeedMeDaily/web/dist/index.html)
-- [dist/update.json](D:/Codes/Projects/SciRSSAgent/dist/update.json)
 
 建议命令：
 
 ```powershell
 Get-ChildItem .\dist\FeedMeDaily
 Get-ChildItem .\dist\FeedMeDaily\web\dist
-Get-Content .\dist\update.json
 ```
 
 检查点：
@@ -1021,9 +1036,9 @@ Get-Content .\dist\update.json
 - `FeedMeDailyTray.exe` 存在
 - `feedmedailyd.exe` 存在
 - `web/dist` 已复制进去
-- `update.json` 的 `version` 与 `web/package.json` 一致
-- `update.json` 的 `download_url` 仍指向 GitHub Releases 安装包
-- 构建后需要把 `dist/update.json` 额外发布到主地址，供应用内更新检查读取
+- 构建脚本不再生成 `dist/update.json`
+- 发布 GitHub Release 后，运行 `tools/update_release_dns.ps1` 更新 `feedmedaily-update.stassenger.top` 的 TXT 记录
+- 阿里云免费版 TXT TTL 最短为 600 秒，手动更新检查可能需要等待 DNS 缓存过期后才看到新版本
 
 ## 12.3 构建完整安装包
 
@@ -1045,6 +1060,34 @@ Get-ChildItem .\dist\installer
 预期至少有一个类似文件：
 
 - `FeedMeDaily-v0.3.2.exe`
+
+### 12.3.1 更新发布 DNS TXT
+
+发布 GitHub Release 且确认页面可访问后，运行：
+
+```powershell
+pwsh -File .\tools\update_release_dns.ps1 -Version 0.3.3
+```
+
+无网络 dry run：
+
+```powershell
+pwsh -File .\tools\update_release_dns.ps1 -Version 0.3.3 -DryRun
+```
+
+检查点：
+
+- 脚本优先从 Windows 环境变量读取 `ALIBABA_CLOUD_ACCESS_KEY_ID` 和 `ALIBABA_CLOUD_ACCESS_KEY_SECRET`，缺失时退回读取仓库根目录 `.env`
+- 脚本不依赖阿里云 CLI
+- TXT 写入值为 `version=<version>;url=https://github.com/yyngfive/feedmedaily/releases/tag/v<version>`
+- 如果记录不存在，脚本会自动创建
+- 如果存在多条同名 TXT 记录，脚本会失败并提示先清理重复记录
+
+解析验证：
+
+```powershell
+Resolve-DnsName feedmedaily-update.stassenger.top -Type TXT
+```
 
 如果没有安装器但前面 release 目录有了，常见原因是：
 

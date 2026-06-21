@@ -91,22 +91,6 @@ function Get-ProjectVersion {
   return "$($packageJson.version)".Trim()
 }
 
-function Write-UpdateManifest {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$Version
-  )
-
-  $manifest = @{
-    version           = $Version
-    download_url      = "https://github.com/yyngfive/feedmedaily/releases/download/v$Version/FeedMeDaily-v$Version.exe"
-    release_notes_url = "https://github.com/yyngfive/feedmedaily/releases/tag/v$Version"
-  } | ConvertTo-Json -Depth 3
-
-  $manifestPath = Join-Path $distDir "update.json"
-  $manifest | Set-Content -Encoding UTF8 $manifestPath
-}
-
 Push-Location $root
 try {
   Stop-ExistingReleaseProcess
@@ -140,8 +124,6 @@ try {
   if (Test-Path $protectedVerifierBuildOutput) {
     Copy-Item -Recurse -Force $protectedVerifierBuildOutput (Join-Path $appDist "FeedMeDailyProtectedVerifier")
   }
-  Write-UpdateManifest -Version $projectVersion
-
   if (-not $SkipInstaller) {
     $iscc = Resolve-Iscc
     if (-not $iscc) {

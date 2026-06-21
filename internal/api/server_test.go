@@ -249,17 +249,13 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 	restore := stubAPIGlobals(t)
 	defer restore()
 
-	manifestCalls := 0
+	txtCalls := 0
 	nowFunc = func() time.Time {
 		return time.Date(2026, 5, 16, 7, 30, 0, 0, time.FixedZone("CST", 8*3600))
 	}
-	fetchUpdateManifestFunc = func(string) (map[string]any, error) {
-		manifestCalls++
-		return map[string]any{
-			"version":           "9.9.9",
-			"download_url":      "https://example.com/feedmedaily.exe",
-			"release_notes_url": "https://example.com/release-notes",
-		}, nil
+	lookupUpdateTXTFunc = func(string) ([]string, error) {
+		txtCalls++
+		return []string{"version=9.9.9;url=https://example.com/release"}, nil
 	}
 	backendRunCommandFunc = func(config.Settings) ([]string, error) {
 		return []string{"bash", filepath.Join(root, "tools", "feedmedaily.sh"), "sync"}, nil
@@ -269,7 +265,6 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 		opened = target
 		return nil
 	}
-	settings.UpdateManifestURL = "https://example.com/update.json"
 	handler := newTestHandler(t, settings)
 
 	updateRecorder := httptest.NewRecorder()
@@ -280,11 +275,11 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 
 	openRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(openRecorder, httptest.NewRequest(http.MethodPost, "/api/app/open", strings.NewReader(`{"target":"download_url"}`)))
-	if openRecorder.Code != http.StatusOK || opened != "https://example.com/feedmedaily.exe" {
+	if openRecorder.Code != http.StatusOK || opened != "https://example.com/release" {
 		t.Fatalf("open response = %d %s opened=%q", openRecorder.Code, openRecorder.Body.String(), opened)
 	}
-	if manifestCalls != 1 {
-		t.Fatalf("expected cached update status, manifestCalls=%d", manifestCalls)
+	if txtCalls != 1 {
+		t.Fatalf("expected cached update status, txtCalls=%d", txtCalls)
 	}
 
 	schedulerGet := httptest.NewRecorder()
@@ -309,7 +304,6 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 func TestAppUpdateCachesSuccessfulManifestFetches(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)
-	settings.UpdateManifestURL = "https://example.com/update.json"
 	restore := stubAPIGlobals(t)
 	defer restore()
 
@@ -317,14 +311,10 @@ func TestAppUpdateCachesSuccessfulManifestFetches(t *testing.T) {
 	nowFunc = func() time.Time {
 		return currentTime
 	}
-	manifestCalls := 0
-	fetchUpdateManifestFunc = func(string) (map[string]any, error) {
-		manifestCalls++
-		return map[string]any{
-			"version":           "9.9.9",
-			"download_url":      "https://example.com/feedmedaily.exe",
-			"release_notes_url": "https://example.com/release-notes",
-		}, nil
+	txtCalls := 0
+	lookupUpdateTXTFunc = func(string) ([]string, error) {
+		txtCalls++
+		return []string{"version=9.9.9;url=https://example.com/release"}, nil
 	}
 	handler := newTestHandler(t, settings)
 
@@ -341,15 +331,33 @@ func TestAppUpdateCachesSuccessfulManifestFetches(t *testing.T) {
 	if second.Code != http.StatusOK || !contains(second.Body.String(), `"has_update":true`) {
 		t.Fatalf("second update response = %d %s", second.Code, second.Body.String())
 	}
-	if manifestCalls != 1 {
-		t.Fatalf("expected cached success response, manifestCalls=%d", manifestCalls)
+	if txtCalls != 1 {
+		t.Fatalf("expected cached success response, txtCalls=%d", txtCalls)
+	}
+}
+
+func TestAppUpdateReportsUpToDateFromDNSTXT(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	currentVersion := appruntime.PackageVersion(root)
+	lookupUpdateTXTFunc = func(string) ([]string, error) {
+		return []string{"version=" + currentVersion + ";url=https://example.com/release"}, nil
+	}
+	handler := newTestHandler(t, settings)
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
+	if recorder.Code != http.StatusOK || !contains(recorder.Body.String(), `"status":"up_to_date"`) || !contains(recorder.Body.String(), `"has_update":false`) {
+		t.Fatalf("update response = %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 
 func TestAppUpdateForceBypassesCache(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)
-	settings.UpdateManifestURL = "https://example.com/update.json"
 	restore := stubAPIGlobals(t)
 	defer restore()
 
@@ -357,14 +365,10 @@ func TestAppUpdateForceBypassesCache(t *testing.T) {
 	nowFunc = func() time.Time {
 		return currentTime
 	}
-	manifestCalls := 0
-	fetchUpdateManifestFunc = func(string) (map[string]any, error) {
-		manifestCalls++
-		return map[string]any{
-			"version":           "9.9.9",
-			"download_url":      "https://example.com/feedmedaily.exe",
-			"release_notes_url": "https://example.com/release-notes",
-		}, nil
+	txtCalls := 0
+	lookupUpdateTXTFunc = func(string) ([]string, error) {
+		txtCalls++
+		return []string{"version=9.9.9;url=https://example.com/release"}, nil
 	}
 	handler := newTestHandler(t, settings)
 
@@ -381,15 +385,14 @@ func TestAppUpdateForceBypassesCache(t *testing.T) {
 	if second.Code != http.StatusOK || !contains(second.Body.String(), `"checked_at":"2026-05-16T07:31:00Z"`) {
 		t.Fatalf("forced update response = %d %s", second.Code, second.Body.String())
 	}
-	if manifestCalls != 2 {
-		t.Fatalf("expected force update to bypass cache, manifestCalls=%d", manifestCalls)
+	if txtCalls != 2 {
+		t.Fatalf("expected force update to bypass cache, txtCalls=%d", txtCalls)
 	}
 }
 
 func TestAppUpdateCachesFailuresBriefly(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)
-	settings.UpdateManifestURL = "https://example.com/update.json"
 	restore := stubAPIGlobals(t)
 	defer restore()
 
@@ -397,10 +400,10 @@ func TestAppUpdateCachesFailuresBriefly(t *testing.T) {
 	nowFunc = func() time.Time {
 		return currentTime
 	}
-	manifestCalls := 0
-	fetchUpdateManifestFunc = func(string) (map[string]any, error) {
-		manifestCalls++
-		return nil, errors.New("dial timeout")
+	txtCalls := 0
+	lookupUpdateTXTFunc = func(string) ([]string, error) {
+		txtCalls++
+		return nil, errors.New("dns timeout")
 	}
 	handler := newTestHandler(t, settings)
 
@@ -417,8 +420,8 @@ func TestAppUpdateCachesFailuresBriefly(t *testing.T) {
 	if second.Code != http.StatusOK || !contains(second.Body.String(), `"status":"check_failed"`) {
 		t.Fatalf("second failed update response = %d %s", second.Code, second.Body.String())
 	}
-	if manifestCalls != 1 {
-		t.Fatalf("expected cached failure response, manifestCalls=%d", manifestCalls)
+	if txtCalls != 1 {
+		t.Fatalf("expected cached failure response, txtCalls=%d", txtCalls)
 	}
 
 	currentTime = currentTime.Add(20 * time.Second)
@@ -428,58 +431,26 @@ func TestAppUpdateCachesFailuresBriefly(t *testing.T) {
 	if third.Code != http.StatusOK || !contains(third.Body.String(), `"status":"check_failed"`) {
 		t.Fatalf("third failed update response = %d %s", third.Code, third.Body.String())
 	}
-	if manifestCalls != 2 {
-		t.Fatalf("expected failure cache expiry, manifestCalls=%d", manifestCalls)
+	if txtCalls != 2 {
+		t.Fatalf("expected failure cache expiry, txtCalls=%d", txtCalls)
 	}
 }
 
-func TestSettingsConfigUpdateRefreshesUpdateManifestURL(t *testing.T) {
+func TestAppUpdateFailsWhenDNSTXTIsIncomplete(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)
-	settings.UpdateManifestURL = "https://example.com/original-update.json"
 	restore := stubAPIGlobals(t)
 	defer restore()
 
-	manifestURLs := make([]string, 0, 2)
-	fetchUpdateManifestFunc = func(manifestURL string) (map[string]any, error) {
-		manifestURLs = append(manifestURLs, manifestURL)
-		return map[string]any{
-			"version":           "9.9.9",
-			"download_url":      "https://example.com/feedmedaily.exe",
-			"release_notes_url": "https://example.com/release-notes",
-		}, nil
+	lookupUpdateTXTFunc = func(string) ([]string, error) {
+		return []string{"version=9.9.9"}, nil
 	}
 	handler := newTestHandler(t, settings)
 
-	firstUpdate := httptest.NewRecorder()
-	handler.ServeHTTP(firstUpdate, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
-	if firstUpdate.Code != http.StatusOK {
-		t.Fatalf("first update response = %d %s", firstUpdate.Code, firstUpdate.Body.String())
-	}
-
-	configRecorder := httptest.NewRecorder()
-	configBody := `{"fields":{"FEEDMEDAILY_UPDATE_MANIFEST_URL":{"value":"https://mirror.example.com/update.json"}}}`
-	handler.ServeHTTP(configRecorder, httptest.NewRequest(http.MethodPut, "/api/settings/config", strings.NewReader(configBody)))
-	if configRecorder.Code != http.StatusOK || !contains(configRecorder.Body.String(), `"key":"FEEDMEDAILY_UPDATE_MANIFEST_URL"`) {
-		t.Fatalf("settings update response = %d %s", configRecorder.Code, configRecorder.Body.String())
-	}
-
-	metaRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(metaRecorder, httptest.NewRequest(http.MethodGet, "/api/app/meta", nil))
-	if metaRecorder.Code != http.StatusOK || !contains(metaRecorder.Body.String(), `"update_manifest_url":"https://mirror.example.com/update.json"`) {
-		t.Fatalf("meta response = %d %s", metaRecorder.Code, metaRecorder.Body.String())
-	}
-
-	secondUpdate := httptest.NewRecorder()
-	handler.ServeHTTP(secondUpdate, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
-	if secondUpdate.Code != http.StatusOK {
-		t.Fatalf("second update response = %d %s", secondUpdate.Code, secondUpdate.Body.String())
-	}
-	if len(manifestURLs) != 2 {
-		t.Fatalf("expected cache reset after settings change, manifestURLs=%v", manifestURLs)
-	}
-	if manifestURLs[0] != "https://example.com/original-update.json" || manifestURLs[1] != "https://mirror.example.com/update.json" {
-		t.Fatalf("unexpected manifest URLs: %v", manifestURLs)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/app/update", nil))
+	if recorder.Code != http.StatusOK || !contains(recorder.Body.String(), `"status":"check_failed"`) {
+		t.Fatalf("update response = %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -1157,7 +1128,7 @@ func writeFile(t *testing.T, path string, content string) {
 func stubAPIGlobals(t *testing.T) func() {
 	t.Helper()
 	previousOpen := openExternalTargetFunc
-	previousFetch := fetchUpdateManifestFunc
+	previousLookupTXT := lookupUpdateTXTFunc
 	previousBackendRunCommand := backendRunCommandFunc
 	previousBootstrapProfile := bootstrapProfileFunc
 	previousGenerateProfileProposal := generateProfileProposalFunc
@@ -1176,7 +1147,7 @@ func stubAPIGlobals(t *testing.T) func() {
 	apiVerifications = verificationRegistry{items: map[string]*pendingVerification{}}
 	return func() {
 		openExternalTargetFunc = previousOpen
-		fetchUpdateManifestFunc = previousFetch
+		lookupUpdateTXTFunc = previousLookupTXT
 		backendRunCommandFunc = previousBackendRunCommand
 		bootstrapProfileFunc = previousBootstrapProfile
 		generateProfileProposalFunc = previousGenerateProfileProposal

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,15 +26,14 @@ import (
 )
 
 type Server struct {
-	settings          config.Settings
-	version           string
-	shutdown          func()
-	storeMu           sync.RWMutex
-	readStore         *store.Store
-	writeStore        *store.Store
-	updateMu          sync.Mutex
-	updateManifestURL string
-	updateCache       *cachedUpdateStatus
+	settings    config.Settings
+	version     string
+	shutdown    func()
+	storeMu     sync.RWMutex
+	readStore   *store.Store
+	writeStore  *store.Store
+	updateMu    sync.Mutex
+	updateCache *cachedUpdateStatus
 }
 
 type cachedUpdateStatus struct {
@@ -44,11 +44,12 @@ type cachedUpdateStatus struct {
 const (
 	updateStatusSuccessTTL = 5 * time.Minute
 	updateStatusFailureTTL = 30 * time.Second
+	updateManifestDNSName  = "feedmedaily-update.stassenger.top"
 )
 
 var (
 	openExternalTargetFunc                                                                                          = appruntime.OpenExternalTarget
-	fetchUpdateManifestFunc                                                                                         = defaultFetchUpdateManifest
+	lookupUpdateTXTFunc                                                                                             = net.LookupTXT
 	selectReclassifyPaperIDsFunc                                                                                    = jobruntime.SelectPaperIDsForScope
 	reclassifyPaperIDsFunc                                                                                          = jobruntime.ReclassifyPaperIDs
 	rebuildLatestReportFunc                                                                                         = jobruntime.RebuildLatestReport
@@ -63,10 +64,9 @@ func NewServer(settings config.Settings, shutdown func()) *Server {
 	// 用当前解析好的 settings 创建一个可挂到 net/http 上的 API 服务器。
 	logging.SetDefaultDir(settings.LogsDir)
 	return &Server{
-		settings:          settings,
-		version:           appruntime.PackageVersion(settings.RootDir),
-		shutdown:          shutdown,
-		updateManifestURL: settings.UpdateManifestURL,
+		settings: settings,
+		version:  appruntime.PackageVersion(settings.RootDir),
+		shutdown: shutdown,
 	}
 }
 
@@ -129,19 +129,6 @@ func (s *Server) Close() error {
 	return closeErr
 }
 
-func (s *Server) currentUpdateManifestURL() string {
-	s.updateMu.Lock()
-	defer s.updateMu.Unlock()
-	return s.updateManifestURL
-}
-
-func (s *Server) setUpdateManifestURL(manifestURL string) {
-	s.updateMu.Lock()
-	defer s.updateMu.Unlock()
-	s.updateManifestURL = strings.TrimSpace(manifestURL)
-	s.updateCache = nil
-}
-
 func (s *Server) cachedUpdateStatus(force bool) map[string]any {
 	now := nowFunc().UTC()
 
@@ -152,9 +139,7 @@ func (s *Server) cachedUpdateStatus(force bool) map[string]any {
 		return cloneJSONMap(s.updateCache.payload)
 	}
 
-	settings := s.settings
-	settings.UpdateManifestURL = s.updateManifestURL
-	payload := fetchUpdateStatus(settings)
+	payload := fetchUpdateStatus(s.settings)
 	ttl := updateStatusSuccessTTL
 	if status, ok := payload["status"].(string); ok && status == "check_failed" {
 		ttl = updateStatusFailureTTL
@@ -246,10 +231,6 @@ func (s *Server) handleAppMeta(w http.ResponseWriter, r *http.Request) {
 	if state, err := appruntime.ReadState(s.settings.RuntimeStatePath); err == nil && state != nil {
 		processRunning = appruntime.ProcessRunning(state.PID)
 	}
-	updateManifestURL := any(nil)
-	if current := s.currentUpdateManifestURL(); current != "" {
-		updateManifestURL = current
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":                appruntime.AppPublicName,
 		"version":             s.version,
@@ -262,13 +243,12 @@ func (s *Server) handleAppMeta(w http.ResponseWriter, r *http.Request) {
 		"tray_settings_path":  filepath.Join(s.settings.ConfigDir, "tray-settings.json"),
 		"server_url":          requestBaseURL(r),
 		"scheduler_task_name": appruntime.SchedulerTaskName,
-		"update_manifest_url": updateManifestURL,
 		"process_running":     processRunning,
 	})
 }
 
 func (s *Server) handleAppUpdate(w http.ResponseWriter, r *http.Request) {
-	// 检查远程 update manifest，告诉前端是否有新版本。
+	// 检查固定 DNS TXT 更新记录，告诉前端是否有新版本。
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
@@ -355,7 +335,6 @@ func (s *Server) handleSettingsConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.settings = updatedSettings
-		s.setUpdateManifestURL(settingsConfigFieldValue(response.Fields, "FEEDMEDAILY_UPDATE_MANIFEST_URL"))
 		writeJSON(w, http.StatusOK, response)
 	default:
 		w.Header().Set("Allow", "GET, PUT")
@@ -1520,45 +1499,57 @@ func emptyReportPayload() map[string]any {
 	}
 }
 
-func defaultFetchUpdateManifest(manifestURL string) (map[string]any, error) {
-	// 默认的 update manifest 拉取实现。
-	response, err := (&http.Client{Timeout: 5 * time.Second}).Get(manifestURL)
+func fetchUpdateManifestFromDNS() (map[string]any, error) {
+	// 读取固定 DNS TXT 记录；发布流程保证记录包含 version 和 url。
+	records, err := lookupUpdateTXTFunc(updateManifestDNSName)
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("update manifest request failed with %s", response.Status)
+	for _, record := range records {
+		manifest := parseUpdateTXT(record)
+		if manifest["version"] != "" && manifest["url"] != "" {
+			return map[string]any{
+				"version":           manifest["version"],
+				"download_url":      manifest["url"],
+				"release_notes_url": manifest["url"],
+			}, nil
+		}
 	}
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, err
+	return nil, fmt.Errorf("DNS TXT %s must include version and url", updateManifestDNSName)
+}
+
+func parseUpdateTXT(record string) map[string]string {
+	// 解析 version=...;url=... 这种极简 manifest。
+	result := map[string]string{}
+	for _, part := range strings.Split(record, ";") {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		if key == "version" || key == "url" {
+			result[key] = value
+		}
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, err
-	}
-	return payload, nil
+	return result
 }
 
 func fetchUpdateStatus(settings config.Settings) map[string]any {
-	// 把远程 manifest 解析成前端消费的统一更新状态对象。
+	// 把 DNS TXT manifest 解析成前端消费的统一更新状态对象。
 	currentVersion := appruntime.PackageVersion(settings.RootDir)
 	payload := map[string]any{
-		"status":            "not_configured",
+		"status":            "checking",
 		"current_version":   currentVersion,
 		"latest_version":    nil,
 		"has_update":        false,
 		"download_url":      nil,
 		"release_notes_url": nil,
-		"detail":            "Update checks are not configured for this build.",
+		"detail":            nil,
 		"checked_at":        nowFunc().UTC().Format(time.RFC3339),
 	}
-	if settings.UpdateManifestURL == "" {
-		return payload
-	}
 
-	manifest, err := fetchUpdateManifestFunc(settings.UpdateManifestURL)
+	manifest, err := fetchUpdateManifestFromDNS()
 	if err != nil {
 		payload["status"] = "check_failed"
 		payload["detail"] = err.Error()
@@ -1583,8 +1574,9 @@ func fetchUpdateStatus(settings config.Settings) map[string]any {
 	if hasUpdate {
 		payload["status"] = "update_available"
 	}
-	if latestVersion == "" {
-		payload["detail"] = "Manifest did not include a version field."
+	if latestVersion == "" || (downloadURL == "" && releaseNotesURL == "") {
+		payload["status"] = "check_failed"
+		payload["detail"] = fmt.Sprintf("DNS TXT %s must include version and url", updateManifestDNSName)
 	} else {
 		payload["detail"] = nil
 	}
@@ -1602,16 +1594,6 @@ func fetchUpdateStatus(settings config.Settings) map[string]any {
 		payload["release_notes_url"] = releaseNotesURL
 	}
 	return payload
-}
-
-func settingsConfigFieldValue(fields []config.SettingsConfigField, key string) string {
-	for _, field := range fields {
-		if field.Key != key || field.Value == nil {
-			continue
-		}
-		return strings.TrimSpace(*field.Value)
-	}
-	return ""
 }
 
 func resolveAppOpenTarget(settings config.Settings, target string, serverURL string, update map[string]any) (string, error) {

@@ -130,7 +130,6 @@ Editable local configuration is exposed through the UI:
 - each field reports whether its value comes from local config, the system environment, or a built-in default
 - first-run onboarding presents one shared LLM API key entry plus optional advanced per-role overrides for classifier and profile generation
 - saving local configuration reloads the running backend settings immediately, so follow-up jobs in the same session use the new API keys and model settings
-- changing `FEEDMEDAILY_UPDATE_MANIFEST_URL` takes effect immediately for subsequent in-app update checks without requiring a backend restart
 
 ## UI Architecture
 
@@ -156,8 +155,9 @@ Behavioral baseline:
 ### Packaged update distribution
 
 - packaged builds still direct installer downloads and release notes to GitHub Releases
-- fresh installs default `FEEDMEDAILY_UPDATE_MANIFEST_URL` to `https://github.com/yyngfive/feedmedaily/releases/latest/download/update.json`
-- the update manifest URL can still be overridden to a separately hosted `update.json`, so update checks and installer hosting can be split across different origins
+- update checks read the fixed DNS TXT record `feedmedaily-update.stassenger.top`
+- the TXT record must contain `version=<semver>;url=<release-url>`, with a 600-second TTL on the current Aliyun DNS plan
+- update checks are not user-configurable through `.env` or the settings UI; release publishing updates GitHub Releases first, then runs `tools/update_release_dns.ps1` to update the DNS TXT record through Aliyun OpenAPI
 
 ## Profile Lifecycle
 

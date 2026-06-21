@@ -2,9 +2,13 @@
 
 This changelog is grouped by version number and records each version relative to the previous released version.
 
-The latest released version is `0.3.2`. The next planned release is `0.3.3`, so unreleased product changes should be added under `0.3.3` until that version ships.
+The latest released version is `0.3.3`. The next planned release is `0.3.4`, so unreleased product changes should be added under `0.3.4` until that version ships.
 
-## 0.3.3 (Unreleased)
+## 0.3.4 (Unreleased)
+
+Changes since `0.3.3`:
+
+## 0.3.3 (2026-06-21)
 
 Changes since `0.3.2`:
 
@@ -14,11 +18,13 @@ Changes since `0.3.2`:
 - Renamed and moved the native protected-feed helper from the ACS-specific `tools/FeedMeDailyACSVerifier` project to the runtime component project `native/FeedMeDailyProtectedVerifier`, with release builds now packaging it under `FeedMeDailyProtectedVerifier`.
 - Migrated the protected-feed verifier runtime from the C# helper to a Go native WebView2 helper while keeping the packaged binary path and callback protocol unchanged. Source and release builds no longer require the .NET SDK for the default protected-feed verifier, and the old Wails verifier is no longer built or packaged.
 - Removed the legacy Python backend package and old pytest suite now that the Go tray plus Go backend service are the maintained runtime path.
+- Changed packaged update checks to read the fixed DNS TXT record `feedmedaily-update.stassenger.top` instead of a configurable JSON manifest URL.
 
 ### Added
 
 - Added a native WebView2 protected-feed helper as the default verifier path for protected hosts. It can keep one persistent host profile, capture multiple same-host feed XML documents in one session, and hand those XML bodies back to the existing Go sync pipeline without switching to the normal Go HTTP client mid-verification.
 - Added a standalone `Save Settings` action to first-run onboarding, so users can save LLM, Zotero, and local settings before generating the initial profile.
+- Added a PowerShell release helper that updates the DNS TXT release record through Aliyun OpenAPI without requiring the Aliyun CLI.
 
 ### Fixed
 
@@ -26,8 +32,6 @@ Changes since `0.3.2`:
 - Fixed source-mode duplicate verifier launches so one `verification_id` can no longer start multiple helper processes for the same protected host. Duplicate callbacks are now acknowledged and ignored cleanly instead of generating follow-up `404` noise after the first successful XML capture.
 - Fixed native verifier stalls so a protected-feed helper that cannot capture XML reports `needs_user` after a short watchdog interval, writes its own diagnostic log under `logs/protected-verifier/`, and is terminated by the backend if the verification request eventually times out.
 - Fixed the admin `Reopen Verification Window` action so stale protected-feed verifier process records are cleared before relaunching, and the backend now launches the visible WinForms/WebView2 verifier window instead of accidentally applying hidden-window launcher settings to the verifier process itself.
-- Fixed the built-in update manifest setting so fresh installs and source-mode `.env.example` now point to the GitHub Releases `latest/download/update.json` asset instead of leaving update checks unset or pointing installer metadata at an example URL.
-
 ## 0.3.2 (2026-06-15)
 
 Changes since `0.3.1`:
@@ -43,7 +47,7 @@ Changes since `0.3.1`:
 ### Fixed
 
 - Fixed source-mode tray startup so `.env` or environment-based `SCIRSS_SERVER_HOST` and `SCIRSS_SERVER_PORT` values are respected when launching the local backend.
-- Fixed release-mode update-manifest changes so saving a new `FEEDMEDAILY_UPDATE_MANIFEST_URL` now takes effect immediately without restarting the local service.
+- Fixed the then-configurable release-mode update manifest setting so saved changes took effect immediately without restarting the local service.
 - Fixed Windows external URL opening so feed links with query parameters like `&feed=rss&jc=jacsat` are opened intact instead of being truncated before the default browser receives them.
 
 ### Added

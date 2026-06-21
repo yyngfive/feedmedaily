@@ -13,9 +13,8 @@ import (
 )
 
 const (
-	defaultHost              = "127.0.0.1"
-	defaultPort              = 8000
-	DefaultUpdateManifestURL = "https://github.com/yyngfive/feedmedaily/releases/latest/download/update.json"
+	defaultHost = "127.0.0.1"
+	defaultPort = 8000
 )
 
 type Settings struct {
@@ -34,7 +33,6 @@ type Settings struct {
 	WebDistDir          string
 	FeedsPath           string
 	ProfilePath         string
-	UpdateManifestURL   string
 	ClassifierAPIKey    string
 	ClassifierBaseURL   string
 	ClassifierModel     string
@@ -246,14 +244,6 @@ var Options = []Option{
 		InputType:   "number",
 		Default:     strconv.Itoa(defaultPort),
 	},
-	{
-		Key:         "FEEDMEDAILY_UPDATE_MANIFEST_URL",
-		Label:       "Update manifest URL",
-		Description: "Remote JSON manifest used for in-app update checks.",
-		Section:     "Release",
-		InputType:   "url",
-		Default:     DefaultUpdateManifestURL,
-	},
 }
 
 var optionsByKey = func() map[string]Option {
@@ -301,7 +291,6 @@ func Load(root string) (Settings, error) {
 	}
 	valueMap := resolvedValueMap(values)
 	settings.ProfilePath = resolveProfilePath(appRoot, valueMap["SCIRSS_PROFILE_PATH"])
-	settings.UpdateManifestURL = valueOrDefault(valueMap["FEEDMEDAILY_UPDATE_MANIFEST_URL"], DefaultUpdateManifestURL)
 	settings.ClassifierAPIKey = optionalValue(valueMap["SCIRSS_CLASSIFIER_API_KEY"])
 	settings.ClassifierBaseURL = valueOrDefault(valueMap["SCIRSS_CLASSIFIER_BASE_URL"], "https://api.deepseek.com")
 	settings.ClassifierModel = valueOrDefault(valueMap["SCIRSS_CLASSIFIER_MODEL"], "deepseek-v4-flash")

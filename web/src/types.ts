@@ -53,7 +53,6 @@ export type AppMeta = {
   tray_settings_path?: string | null;
   server_url?: string | null;
   scheduler_task_name: string;
-  update_manifest_url?: string | null;
   process_running: boolean;
 };
 
