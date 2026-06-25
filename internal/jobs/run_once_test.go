@@ -1,13 +1,17 @@
 package jobs
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/yyngfive/scirssagent/internal/config"
 	"github.com/yyngfive/scirssagent/internal/feeds"
 	"github.com/yyngfive/scirssagent/internal/profile"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
@@ -291,6 +295,157 @@ func TestRunSyncTreatsSkippedVerificationWarningsAsNonFatal(t *testing.T) {
 	}
 }
 
+func TestRunSyncDegradesFailedBatchToSinglePaperClassification(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	settings.ClassifierBatchSize = 5
+	writeTestProfile(t, settings)
+	stubFetchedPapers(t, 5)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userContent := classifierUserPrompt(t, r)
+		if strings.Contains(userContent, `"id":"5"`) {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":["}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Relevant.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"单篇论文\"}]}"}}]}`))
+	}))
+	defer server.Close()
+	settings.ClassifierBaseURL = server.URL
+
+	summary, err := RunSync(settings, RunOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Classified != 5 || len(summary.Errors) != 0 {
+		t.Fatalf("unexpected summary: %#v", summary)
+	}
+	assertClassificationCount(t, settings, 5, 5)
+}
+
+func TestRunSyncKeepsSuccessfulSinglesWhenOnePaperStillFails(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	settings.ClassifierBatchSize = 5
+	writeTestProfile(t, settings)
+	stubFetchedPapers(t, 5)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userContent := classifierUserPrompt(t, r)
+		if strings.Contains(userContent, `"id":"5"`) || strings.Contains(userContent, `Paper 3`) {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":["}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Relevant.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"单篇论文\"}]}"}}]}`))
+	}))
+	defer server.Close()
+	settings.ClassifierBaseURL = server.URL
+
+	summary, err := RunSync(settings, RunOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Classified != 4 || len(summary.Errors) != 1 || !strings.Contains(summary.Errors[0], "paper 3") {
+		t.Fatalf("unexpected summary: %#v", summary)
+	}
+	assertClassificationCount(t, settings, 5, 4)
+}
+
+func TestRunSyncFailsWhenAllClassificationAttemptsFail(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	settings.ClassifierBatchSize = 3
+	writeTestProfile(t, settings)
+	stubFetchedPapers(t, 3)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":["}}]}`))
+	}))
+	defer server.Close()
+	settings.ClassifierBaseURL = server.URL
+
+	_, err := RunSync(settings, RunOptions{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "all classification attempts failed") {
+		t.Fatalf("expected all-failed error, got %v", err)
+	}
+	sqliteStore, openErr := store.Open(settings.DatabasePath)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	defer sqliteStore.Close()
+	paper, paperErr := sqliteStore.PaperByID(1)
+	if paperErr != nil {
+		t.Fatal(paperErr)
+	}
+	if paper == nil {
+		t.Fatalf("expected fetched paper to remain persisted")
+	}
+}
+
 func testStringPtr(value string) *string {
 	return &value
+}
+
+func writeTestProfile(t *testing.T, settings config.Settings) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings.ProfilePath, []byte(`{"meta":{"name":"Test","version":1,"created_at":"2026-05-16T00:00:00Z","updated_at":"2026-05-16T00:00:00Z","source_description":"test"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func stubFetchedPapers(t *testing.T, count int) {
+	t.Helper()
+	previousFetch := fetchAllFeedsFunc
+	t.Cleanup(func() { fetchAllFeedsFunc = previousFetch })
+	fetchAllFeedsFunc = func(_ string, _ feeds.FetchOptions) (feeds.FetchResult, error) {
+		papers := make([]store.Paper, 0, count)
+		for i := 1; i <= count; i++ {
+			papers = append(papers, store.Paper{
+				SourceURL:      "https://example.com/rss",
+				Title:          fmt.Sprintf("Paper %d", i),
+				URL:            fmt.Sprintf("https://example.com/paper-%d", i),
+				Journal:        testStringPtr("Nature"),
+				Abstract:       testStringPtr("RNA paper."),
+				AbstractSource: "rss",
+				Raw:            map[string]any{"guid": fmt.Sprintf("paper-%d", i)},
+			})
+		}
+		return feeds.FetchResult{Papers: papers, Fetched: count, Errors: []string{}}, nil
+	}
+}
+
+func classifierUserPrompt(t *testing.T, r *http.Request) string {
+	t.Helper()
+	defer r.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	messages := payload["messages"].([]any)
+	return messages[1].(map[string]any)["content"].(string)
+}
+
+func assertClassificationCount(t *testing.T, settings config.Settings, total int, expected int) {
+	t.Helper()
+	sqliteStore, err := store.Open(settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqliteStore.Close()
+	found := 0
+	for id := int64(1); id <= int64(total); id++ {
+		classification, err := sqliteStore.LatestClassification(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if classification != nil {
+			found++
+		}
+	}
+	if found != expected {
+		t.Fatalf("expected %d classifications, found %d", expected, found)
+	}
 }

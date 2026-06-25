@@ -473,26 +473,32 @@ func NormalizeDailyTime(value string) string {
 
 func OpenExternalTarget(target string) error {
 	// URL 交给系统默认浏览器；本地路径交给系统文件管理器或默认处理程序。
-	parsed, err := url.Parse(target)
-	if err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
-		return openWithShell(target)
+	cleanTarget := strings.TrimSpace(target)
+	if cleanTarget == "" {
+		return fmt.Errorf("open target cannot be blank")
 	}
-	return openWithShell(filepath.Clean(target))
+	parsed, err := url.Parse(cleanTarget)
+	if err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
+		return openWithShell(cleanTarget)
+	}
+	localTarget := filepath.Clean(cleanTarget)
+	if _, err := os.Stat(localTarget); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("local open target does not exist: %s", localTarget)
+		}
+		return fmt.Errorf("check local open target %s: %w", localTarget, err)
+	}
+	return openWithShell(localTarget)
 }
 
 func openWithShell(target string) error {
 	// 按平台调用系统壳层命令打开链接或路径。
-	cmd := openWithShellCommand(goruntime.GOOS, target)
-	if goruntime.GOOS == "windows" {
-		cmd.SysProcAttr = hiddenBuildSysProcAttr()
-	}
-	return cmd.Start()
+	return openWithSystemShell(target)
 }
 
 func openWithShellCommand(goos string, target string) *exec.Cmd {
 	switch goos {
 	case "windows":
-		// 避免 cmd /c start 把 URL 里的 & 解释成命令分隔符，导致查询参数被截断。
 		return exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
 	case "darwin":
 		return exec.Command("open", target)

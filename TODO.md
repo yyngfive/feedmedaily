@@ -5,24 +5,29 @@
 
 # Front end
 
+## UI
+
+- [X] open logs、data、 install按钮失效
+
 ## Profile
 
 - [X] 增加自己编辑Profile功能
 - [X] 增加AI自动简化Profile的功能，优化Profile更新逻辑
-- [ ] 更新profile后feedback文章的分类还是保持之前
-- [ ] 拒绝的Feedback应该保留
-- [ ] 合并有些过头，导致每个条目很长，不是真正的抽象，而是罗列新的更大的范围，降低了分类准确性
+- [X] 更新profile后feedback文章的分类还是保持之前
+- [X] 拒绝的Feedback应该保留
+- [X] 合并有些过头，导致每个条目很长，不是真正的抽象，而是罗列新的更大的范围，降低了分类准确性
 
 ## Feed
 
 - [ ] 增加一个内置的Feed List以及官方RSS List跳转页
 - [X] 增加获取feed、metadata、llm分类时的具体进度条（当前已有状态消息提示，但还不是进度条）
+- [ ] 卡住时增加一个手动跳过当前Feed RSS获取的按钮
 
 ## Initialization & Settings
 
 - [X] 精简参数界面，把确认按钮放在下方
 - [X] 增加DeepSeek开发者中心链接指引
-- [ ] 增加起始界面的说明文档
+- [X] 增加起始界面的说明文档
 - [ ] thinking 自动降级时补更明确的前端提示和设置说明
 
 ## Filter
@@ -62,7 +67,7 @@
 - [X] 避免数据更新时的终端弹窗
 - [X] 托盘启动和双击打开应用时仍会闪烁命令行窗口
 - [X] Last Update没有更新却自动增加
-- [ ] 2026-06-03 13:21:51,951 WARNING Feed returned unsupported XML root "html" attempt=0 root=html url=https://www.pnas.org/action/showfeed?type=searchTopic&taxonomyCode=topic&tagCode=bio-sci
+- [X] 2026-06-03 13:21:51,951 WARNING Feed returned unsupported XML root "html" attempt=0 root=html url=https://www.pnas.org/action/showfeed?type=searchTopic&taxonomyCode=topic&tagCode=bio-sci
 
 ## Scheduler
 
@@ -75,4 +80,4 @@
 ## 托盘
 
 - [X] 后台服务检测到托盘程序未启动，自动打开托盘
-- [ ] 修改自动同步时间后，托盘菜单显示的时间还是十点半
+- [ ] Web UI 修改自动同步时间后，运行中的托盘菜单和自动同步逻辑仍未同步到新设置

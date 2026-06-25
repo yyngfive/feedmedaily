@@ -74,10 +74,11 @@ const (
 )
 
 const (
-	trayCallbackMessage = wmApp + 1
-	trayMsgRefreshIcon  = wmApp + 2
-	trayMsgShowInfo     = wmApp + 3
-	trayMsgShowError    = wmApp + 4
+	trayCallbackMessage  = wmApp + 1
+	trayMsgRefreshIcon   = wmApp + 2
+	trayMsgShowInfo      = wmApp + 3
+	trayMsgShowError     = wmApp + 4
+	trayMsgReloadSetting = wmApp + 5
 )
 
 const refreshRetryDelay = time.Second
@@ -95,6 +96,7 @@ var (
 	procDestroyMenu       = user32.NewProc("DestroyMenu")
 	procDestroyWindow     = user32.NewProc("DestroyWindow")
 	procDispatchMessageW  = user32.NewProc("DispatchMessageW")
+	procFindWindowW       = user32.NewProc("FindWindowW")
 	procGetCursorPos      = user32.NewProc("GetCursorPos")
 	procGetMessageW       = user32.NewProc("GetMessageW")
 	procGetModuleHandleW  = kernel32.NewProc("GetModuleHandleW")
@@ -120,6 +122,12 @@ var (
 	shellNotifyIconCall   = func(message uint32, data *notifyIconData) (bool, error) {
 		ok, _, err := procShellNotifyIconW.Call(uintptr(message), uintptr(unsafe.Pointer(data)))
 		return ok != 0, err
+	}
+	findTrayWindowCall = func() uintptr {
+		className, _ := syscall.UTF16PtrFromString("FeedMeDailyTrayWindow")
+		title, _ := syscall.UTF16PtrFromString("FeedMeDaily Tray")
+		hwnd, _, _ := procFindWindowW.Call(uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(title)))
+		return hwnd
 	}
 	postMessageCall = func(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) bool {
 		ok, _, _ := procPostMessageW.Call(hwnd, uintptr(message), wParam, lParam)
@@ -514,6 +522,9 @@ func windowProc(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) ui
 		return 0
 	case trayMsgRefreshIcon:
 		globalTray.handleRefreshMessage(wParam != 0)
+		return 0
+	case trayMsgReloadSetting:
+		globalTray.app.refreshSettingsFromDisk("settings_message_refresh_failed")
 		return 0
 	case trayMsgShowInfo, trayMsgShowError:
 		globalTray.handleQueuedBalloon()

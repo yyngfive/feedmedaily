@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
@@ -160,6 +161,101 @@ func TestClassifyPapersFallbackDisablesThinkingAndClearsTopicTags(t *testing.T) 
 	}
 }
 
+func TestClassifyPapersRetriesTimeoutThenSucceeds(t *testing.T) {
+	previousClient := classifierHTTPClient
+	classifierHTTPClient = &http.Client{Timeout: 20 * time.Millisecond}
+	defer func() { classifierHTTPClient = previousClient }()
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			time.Sleep(100 * time.Millisecond)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Relevant.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"RNA 论文\"}]}"}}]}`))
+	}))
+	defer server.Close()
+
+	results, err := ClassifyPapers([]store.Paper{{ID: 1, Title: "RNA paper"}}, testProfile(), LLMConfig{
+		APIKey:  "key",
+		Model:   "model",
+		BaseURL: server.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Fatalf("expected timeout retry, got %d requests", requests)
+	}
+	if len(results) != 1 || results[0].Relevance != "direct" {
+		t.Fatalf("unexpected results: %#v", results)
+	}
+}
+
+func TestClassifyPapersRetriesMalformedContentJSON(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":["}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"indirect\",\"confidence\":0.7,\"reason\":\"Useful context.\",\"recommended_action\":\"scan\",\"translated_title_zh\":\"RNA 方法\"}]}"}}]}`))
+	}))
+	defer server.Close()
+
+	results, err := ClassifyPapers([]store.Paper{{ID: 1, Title: "RNA method"}}, testProfile(), LLMConfig{
+		APIKey:  "key",
+		Model:   "model",
+		BaseURL: server.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Fatalf("expected malformed content retry, got %d requests", requests)
+	}
+	if len(results) != 1 || results[0].Relevance != "indirect" {
+		t.Fatalf("unexpected results: %#v", results)
+	}
+}
+
+func TestClassifyPapersContinuesWhenTitleTranslationFails(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		requests++
+		messages := payload["messages"].([]any)
+		userContent := messages[1].(map[string]any)["content"].(string)
+		if strings.Contains(userContent, "Translate each paper title") {
+			http.Error(w, "temporary translation failure", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Relevant.\",\"recommended_action\":\"read\"}]}"}}]}`))
+	}))
+	defer server.Close()
+
+	results, err := ClassifyPapers([]store.Paper{{ID: 1, Title: "RNA paper"}}, testProfile(), LLMConfig{
+		APIKey:  "key",
+		Model:   "model",
+		BaseURL: server.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 3 {
+		t.Fatalf("expected classification plus translation retries, got %d requests", requests)
+	}
+	if len(results) != 1 || results[0].TranslatedTitleZH != nil {
+		t.Fatalf("expected classification without translated title, got %#v", results)
+	}
+}
+
 func TestClassifyPapersMissingIDFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[]}"}}]}`))
@@ -173,5 +269,16 @@ func TestClassifyPapersMissingIDFails(t *testing.T) {
 	}, LLMConfig{APIKey: "key", Model: "model", BaseURL: server.URL})
 	if err == nil || !strings.Contains(err.Error(), "missing papers") {
 		t.Fatalf("expected missing papers error, got %v", err)
+	}
+}
+
+func testProfile() map[string]any {
+	return map[string]any{
+		"scope": "RNA biology",
+		"relevance_rules": map[string]any{
+			"direct":    []any{"RNA"},
+			"indirect":  []any{},
+			"unrelated": []any{},
+		},
 	}
 }

@@ -458,6 +458,34 @@ export function App() {
     setScheduler(await fetchSchedulerSettings());
   }, []);
 
+  React.useEffect(() => {
+    if (!adminOpen) {
+      return;
+    }
+    let cancelled = false;
+    const pollScheduler = async () => {
+      if (schedulerSaving) {
+        return;
+      }
+      try {
+        const next = await fetchSchedulerSettings();
+        if (!cancelled) {
+          setScheduler(next);
+        }
+      } catch {
+        // Admin 初始化已有错误提示；后台轮询保持安静，避免刷屏。
+      }
+    };
+    void pollScheduler();
+    const timer = window.setInterval(() => {
+      void pollScheduler();
+    }, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [adminOpen, schedulerSaving]);
+
   const refreshConfig = React.useCallback(async () => {
     const nextConfig = await fetchSettingsConfig();
     setSettingsConfig(nextConfig.fields);
@@ -1272,13 +1300,19 @@ export function App() {
       const saved = await saveCurrentProfile(nextProfile);
       setProfile(saved.profile);
       pushMessage("profile.current.save.succeeded");
+      try {
+        registerJob(await launchReclassifyJob({scope: "feedback", limit: 0}));
+        pushMessage("job.reclassify.started");
+      } catch (error) {
+        pushErrorMessage("app.service.unavailable", error, "Could not start the feedback reclassification job.");
+      }
     } catch (error) {
       pushErrorMessage("app.service.unavailable", error, "Could not save the local profile.");
       throw error;
     } finally {
       setProfileSaving(false);
     }
-  }, [pushErrorMessage, pushMessage]);
+  }, [pushErrorMessage, pushMessage, registerJob]);
 
   const handleDeleteScheduler = React.useCallback(async () => {
     try {

@@ -61,6 +61,8 @@ type chatCompletionResponse struct {
 
 var classifierHTTPClient = &http.Client{Timeout: 60 * time.Second}
 
+const classifierMaxAttempts = 2
+
 func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig) ([]store.Classification, error) {
 	// 复刻 Python classifier 的批量分类与缺失标题翻译补全逻辑。
 	if strings.TrimSpace(cfg.APIKey) == "" {
@@ -101,22 +103,35 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 
 	var decoded map[string]any
 	lastContent := ""
-	for range 2 {
+	var lastParseErr error
+	for attempt := 1; attempt <= classifierMaxAttempts; attempt++ {
 		content, err := requestJSONContentWithFallback(cfg, payload, "classification")
 		if err != nil {
 			return nil, err
 		}
 		lastContent = content
 		if strings.TrimSpace(content) == "" {
+			lastParseErr = fmt.Errorf("empty classifier response content")
+			if attempt < classifierMaxAttempts {
+				logClassifierRetry("classification_parse_retry", "Retrying after empty classifier response content.", lastParseErr, cfg.Model, "classification", attempt, len(content))
+			}
 			continue
 		}
 		if err := json.Unmarshal([]byte(content), &decoded); err != nil {
-			return nil, fmt.Errorf("parse classifier response: %w", err)
+			lastParseErr = fmt.Errorf("parse classifier response: %w", err)
+			if attempt < classifierMaxAttempts {
+				logClassifierRetry("classification_parse_retry", "Retrying after malformed classifier JSON content.", lastParseErr, cfg.Model, "classification", attempt, len(content))
+				continue
+			}
+			return nil, lastParseErr
 		}
 		break
 	}
 	if decoded == nil {
-		return nil, fmt.Errorf("batch model returned empty JSON content: %q", lastContent)
+		if lastParseErr != nil {
+			return nil, lastParseErr
+		}
+		return nil, fmt.Errorf("batch model returned empty JSON content length=%d", len(lastContent))
 	}
 	rawItems, ok := decoded["items"].([]any)
 	if !ok {
@@ -160,7 +175,18 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 		})
 		translations, err := TranslateTitlesBatch(missingTitles, cfg)
 		if err != nil {
-			return nil, err
+			_, _ = logging.WriteDefault(logging.Event{
+				Level:     "warning",
+				Component: "classifier",
+				Action:    "translation_fallback_failed",
+				Message:   "Title translation fallback failed; continuing without translated titles.",
+				Error:     err.Error(),
+				Data: map[string]any{
+					"model": cfg.Model,
+					"items": len(missingTitles),
+				},
+			})
+			translations = map[string]string{}
 		}
 		for itemID, translated := range translations {
 			classification := byID[itemID]
@@ -214,7 +240,7 @@ func TranslateTitlesBatch(papers []promptPaper, cfg LLMConfig) (map[string]strin
 		"response_format": map[string]string{"type": "json_object"},
 		"thinking":        map[string]string{"type": "disabled"},
 	}
-	content, err := requestJSONContent(cfg, payload, "title_translation")
+	content, err := requestJSONContentWithFallback(cfg, payload, "title_translation")
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +268,7 @@ func TranslateTitlesBatch(papers []promptPaper, cfg LLMConfig) (map[string]strin
 	return translations, nil
 }
 
-func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string) (string, error) {
+func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string, attempt int) (string, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("encode classifier request: %w", err)
@@ -266,28 +292,45 @@ func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string)
 			Data: map[string]any{
 				"model":       cfg.Model,
 				"operation":   operation,
+				"attempt":     attempt,
 				"duration_ms": time.Since(started).Milliseconds(),
 			},
 		})
 		return "", fmt.Errorf("request classifier: %w", err)
 	}
 	defer response.Body.Close()
+	responseBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "warning",
+			Component: "classifier",
+			Action:    operation + "_response_read_failed",
+			Message:   "Failed to read classifier response body.",
+			Error:     err.Error(),
+			Data: map[string]any{
+				"model":       cfg.Model,
+				"operation":   operation,
+				"attempt":     attempt,
+				"status_code": response.StatusCode,
+				"duration_ms": time.Since(started).Milliseconds(),
+			},
+		})
+		return "", fmt.Errorf("read classifier response: %w", err)
+	}
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "info",
 		Component: "classifier",
 		Action:    operation + "_request",
 		Message:   fmt.Sprintf("LLM Request: POST %s %q", endpoint, response.Proto+" "+response.Status),
 		Data: map[string]any{
-			"model":       cfg.Model,
-			"operation":   operation,
-			"status_code": response.StatusCode,
-			"duration_ms": time.Since(started).Milliseconds(),
+			"model":          cfg.Model,
+			"operation":      operation,
+			"attempt":        attempt,
+			"status_code":    response.StatusCode,
+			"content_length": len(responseBody),
+			"duration_ms":    time.Since(started).Milliseconds(),
 		},
 	})
-	responseBody, err := io.ReadAll(response.Body)
-	if err != nil {
-		return "", fmt.Errorf("read classifier response: %w", err)
-	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		message := strings.TrimSpace(string(responseBody))
 		if message == "" {
@@ -297,6 +340,7 @@ func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string)
 	}
 	var decoded chatCompletionResponse
 	if err := json.Unmarshal(responseBody, &decoded); err != nil {
+		logClassifierRetry(operation+"_envelope_parse_failed", "Classifier response envelope was not valid JSON.", err, cfg.Model, operation, attempt, len(responseBody))
 		return "", fmt.Errorf("parse classifier response envelope: %w", err)
 	}
 	if len(decoded.Choices) == 0 {
@@ -306,12 +350,19 @@ func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string)
 }
 
 func requestJSONContentWithFallback(cfg LLMConfig, payload map[string]any, operation string) (string, error) {
-	content, err := requestJSONContent(cfg, payload, operation)
-	if err == nil {
+	content, err := requestJSONContent(cfg, payload, operation, 1)
+	if err == nil && strings.TrimSpace(content) != "" {
 		return content, nil
 	}
+	if err == nil {
+		err = fmt.Errorf("classifier response content was empty")
+	}
 	if normalizedThinking(cfg.Thinking) == "disabled" || !shouldRetryWithoutThinking(err) {
-		return "", err
+		if !shouldRetryClassifierRequest(err) {
+			return "", err
+		}
+		logRequestRetry(cfg.Model, operation, "primary", 1, err)
+		return requestJSONContentWithRetries(cfg, payload, operation, "primary", 2)
 	}
 
 	_, _ = logging.WriteDefault(logging.Event{
@@ -327,7 +378,7 @@ func requestJSONContentWithFallback(cfg LLMConfig, payload map[string]any, opera
 	})
 	fallbackPayload := clonePayload(payload)
 	fallbackPayload["thinking"] = map[string]string{"type": "disabled"}
-	content, fallbackErr := requestJSONContent(cfg, fallbackPayload, operation)
+	content, fallbackErr := requestJSONContentWithRetries(cfg, fallbackPayload, operation, "thinking_disabled", 1)
 	if fallbackErr != nil {
 		_, _ = logging.WriteDefault(logging.Event{
 			Level:     "error",
@@ -353,6 +404,42 @@ func requestJSONContentWithFallback(cfg LLMConfig, payload map[string]any, opera
 		},
 	})
 	return content, nil
+}
+
+func requestJSONContentWithRetries(cfg LLMConfig, payload map[string]any, operation string, phase string, startAttempt int) (string, error) {
+	var lastErr error
+	for attempt := startAttempt; attempt <= classifierMaxAttempts; attempt++ {
+		content, err := requestJSONContent(cfg, payload, operation, attempt)
+		if err == nil {
+			if strings.TrimSpace(content) != "" {
+				return content, nil
+			}
+			err = fmt.Errorf("classifier response content was empty")
+		}
+		lastErr = err
+		if attempt == classifierMaxAttempts || !shouldRetryClassifierRequest(err) {
+			break
+		}
+		logRequestRetry(cfg.Model, operation, phase, attempt, err)
+		time.Sleep(time.Duration(attempt) * 250 * time.Millisecond)
+	}
+	return "", lastErr
+}
+
+func logRequestRetry(model string, operation string, phase string, attempt int, err error) {
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "warning",
+		Component: "classifier",
+		Action:    operation + "_request_retry",
+		Message:   "Retrying classifier request after transient failure.",
+		Error:     err.Error(),
+		Data: map[string]any{
+			"model":     model,
+			"operation": operation,
+			"phase":     phase,
+			"attempt":   attempt,
+		},
+	})
 }
 
 func batchClassificationPrompt(papers []promptPaper, profile map[string]any) string {
@@ -542,8 +629,60 @@ func shouldRetryWithoutThinking(err error) bool {
 		strings.Contains(message, "thinking") ||
 		strings.Contains(message, "reasoning") ||
 		strings.Contains(message, "reasoner") ||
+		strings.Contains(message, "429") ||
+		strings.Contains(message, "500") ||
+		strings.Contains(message, "503") ||
 		strings.Contains(message, "504") ||
 		strings.Contains(message, "502")
+}
+
+func shouldRetryClassifierRequest(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, fragment := range []string{
+		"timeout",
+		"timed out",
+		"deadline exceeded",
+		"temporary",
+		"connection reset",
+		"connection refused",
+		"tls handshake",
+		"read classifier response",
+		"parse classifier response envelope",
+		"classifier response content was empty",
+		"429",
+		"500",
+		"502",
+		"503",
+		"504",
+	} {
+		if strings.Contains(message, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func logClassifierRetry(action string, message string, err error, model string, operation string, attempt int, contentLength int) {
+	errorMessage := ""
+	if err != nil {
+		errorMessage = err.Error()
+	}
+	_, _ = logging.WriteDefault(logging.Event{
+		Level:     "warning",
+		Component: "classifier",
+		Action:    action,
+		Message:   message,
+		Error:     errorMessage,
+		Data: map[string]any{
+			"model":          model,
+			"operation":      operation,
+			"attempt":        attempt,
+			"content_length": contentLength,
+		},
+	})
 }
 
 func clonePayload(source map[string]any) map[string]any {

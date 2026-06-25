@@ -5,6 +5,9 @@
 FeedMeDaily 是一个面向科研 RSS 的本地论文筛选工具。它可以抓取期刊 RSS、按 Profile 规则调用 LLM 做相关性分类、提供本地 Web 界面进行阅读和反馈，并支持把选中的论文保存到 Zotero。
 
 - 当前架构说明见 [ARCHITECTURE.md](./ARCHITECTURE.md)
+- 中文维护与开发手册见 [docs/maintenance-development.zh-CN.md](./docs/maintenance-development.zh-CN.md)
+- 中文架构文档见 [docs/architecture.zh-CN.md](./docs/architecture.zh-CN.md)
+- 本地 API 文档见 [docs/api.zh-CN.md](./docs/api.zh-CN.md)
 - 版本更新记录见 [CHANGELOG.md](./CHANGELOG.md)
 - 开源协议为 [MIT](./LICENSE)
 

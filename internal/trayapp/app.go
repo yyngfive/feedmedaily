@@ -17,6 +17,7 @@ type App struct {
 	settingsMutex sync.Mutex
 	tray          *windowsTray
 	stopScheduler chan struct{}
+	runSyncNow    func() error
 }
 
 func NewApp(cfg AppConfig) (*App, error) {
@@ -52,6 +53,7 @@ func (a *App) Run() error {
 		return err
 	}
 	a.tray = tray
+	a.startSettingsRefreshLoop()
 	a.startSchedulerLoop()
 	defer close(a.stopScheduler)
 	return tray.Run()
@@ -61,6 +63,9 @@ func (a *App) MenuState() trayMenuState {
 	// 返回菜单渲染所需的只读状态快照。
 	a.settingsMutex.Lock()
 	defer a.settingsMutex.Unlock()
+	if _, err := a.refreshSettingsLocked(); err != nil {
+		a.logSettingsRefreshError("menu_state_refresh_failed", err)
+	}
 	return trayMenuState{
 		ScheduleEnabled: a.settings.ScheduleEnabled,
 		DailyTime:       a.settings.DailyTime,
@@ -131,6 +136,14 @@ func (a *App) StopService() error {
 
 func (a *App) RunSyncNow() error {
 	// 确保服务在运行，然后触发一次“立即同步”。
+	if a.runSyncNow != nil {
+		return a.runSyncNow()
+	}
+	return a.runSyncNowDefault()
+}
+
+func (a *App) runSyncNowDefault() error {
+	// 确保服务在运行，然后触发一次“立即同步”。
 	_, _ = logging.Write(a.layout.LogsDir, logging.Event{
 		Level:     "info",
 		Component: "tray",
@@ -163,6 +176,10 @@ func (a *App) ToggleScheduleEnabled() (trayMenuState, error) {
 	// 切换托盘自己的本地每日调度开关。
 	a.settingsMutex.Lock()
 	defer a.settingsMutex.Unlock()
+	if _, err := a.refreshSettingsLocked(); err != nil {
+		a.logSettingsRefreshError("toggle_schedule_refresh_failed", err)
+		return trayMenuState{}, err
+	}
 	a.settings.ScheduleEnabled = !a.settings.ScheduleEnabled
 	if err := a.persistSettingsLocked(); err != nil {
 		return trayMenuState{}, err
@@ -240,6 +257,22 @@ func (a *App) SchedulerLabel() string {
 	return fmt.Sprintf("Enable Daily Sync (%s)", state.DailyTime)
 }
 
+func (a *App) startSettingsRefreshLoop() {
+	// 定期吸收 Web UI 写入的 tray-settings.json，保持托盘内存态和菜单状态同步。
+	ticker := time.NewTicker(2 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				a.refreshSettingsFromDisk("settings_poll_refresh_failed")
+			case <-a.stopScheduler:
+				return
+			}
+		}
+	}()
+}
+
 func (a *App) startSchedulerLoop() {
 	// 每 30 秒检查一次是否到了托盘本地调度的触发时间。
 	ticker := time.NewTicker(30 * time.Second)
@@ -260,6 +293,11 @@ func (a *App) startSchedulerLoop() {
 func (a *App) maybeRunScheduledSync(now time.Time) {
 	// 如果到点且今天还没跑过，就触发一次同步。
 	a.settingsMutex.Lock()
+	if _, err := a.refreshSettingsLocked(); err != nil {
+		a.logSettingsRefreshError("scheduled_sync_refresh_failed", err)
+		a.settingsMutex.Unlock()
+		return
+	}
 	settings := a.settings
 	a.settingsMutex.Unlock()
 
@@ -284,6 +322,11 @@ func (a *App) maybeRunScheduledSync(now time.Time) {
 	}
 
 	a.settingsMutex.Lock()
+	if _, err := a.refreshSettingsLocked(); err != nil {
+		a.logSettingsRefreshError("scheduled_sync_save_refresh_failed", err)
+		a.settingsMutex.Unlock()
+		return
+	}
 	a.settings.LastRunDate = today
 	_ = a.persistSettingsLocked()
 	a.settingsMutex.Unlock()
@@ -321,6 +364,40 @@ func (a *App) snapshotSettings() TraySettings {
 func (a *App) persistSettingsLocked() error {
 	// 在调用方已经持锁的前提下保存设置。
 	return a.settings.Save(a.layout.TraySettingsPath)
+}
+
+func (a *App) refreshSettingsFromDisk(action string) {
+	a.settingsMutex.Lock()
+	changed, err := a.refreshSettingsLocked()
+	a.settingsMutex.Unlock()
+	if err != nil {
+		a.logSettingsRefreshError(action, err)
+		return
+	}
+	if changed && a.tray != nil {
+		a.tray.requestRefreshIcon(false)
+	}
+}
+
+func (a *App) refreshSettingsLocked() (bool, error) {
+	// 在调用方已经持锁的前提下，从共享 tray-settings.json 重新加载最新设置。
+	settings, err := LoadTraySettings(a.layout.TraySettingsPath)
+	if err != nil {
+		return false, err
+	}
+	changed := settings != a.settings
+	a.settings = settings
+	return changed, nil
+}
+
+func (a *App) logSettingsRefreshError(action string, err error) {
+	_, _ = logging.Write(a.layout.LogsDir, logging.Event{
+		Level:     "error",
+		Component: "tray",
+		Action:    action,
+		Message:   "Refreshing tray settings from disk failed.",
+		Error:     err.Error(),
+	})
 }
 
 func (a *App) currentMenuStateLocked() trayMenuState {

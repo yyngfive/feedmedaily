@@ -53,10 +53,7 @@ func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress Pro
 	}
 	defer sqliteStore.Close()
 
-	enrichedPairs := make([]struct {
-		PaperID int64
-		Paper   store.Paper
-	}, 0, len(paperIDs))
+	enrichedPairs := make([]classificationPaperPair, 0, len(paperIDs))
 	now := time.Now().UTC()
 	for _, paperID := range paperIDs {
 		paper, err := sqliteStore.PaperByID(paperID)
@@ -71,10 +68,7 @@ func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress Pro
 		if _, _, err := sqliteStore.UpsertPaper(enriched, now); err != nil {
 			return 0, err
 		}
-		enrichedPairs = append(enrichedPairs, struct {
-			PaperID int64
-			Paper   store.Paper
-		}{PaperID: paperID, Paper: enriched})
+		enrichedPairs = append(enrichedPairs, classificationPaperPair{PaperID: paperID, Paper: enriched})
 		EmitProgress(progress, PercentProgress(
 			"pipeline.metadata.enriching",
 			"metadata",
@@ -98,6 +92,7 @@ func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress Pro
 		batchSize = 10
 	}
 	classified := 0
+	classificationWarnings := []string{}
 	for start := 0; start < len(enrichedPairs); start += batchSize {
 		end := min(start+batchSize, len(enrichedPairs))
 		batch := enrichedPairs[start:end]
@@ -110,20 +105,12 @@ func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress Pro
 			Message:   fmt.Sprintf("Classifying batch %d/%d (%d paper(s))", batchNumber, totalBatches, len(batch)),
 			Data:      map[string]any{"batch": batchNumber, "total_batches": totalBatches, "batch_size": len(batch)},
 		})
-		papers := make([]store.Paper, 0, len(batch))
-		for _, pair := range batch {
-			papers = append(papers, pair.Paper)
-		}
-		results, err := classifier.ClassifyPapers(papers, currentProfile, cfg)
+		batchClassified, batchWarnings, err := classifyAndSaveBatch(sqliteStore, "jobs.reclassify", batch, currentProfile, cfg)
 		if err != nil {
 			return 0, err
 		}
-		for index, result := range results {
-			if err := sqliteStore.SaveClassification(batch[index].PaperID, result, time.Now().UTC()); err != nil {
-				return 0, err
-			}
-			classified++
-		}
+		classified += batchClassified
+		classificationWarnings = append(classificationWarnings, batchWarnings...)
 		EmitProgress(progress, PercentProgress(
 			"pipeline.classifier.classifying",
 			"classification",
@@ -138,6 +125,9 @@ func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress Pro
 			Message:   fmt.Sprintf("Finished batch %d/%d", batchNumber, totalBatches),
 			Data:      map[string]any{"batch": batchNumber, "total_batches": totalBatches, "classified_running": classified},
 		})
+	}
+	if classified == 0 && len(classificationWarnings) > 0 {
+		return classified, fmt.Errorf("all classification attempts failed: %s", summarizeClassificationWarnings(classificationWarnings))
 	}
 	return classified, nil
 }

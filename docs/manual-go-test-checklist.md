@@ -284,6 +284,11 @@ go run .\cmd\feedmedaily-tray --root .
 
 当前迁移分支的 scheduler 实际落在本地 tray 设置，而不是 Windows Task Scheduler。UI 和测试都应以 tray-local daily sync 为准。
 
+已知问题：
+
+- Web UI 修改 scheduler 时间后，运行中的托盘仍可能继续显示或使用旧设置；后续需要继续排查 Web API 写入的 `tray-settings.json` 与托盘进程读取路径、窗口通知、实际运行二进制版本是否一致。
+- 托盘切换 daily sync 后，Web UI 依赖轮询刷新；如果 UI 未自动变化，先手动刷新页面确认磁盘状态，再继续排查前端轮询。
+
 ## 7. HTTP API 手工测试
 
 以下命令默认服务已启动：
@@ -1036,8 +1041,11 @@ Get-ChildItem .\dist\FeedMeDaily\web\dist
 - `FeedMeDailyTray.exe` 存在
 - `feedmedailyd.exe` 存在
 - `web/dist` 已复制进去
-- 构建脚本不再生成 `dist/update.json`
-- 发布 GitHub Release 后，运行 `tools/update_release_dns.ps1` 更新 `feedmedaily-update.stassenger.top` 的 TXT 记录
+- `dist/update.json` 存在，作为旧版安装包的 GitHub Release 更新兼容 manifest
+- `update.json` 的 `version` 与 `web/package.json` 一致
+- `update.json` 的 `download_url` 指向当前版本 GitHub Release 安装包
+- 发布 GitHub Release 时必须同时上传安装包和 `dist/update.json`
+- 发布 GitHub Release 后，运行 `tools/update_release_dns.ps1` 更新 `feedmedaily-update.stassenger.top` 的 TXT 记录，供新版安装包使用
 - 阿里云免费版 TXT TTL 最短为 600 秒，手动更新检查可能需要等待 DNS 缓存过期后才看到新版本
 
 ## 12.3 构建完整安装包

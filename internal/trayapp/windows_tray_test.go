@@ -160,11 +160,101 @@ func TestWindowProcResumeSuspendRequestsRefresh(t *testing.T) {
 	}
 }
 
+func TestNotifySettingsChangedPostsReloadMessageToTrayWindow(t *testing.T) {
+	restoreFind := replaceFindTrayWindowCall(func() uintptr {
+		return 606
+	})
+	defer restoreFind()
+
+	var posted []postedTrayMessage
+	restorePost := replacePostMessageCall(func(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) bool {
+		posted = append(posted, postedTrayMessage{
+			hwnd:    hwnd,
+			message: message,
+			wParam:  wParam,
+			lParam:  lParam,
+		})
+		return true
+	})
+	defer restorePost()
+
+	if err := NotifySettingsChanged(); err != nil {
+		t.Fatal(err)
+	}
+	wantPosted := []postedTrayMessage{{
+		hwnd:    606,
+		message: trayMsgReloadSetting,
+		wParam:  0,
+		lParam:  0,
+	}}
+	if !reflect.DeepEqual(posted, wantPosted) {
+		t.Fatalf("posted = %#v, want %#v", posted, wantPosted)
+	}
+}
+
+func TestWindowProcReloadSettingsRefreshesAppState(t *testing.T) {
+	app, settingsPath := testSchedulerApp(t, TraySettings{
+		ScheduleEnabled: false,
+		DailyTime:       "10:30",
+		LaunchAtLogin:   false,
+	})
+	writeTraySettings(t, settingsPath, TraySettings{
+		ScheduleEnabled: true,
+		DailyTime:       "08:15",
+		LaunchAtLogin:   false,
+	})
+	tray := &windowsTray{
+		app:  app,
+		hwnd: 707,
+	}
+	app.tray = tray
+	restoreGlobal := replaceGlobalTray(tray)
+	defer restoreGlobal()
+
+	var posted []postedTrayMessage
+	restorePost := replacePostMessageCall(func(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) bool {
+		posted = append(posted, postedTrayMessage{
+			hwnd:    hwnd,
+			message: message,
+			wParam:  wParam,
+			lParam:  lParam,
+		})
+		return true
+	})
+	defer restorePost()
+
+	result := windowProc(tray.hwnd, trayMsgReloadSetting, 0, 0)
+	if result != 0 {
+		t.Fatalf("result = %d, want 0", result)
+	}
+	state := app.currentMenuStateForTest()
+	if !state.ScheduleEnabled || state.DailyTime != "08:15" {
+		t.Fatalf("state = %#v", state)
+	}
+	wantPosted := []postedTrayMessage{{
+		hwnd:    707,
+		message: trayMsgRefreshIcon,
+		wParam:  0,
+		lParam:  0,
+	}}
+	if !reflect.DeepEqual(posted, wantPosted) {
+		t.Fatalf("posted = %#v, want %#v", posted, wantPosted)
+	}
+}
+
 func replaceShellNotifyIconCall(next func(uint32, *notifyIconData) (bool, error)) func() {
 	previous := shellNotifyIconCall
 	shellNotifyIconCall = next
 	return func() {
 		shellNotifyIconCall = previous
+	}
+}
+
+func replaceFindTrayWindowCall(next func() uintptr) func() {
+	previous := findTrayWindowCall
+	findTrayWindowCall = next
+	return func() {
+		findTrayWindowCall = previous
 	}
 }
 

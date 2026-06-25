@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -265,6 +266,11 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 		opened = target
 		return nil
 	}
+	notifyCalls := 0
+	notifyTraySettingsChangedFunc = func() error {
+		notifyCalls++
+		return nil
+	}
 	handler := newTestHandler(t, settings)
 
 	updateRecorder := httptest.NewRecorder()
@@ -281,6 +287,24 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 	if txtCalls != 1 {
 		t.Fatalf("expected cached update status, txtCalls=%d", txtCalls)
 	}
+	if err := os.MkdirAll(settings.DataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(settings.LogsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for target, expected := range map[string]string{
+		"data_dir":    settings.DataDir,
+		"logs_dir":    settings.LogsDir,
+		"install_dir": settings.AppDir,
+	} {
+		opened = ""
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/app/open", strings.NewReader(fmt.Sprintf(`{"target":%q}`, target))))
+		if recorder.Code != http.StatusOK || opened != expected {
+			t.Fatalf("open %s response = %d %s opened=%q want=%q", target, recorder.Code, recorder.Body.String(), opened, expected)
+		}
+	}
 
 	schedulerGet := httptest.NewRecorder()
 	handler.ServeHTTP(schedulerGet, httptest.NewRequest(http.MethodGet, "/api/settings/scheduler", nil))
@@ -293,11 +317,17 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 	if schedulerPut.Code != http.StatusOK || !contains(schedulerPut.Body.String(), `"installed":true`) || !contains(schedulerPut.Body.String(), `"scheduled_time":"08:15"`) {
 		t.Fatalf("scheduler put = %d %s", schedulerPut.Code, schedulerPut.Body.String())
 	}
+	if notifyCalls != 1 {
+		t.Fatalf("notify calls after scheduler put = %d, want 1", notifyCalls)
+	}
 
 	schedulerDelete := httptest.NewRecorder()
 	handler.ServeHTTP(schedulerDelete, httptest.NewRequest(http.MethodDelete, "/api/settings/scheduler", nil))
 	if schedulerDelete.Code != http.StatusOK || !contains(schedulerDelete.Body.String(), `"installed":false`) {
 		t.Fatalf("scheduler delete = %d %s", schedulerDelete.Code, schedulerDelete.Body.String())
+	}
+	if notifyCalls != 2 {
+		t.Fatalf("notify calls after scheduler delete = %d, want 2", notifyCalls)
 	}
 }
 
@@ -718,6 +748,9 @@ func TestProfileProposalApplyRejectAndReclassifyAPI(t *testing.T) {
 	if feedbackRecorder.Code != http.StatusOK || !contains(feedbackRecorder.Body.String(), `"used_in_profile":true`) {
 		t.Fatalf("feedback after apply = %d %s", feedbackRecorder.Code, feedbackRecorder.Body.String())
 	}
+	if used := feedbackStateCount(t, settings.DatabasePath, "used"); used != 2 {
+		t.Fatalf("legacy proposal should mark all source feedback used, got %d", used)
+	}
 
 	rejectRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(rejectRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/proposals/1/reject", nil))
@@ -752,7 +785,9 @@ func TestCompactProfileProposalApplyUsesAcceptedChanges(t *testing.T) {
 	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":["Background"],"unrelated":["Plant biology"]},"topic_taxonomy":[],"few_shots":[]}`)
 	seedCompactProposalFixture(t, settings.DatabasePath)
 
+	reclassifiedPaperIDs := []int64(nil)
 	reclassifyPaperIDsFunc = func(_ config.Settings, paperIDs []int64, _ jobruntime.ProgressFunc) (int, error) {
+		reclassifiedPaperIDs = append([]int64(nil), paperIDs...)
 		return len(paperIDs), nil
 	}
 	rebuildLatestReportFunc = func(_ config.Settings, _ jobruntime.ProgressFunc) (int, error) {
@@ -776,6 +811,15 @@ func TestCompactProfileProposalApplyUsesAcceptedChanges(t *testing.T) {
 	}
 	if contains(string(appliedProfile), `"RNA",`) {
 		t.Fatalf("expected accepted rewrite to replace the old direct rule: %s", appliedProfile)
+	}
+	if len(reclassifiedPaperIDs) != 1 || reclassifiedPaperIDs[0] != 1 {
+		t.Fatalf("expected only accepted feedback paper reclassified, got %#v", reclassifiedPaperIDs)
+	}
+	if used := feedbackStateCount(t, settings.DatabasePath, "used"); used != 1 {
+		t.Fatalf("expected only accepted feedback to be used, got %d", used)
+	}
+	if open := feedbackStateCount(t, settings.DatabasePath, "open"); open != 1 {
+		t.Fatalf("expected rejected feedback to remain open, got %d", open)
 	}
 }
 
@@ -990,10 +1034,10 @@ INSERT INTO classifications (
   1, 'indirect', 0.8, 'Fixture', '["rna_bio"]', 'scan', 'test', NULL, '2026-05-16T00:10:00Z'
 );
 INSERT INTO feedback (
-  paper_id, original_relevance, corrected_relevance, note, state, used_in_prompt, created_at
-) VALUES (
-  1, 'indirect', 'direct', 'Should be visible as direct.', 'open', 0, '2026-05-16T00:20:00Z'
-);
+  id, paper_id, original_relevance, corrected_relevance, note, state, used_in_prompt, created_at
+) VALUES
+  (1, 1, 'indirect', 'direct', 'Should be visible as direct.', 'open', 0, '2026-05-16T00:20:00Z'),
+  (2, 1, 'indirect', 'unrelated', 'Legacy second feedback.', 'open', 0, '2026-05-16T00:21:00Z');
 INSERT INTO profile_proposals (
   id, summary, proposed_profile_json, rule_delta_json, source_feedback_ids_json, model, state, created_at
 ) VALUES (
@@ -1075,12 +1119,19 @@ CREATE TABLE profile_proposals (
 INSERT INTO papers (
   id, source_url, feed_title, title, url, doi, journal, authors_json, abstract,
   abstract_source, published_date, first_seen_at, read_at, raw_json
-) VALUES (
-  1, 'https://example.com/rss', 'Fixture Feed', 'Compact proposal paper', 'https://example.com/compact-paper',
-  '10.1000/compact', 'Example Journal', '["Alice","Bob"]', 'Abstract text.',
-  'rss', '2026-05-15', '2026-05-16T00:00:00Z', NULL,
-  '{"_abstract_html":"<p>Abstract text.</p>","_abstract_images":[]}'
-);
+) VALUES
+  (
+    1, 'https://example.com/rss', 'Fixture Feed', 'Compact proposal paper', 'https://example.com/compact-paper',
+    '10.1000/compact', 'Example Journal', '["Alice","Bob"]', 'Abstract text.',
+    'rss', '2026-05-15', '2026-05-16T00:00:00Z', NULL,
+    '{"_abstract_html":"<p>Abstract text.</p>","_abstract_images":[]}'
+  ),
+  (
+    2, 'https://example.com/rss', 'Fixture Feed', 'Rejected feedback paper', 'https://example.com/rejected-paper',
+    '10.1000/rejected', 'Example Journal', '["Carol"]', 'Rejected abstract text.',
+    'rss', '2026-05-15', '2026-05-16T00:00:00Z', NULL,
+    '{"_abstract_html":"<p>Rejected abstract text.</p>","_abstract_images":[]}'
+  );
 INSERT INTO classifications (
   paper_id, relevance, confidence, reason, topic_tags_json, recommended_action, model, translated_title_zh, classified_at
 ) VALUES (
@@ -1088,9 +1139,9 @@ INSERT INTO classifications (
 );
 INSERT INTO feedback (
   id, paper_id, original_relevance, corrected_relevance, note, state, used_in_prompt, created_at
-) VALUES (
-  1, 1, 'indirect', 'direct', 'Should be direct.', 'open', 0, '2026-05-16T00:20:00Z'
-);
+) VALUES
+  (1, 1, 'indirect', 'direct', 'Should be direct.', 'open', 0, '2026-05-16T00:20:00Z'),
+  (2, 2, 'indirect', 'unrelated', 'Should stay available after rejected change.', 'open', 0, '2026-05-16T00:21:00Z');
 INSERT INTO profile_proposals (
   id, summary, proposed_profile_json, rule_delta_json, base_profile_version, change_set_json, source_feedback_ids_json, model, state, created_at
 ) VALUES (
@@ -1098,8 +1149,8 @@ INSERT INTO profile_proposals (
   '{"meta":{"name":"Current","version":2,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-16T00:30:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA chemistry"],"indirect":["Background"],"unrelated":["Plant biology"]},"topic_taxonomy":[],"few_shots":[]}',
   '{"summary":"Compact proposal summary","direct_rule_additions":[],"indirect_rule_additions":[],"unrelated_rule_additions":[],"scope_rewrite":null,"tag_additions":[],"tag_removals":[]}',
   1,
-  '[{"id":"change-1","section":"direct_rule","operation":"rewrite","summary":"Promote chemistry-first RNA work.","text_before":["RNA"],"text_after":["RNA chemistry"],"topic_before":[],"topic_after":[],"rationale":"The feedback shows chemistry-first RNA papers should be direct.","source_feedback_ids":[1],"source_paper_ids":[1],"status":"proposed"},{"id":"change-2","section":"unrelated_rule","operation":"remove","summary":"Drop the unrelated rule.","text_before":["Plant biology"],"text_after":[],"topic_before":[],"topic_after":[],"rationale":"A review candidate that can be declined.","source_feedback_ids":[1],"source_paper_ids":[1],"status":"proposed"}]',
-  '[1]', 'deepseek-v4-pro', 'pending', '2026-05-16T00:30:00Z'
+  '[{"id":"change-1","section":"direct_rule","operation":"rewrite","summary":"Promote chemistry-first RNA work.","text_before":["RNA"],"text_after":["RNA chemistry"],"topic_before":[],"topic_after":[],"rationale":"The feedback shows chemistry-first RNA papers should be direct.","source_feedback_ids":[1],"source_paper_ids":[1],"status":"proposed"},{"id":"change-2","section":"unrelated_rule","operation":"remove","summary":"Drop the unrelated rule.","text_before":["Plant biology"],"text_after":[],"topic_before":[],"topic_after":[],"rationale":"A review candidate that can be declined.","source_feedback_ids":[2],"source_paper_ids":[2],"status":"proposed"}]',
+  '[1,2]', 'deepseek-v4-pro', 'pending', '2026-05-16T00:30:00Z'
 );
 `)
 }
@@ -1109,6 +1160,20 @@ func execSQLite(t *testing.T, db *sql.DB, statement string) {
 	if _, err := db.Exec(statement); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func feedbackStateCount(t *testing.T, path string, state string) int {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM feedback WHERE state = ?`, state).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
 }
 
 func contains(value string, needle string) bool {
@@ -1138,6 +1203,7 @@ func stubAPIGlobals(t *testing.T) func() {
 	previousReclassify := reclassifyPaperIDsFunc
 	previousRebuildLatestReport := rebuildLatestReportFunc
 	previousRunSync := runSyncFunc
+	previousNotifyTraySettingsChanged := notifyTraySettingsChangedFunc
 	previousStartVerification := startVerificationFlowFunc
 	previousCompleteVerification := completeVerificationFlowFunc
 	previousNow := nowFunc
@@ -1157,6 +1223,7 @@ func stubAPIGlobals(t *testing.T) func() {
 		reclassifyPaperIDsFunc = previousReclassify
 		rebuildLatestReportFunc = previousRebuildLatestReport
 		runSyncFunc = previousRunSync
+		notifyTraySettingsChangedFunc = previousNotifyTraySettingsChanged
 		startVerificationFlowFunc = previousStartVerification
 		completeVerificationFlowFunc = previousCompleteVerification
 		nowFunc = previousNow

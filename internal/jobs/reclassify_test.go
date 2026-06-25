@@ -2,8 +2,11 @@ package jobs
 
 import (
 	"database/sql"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/yyngfive/scirssagent/internal/config"
@@ -36,6 +39,51 @@ func TestSelectPaperIDsForScopeAndRebuildReport(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(settings.ReportsDir, "latest", "index.html")); !os.IsNotExist(err) {
 		t.Fatalf("expected no static report artifact, got err=%v", err)
 	}
+}
+
+func TestReclassifyPaperIDsDegradesFailedBatchToSingles(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	settings.ClassifierBatchSize = 2
+	seedJobFixture(t, settings)
+	db, err := sql.Open("sqlite", settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execJobSQL(t, db, `
+INSERT INTO papers (
+  id, source_url, feed_title, title, url, doi, journal, authors_json, abstract,
+  abstract_source, published_date, first_seen_at, read_at, raw_json
+) VALUES (
+  2, 'https://example.com/rss', 'Fixture Feed', 'Second API paper', 'https://example.com/api-paper-2',
+  '10.1000/api2', 'Original Feed Title', '["Alice"]', 'Second plain abstract text.',
+  'rss', '2026-05-15', '2026-05-16T00:00:00Z', NULL,
+  '{"_abstract_html":"<p>Second plain abstract text.</p>","_abstract_images":[]}'
+);
+`)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userContent := classifierUserPrompt(t, r)
+		if strings.Contains(userContent, `"id":"2"`) {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":["}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Relevant.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"重分类论文\"}]}"}}]}`))
+	}))
+	defer server.Close()
+	settings.ClassifierBaseURL = server.URL
+
+	classified, err := ReclassifyPaperIDs(settings, []int64{1, 2}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if classified != 2 {
+		t.Fatalf("expected 2 classifications, got %d", classified)
+	}
+	assertClassificationCount(t, settings, 2, 2)
 }
 
 func testJobSettings(root string) config.Settings {

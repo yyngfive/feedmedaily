@@ -117,7 +117,7 @@ Each role can use its own API key and base URL:
 
 The code owns the prompt shell and response schema. User interest boundaries, topic taxonomy, notes, and few-shot guidance live in the profile file. The classifier prompt applies profile rules in priority order: unrelated exclusions are checked first as a veto, then direct rules, then indirect rules; model-returned decision traces are used only to discipline the prompt and are not persisted.
 
-The current classification path stores relevance, confidence, reason, recommended action, and translated title. It does not emit paper-level topic tags.
+The current classification path stores relevance, confidence, reason, recommended action, and translated title. It does not emit paper-level topic tags. Classifier requests use bounded retry handling for transient provider failures and malformed JSON responses; if a batch still fails, sync and reclassify jobs fall back to single-paper classification so successful papers can still be persisted.
 
 Both model roles can request provider thinking mode. If a request fails with timeout, gateway-style, or reasoning-mode errors, the runtime retries once with `thinking=disabled`.
 
@@ -157,6 +157,7 @@ Behavioral baseline:
 - packaged builds still direct installer downloads and release notes to GitHub Releases
 - update checks read the fixed DNS TXT record `feedmedaily-update.stassenger.top`
 - the TXT record must contain `version=<semver>;url=<release-url>`, with a 600-second TTL on the current Aliyun DNS plan
+- release builds still generate `dist/update.json`, and GitHub Releases must upload it as an asset for older installed clients that read `latest/download/update.json`
 - update checks are not user-configurable through `.env` or the settings UI; release publishing updates GitHub Releases first, then runs `tools/update_release_dns.ps1` to update the DNS TXT record through Aliyun OpenAPI
 
 ## Profile Lifecycle

@@ -22,6 +22,7 @@ import (
 	"github.com/yyngfive/scirssagent/internal/profile"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
+	"github.com/yyngfive/scirssagent/internal/trayapp"
 	zoterosvc "github.com/yyngfive/scirssagent/internal/zotero"
 )
 
@@ -48,16 +49,17 @@ const (
 )
 
 var (
-	openExternalTargetFunc                                                                                          = appruntime.OpenExternalTarget
-	lookupUpdateTXTFunc                                                                                             = net.LookupTXT
-	selectReclassifyPaperIDsFunc                                                                                    = jobruntime.SelectPaperIDsForScope
-	reclassifyPaperIDsFunc                                                                                          = jobruntime.ReclassifyPaperIDs
-	rebuildLatestReportFunc                                                                                         = jobruntime.RebuildLatestReport
-	runSyncFunc                                                                                                     = jobruntime.RunSync
-	bootstrapProfileFunc                                                                                            = jobruntime.GenerateInitialProfileProposal
-	generateProfileProposalFunc                                                                                     = jobruntime.GenerateProfileProposal
-	listZoteroCollectionsFunc    func(config.Settings) (zoterosvc.CollectionsResponse, error)                       = zoterosvc.ListCollections
-	savePaperToZoteroFunc        func(config.Settings, store.Paper, store.Classification, *string) (*string, error) = zoterosvc.SavePaper
+	openExternalTargetFunc                                                                                           = appruntime.OpenExternalTarget
+	lookupUpdateTXTFunc                                                                                              = net.LookupTXT
+	selectReclassifyPaperIDsFunc                                                                                     = jobruntime.SelectPaperIDsForScope
+	reclassifyPaperIDsFunc                                                                                           = jobruntime.ReclassifyPaperIDs
+	rebuildLatestReportFunc                                                                                          = jobruntime.RebuildLatestReport
+	runSyncFunc                                                                                                      = jobruntime.RunSync
+	bootstrapProfileFunc                                                                                             = jobruntime.GenerateInitialProfileProposal
+	generateProfileProposalFunc                                                                                      = jobruntime.GenerateProfileProposal
+	listZoteroCollectionsFunc     func(config.Settings) (zoterosvc.CollectionsResponse, error)                       = zoterosvc.ListCollections
+	savePaperToZoteroFunc         func(config.Settings, store.Paper, store.Classification, *string) (*string, error) = zoterosvc.SavePaper
+	notifyTraySettingsChangedFunc                                                                                    = trayapp.NotifySettingsChanged
 )
 
 func NewServer(settings config.Settings, shutdown func()) *Server {
@@ -410,6 +412,7 @@ func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		s.notifyTraySettingsChanged()
 		command, err := backendRunCommandFunc(s.settings)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -427,6 +430,7 @@ func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		s.notifyTraySettingsChanged()
 		command, err := backendRunCommandFunc(s.settings)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -436,6 +440,19 @@ func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request)
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed.")
+	}
+}
+
+func (s *Server) notifyTraySettingsChanged() {
+	// Web 保存共享调度配置后，尽力通知正在运行的托盘立刻刷新内存态。
+	if err := notifyTraySettingsChangedFunc(); err != nil {
+		_, _ = logging.Write(s.settings.LogsDir, logging.Event{
+			Level:     "warning",
+			Component: "api",
+			Action:    "tray_settings_notify_failed",
+			Message:   "Saved scheduler settings, but notifying the running tray failed.",
+			Error:     err.Error(),
+		})
 	}
 }
 
@@ -833,7 +850,7 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	feedbackIDs := store.FeedbackIDsToInt64(proposal.SourceFeedbackIDs)
+	feedbackIDs := appliedProposalFeedbackIDs(proposal, finalizedChanges)
 	if err := sqliteStore.ApplyProfileProposalState(proposalID, version, appliedProfile, finalizedChanges, now); err != nil {
 		if errors.Is(err, store.ErrProfileProposalNotFound) {
 			writeError(w, http.StatusNotFound, "Profile proposal not found.")
@@ -871,6 +888,34 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, updatedProposal)
+}
+
+func appliedProposalFeedbackIDs(proposal *store.ProfileProposal, finalizedChanges []profile.ProposalChange) []int64 {
+	// Legacy proposals do not have per-change status, so keep their original top-level feedback scope.
+	if proposal == nil || len(proposal.Changes) == 0 {
+		if proposal == nil {
+			return []int64{}
+		}
+		return store.FeedbackIDsToInt64(proposal.SourceFeedbackIDs)
+	}
+	seen := map[int64]struct{}{}
+	ids := make([]int64, 0)
+	for _, change := range finalizedChanges {
+		if change.Status != profile.ProposalStatusAccepted {
+			continue
+		}
+		for _, id := range change.SourceFeedbackIDs {
+			if id <= 0 {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func (s *Server) handleProfileProposalReject(w http.ResponseWriter, proposalID int64) {

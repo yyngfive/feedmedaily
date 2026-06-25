@@ -2,20 +2,22 @@ package appruntime
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestOpenWithShellCommandWindowsPreservesFullURL(t *testing.T) {
-	target := "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=jacsat"
-	cmd := openWithShellCommand("windows", target)
-	if filepath.Base(cmd.Path) != "rundll32.exe" {
-		t.Fatalf("command path = %q", cmd.Path)
+func TestOpenExternalTargetRejectsMissingLocalPath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	err := OpenExternalTarget(missing)
+	if err == nil || !strings.Contains(err.Error(), "local open target does not exist") {
+		t.Fatalf("missing path error = %v", err)
 	}
-	if len(cmd.Args) != 3 {
-		t.Fatalf("args = %#v", cmd.Args)
-	}
-	if cmd.Args[1] != "url.dll,FileProtocolHandler" || cmd.Args[2] != target {
-		t.Fatalf("args = %#v", cmd.Args)
+}
+
+func TestOpenExternalTargetRejectsBlankTarget(t *testing.T) {
+	err := OpenExternalTarget("  ")
+	if err == nil || !strings.Contains(err.Error(), "open target cannot be blank") {
+		t.Fatalf("blank target error = %v", err)
 	}
 }
 

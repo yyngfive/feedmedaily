@@ -8,6 +8,13 @@ The latest released version is `0.3.3`. The next planned release is `0.3.4`, so 
 
 Changes since `0.3.3`:
 
+### Fixed
+
+- Restored the release `update.json` asset generation so older installed clients that still read the GitHub Releases `latest/download/update.json` URL can receive update notifications after the DNS TXT update flow is adopted.
+- Improved classifier stability so transient LLM request failures, malformed JSON responses, and title-translation failures no longer waste an otherwise successful sync. Failed classifier batches now retry and then fall back to single-paper classification where possible.
+- Fixed profile feedback reclassification semantics so applying a proposal only consumes accepted feedback, rejected feedback remains available, and manual profile saves automatically start a feedback-paper reclassification job.
+- Fixed the Web status bar's `Open Data`, `Open Logs`, and `Open Install` buttons so local folders use the same Windows ShellExecute path as the tray menu instead of the less reliable URL file handler path.
+
 ## 0.3.3 (2026-06-21)
 
 Changes since `0.3.2`:
