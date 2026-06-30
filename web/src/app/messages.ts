@@ -35,6 +35,8 @@ const catalog = {
     tone: "warning",
   },
   "paper.read.failed": {text: "Could not update read status.", tone: "danger"},
+  "paper.bulk_read.succeeded": {text: "Marked visible papers as read.", tone: "success"},
+  "paper.bulk_read.failed": {text: "Could not mark visible papers as read.", tone: "danger"},
   "zotero.save.succeeded": {text: "Saved to Zotero.", tone: "success"},
   "feedback.save.succeeded": {text: "Feedback saved.", tone: "success"},
   "feedback.delete.succeeded": {text: "Feedback deleted.", tone: "success"},

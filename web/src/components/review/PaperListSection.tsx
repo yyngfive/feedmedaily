@@ -12,7 +12,9 @@ export function PaperListSection({
   hasNoFetchedPapers,
   loading,
   needsFeedSetup,
+  markAllReadBusy,
   onOpenAdmin,
+  onMarkAllRead,
   onResetFilters,
   onRunSync,
   onSelectPaper,
@@ -24,6 +26,7 @@ export function PaperListSection({
   selectedId,
   setQuery,
   setRelevance,
+  unreadVisibleCount,
   visibleBaseCount,
   visibleTotals,
 }: {
@@ -31,7 +34,9 @@ export function PaperListSection({
   hasNoFetchedPapers: boolean;
   loading: boolean;
   needsFeedSetup: boolean;
+  markAllReadBusy: boolean;
   onOpenAdmin: () => void;
+  onMarkAllRead: () => void;
   onResetFilters: () => void;
   onRunSync: () => void;
   onSelectPaper: (paper: Paper) => void;
@@ -43,6 +48,7 @@ export function PaperListSection({
   selectedId: number | null;
   setQuery: (value: string) => void;
   setRelevance: (value: RelevanceFilter) => void;
+  unreadVisibleCount: number;
   visibleBaseCount: number;
   visibleTotals: Record<Relevance, number>;
 }) {
@@ -87,6 +93,19 @@ export function PaperListSection({
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
+
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              isDisabled={unreadVisibleCount === 0 || markAllReadBusy}
+              onPress={onMarkAllRead}
+            >
+              {markAllReadBusy
+                ? "Marking..."
+                : `Mark all shown read (${unreadVisibleCount})`}
+            </Button>
+          </div>
         </div>
       </div>
 

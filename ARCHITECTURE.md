@@ -10,7 +10,6 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 - `cmd/feedmedaily-tray/`: Windows tray runtime entrypoint
 - `cmd/feedmedaily-protected-verifier/`: Go native WebView2 helper for host-scoped protected-feed verification
 - `cmd/feedmedaily-verifier/`: deprecated Wails verifier source kept for reference only
-- `native/FeedMeDailyProtectedVerifier/`: deprecated C# helper source kept as a short-term rollback reference
 - `internal/api/`: HTTP API handlers, job endpoints, verification endpoints, and static asset serving
 - `internal/classifier/`: Go classifier client, prompt shaping, and thinking-fallback handling
 - `internal/config/`: settings schema, local config editing, and path resolution

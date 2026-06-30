@@ -8,6 +8,14 @@ The latest released version is `0.3.3`. The next planned release is `0.3.4`, so 
 
 Changes since `0.3.3`:
 
+### Changed
+
+- Removed the deprecated C# protected-feed verifier source now that the Go native verifier is the maintained build and runtime path.
+
+### Added
+
+- Added review workflow controls for filtering Mark wrong feedback, selecting multiple journals, sorting by date/journal/confidence, and marking the current visible result set as read.
+
 ### Fixed
 
 - Restored the release `update.json` asset generation so older installed clients that still read the GitHub Releases `latest/download/update.json` URL can receive update notifications after the DNS TXT update flow is adopted.

@@ -45,8 +45,10 @@ import {
 } from "./app/messages";
 import type {
   DateFilter,
+  FeedbackFilter,
   ReadFilter,
   RelevanceFilter,
+  SortOption,
 } from "./app/constants";
 import {EMPTY_REPORT} from "./types";
 import {AdminPanel, type AdminTab} from "./components/admin/AdminPanel";
@@ -97,7 +99,7 @@ type RefreshRequestFlags = {
 
 type LocalMutation = {
   requestId: string;
-  kind: "mark-read" | "feedback-save" | "feedback-delete";
+  kind: "mark-read" | "bulk-mark-read" | "feedback-save" | "feedback-delete";
   entityId: number;
   startedAt: number;
 };
@@ -123,10 +125,13 @@ export function App() {
   const [message, setMessage] = React.useState<UiMessage | null>(null);
   const [query, setQuery] = React.useState("");
   const [relevance, setRelevance] = React.useState<RelevanceFilter>("direct");
-  const [journal, setJournal] = React.useState("all");
+  const [selectedJournals, setSelectedJournals] = React.useState<string[]>([]);
   const [dateFilter, setDateFilter] = React.useState<DateFilter>("30d");
   const [readFilter, setReadFilter] = React.useState<ReadFilter>("unread");
+  const [feedbackFilter, setFeedbackFilter] = React.useState<FeedbackFilter>("all");
+  const [sortOption, setSortOption] = React.useState<SortOption>("date-desc");
   const [markReadRequest, setMarkReadRequest] = React.useState<MarkReadRequest | null>(null);
+  const [bulkReadSubmitting, setBulkReadSubmitting] = React.useState(false);
   const [pendingReadOverrides, setPendingReadOverrides] = React.useState<Record<number, string>>({});
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
   const [feedbackRecords, setFeedbackRecords] = React.useState<FeedbackRecord[]>([]);
@@ -177,6 +182,7 @@ export function App() {
     }
   }, []);
   const markReadSubmitting = markReadRequest != null;
+  const readMutationSubmitting = markReadSubmitting || bulkReadSubmitting;
 
   const hydrateEditableFeeds = React.useCallback((items: FeedSubscription[]) =>
     items.map((item) => ({
@@ -594,7 +600,7 @@ export function App() {
   }, [runScheduledRefresh]);
 
   React.useEffect(() => {
-    if (markReadSubmitting) {
+    if (readMutationSubmitting) {
       return;
     }
     const queued = queuedRefreshRef.current;
@@ -613,7 +619,7 @@ export function App() {
     if (queued.admin) {
       void refreshAdminData();
     }
-  }, [logMarkReadDebug, markReadSubmitting, refreshAdminData, refreshAll, refreshReviewCore]);
+  }, [logMarkReadDebug, readMutationSubmitting, refreshAdminData, refreshAll, refreshReviewCore]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -798,9 +804,10 @@ export function App() {
     [effectivePapers],
   );
   const journalOptions = React.useMemo(
-    () => [{value: "all", label: "All journals"}, ...journals.map((item) => ({value: item, label: item}))],
+    () => journals.map((item) => ({value: item, label: item})),
     [journals],
   );
+  const selectedJournalSet = React.useMemo(() => new Set(selectedJournals), [selectedJournals]);
 
   const filteredBase = React.useMemo(
     () =>
@@ -816,15 +823,29 @@ export function App() {
           .join(" ")
           .toLowerCase();
         const matchesQuery = !deferredQuery || haystack.includes(deferredQuery.toLowerCase());
-        const matchesJournal = journal === "all" || paper.journal === journal;
+        const matchesJournal =
+          selectedJournalSet.size === 0 ||
+          (paper.journal ? selectedJournalSet.has(paper.journal) : false);
         const dateValue = paper.published_date ?? paper.seen_date;
         const matchesRead =
           readFilter === "all" ||
           (readFilter === "read" ? Boolean(paper.read_at) : !paper.read_at);
+        const hasFeedback = Boolean(paper.feedback_status?.has_feedback);
+        const matchesFeedback =
+          feedbackFilter === "all" ||
+          (feedbackFilter === "marked" ? hasFeedback : !hasFeedback);
         const matchesDate = matchesDateFilter(dateValue, report.report_date, dateFilter);
-        return matchesQuery && matchesJournal && matchesRead && matchesDate;
+        return matchesQuery && matchesJournal && matchesRead && matchesFeedback && matchesDate;
       }),
-    [dateFilter, deferredQuery, effectivePapers, journal, readFilter, report.report_date],
+    [
+      dateFilter,
+      deferredQuery,
+      effectivePapers,
+      feedbackFilter,
+      readFilter,
+      report.report_date,
+      selectedJournalSet,
+    ],
   );
 
   const filtered = React.useMemo(
@@ -834,6 +855,30 @@ export function App() {
       ),
     [filteredBase, relevance],
   );
+  const sortedFiltered = React.useMemo(() => {
+    const byDate = (paper: Paper) => paper.published_date ?? paper.seen_date;
+    const next = [...filtered];
+    next.sort((left, right) => {
+      if (sortOption === "journal-asc") {
+        const journalCompare = (left.journal ?? "").localeCompare(right.journal ?? "");
+        if (journalCompare !== 0) {
+          return journalCompare;
+        }
+        return byDate(right).localeCompare(byDate(left));
+      }
+      if (sortOption === "confidence-desc" || sortOption === "confidence-asc") {
+        const confidenceCompare =
+          left.classification.confidence - right.classification.confidence;
+        if (confidenceCompare !== 0) {
+          return sortOption === "confidence-desc" ? -confidenceCompare : confidenceCompare;
+        }
+        return byDate(right).localeCompare(byDate(left));
+      }
+      const dateCompare = byDate(left).localeCompare(byDate(right));
+      return sortOption === "date-desc" ? -dateCompare : dateCompare;
+    });
+    return next;
+  }, [filtered, sortOption]);
   const lastUpdateLabel = React.useMemo(
     () => report.last_updated_at?.slice(0, 10) ?? "Never",
     [report.last_updated_at],
@@ -852,13 +897,13 @@ export function App() {
     [filteredBase, needsFeedSetup],
   );
   const visibleList = React.useMemo(
-    () => (needsFeedSetup ? [] : filtered),
-    [filtered, needsFeedSetup],
+    () => (needsFeedSetup ? [] : sortedFiltered),
+    [needsFeedSetup, sortedFiltered],
   );
   const visibleTotals = React.useMemo(() => relevanceCounts(visibleBase), [visibleBase]);
 
   React.useEffect(() => {
-    if (markReadSubmitting) {
+    if (readMutationSubmitting) {
       return;
     }
     if (visibleList.length === 0) {
@@ -868,7 +913,7 @@ export function App() {
     if (!selectedId || !visibleList.some((paper) => paper.id === selectedId)) {
       setSelectedId(visibleList[0].id);
     }
-  }, [markReadSubmitting, selectedId, visibleList]);
+  }, [readMutationSubmitting, selectedId, visibleList]);
 
   React.useEffect(() => {
     if (!zoteroPaper) {
@@ -978,7 +1023,7 @@ export function App() {
 
   const persistReadStatus = async (paperId: number) => {
     const paper = effectivePapers.find((item) => item.id === paperId);
-    if (!paper || paper.read_at || markReadRequest != null) {
+    if (!paper || paper.read_at || readMutationSubmitting) {
       return;
     }
     const requestId = `mark-read-${++markReadSequenceRef.current}`;
@@ -1063,6 +1108,84 @@ export function App() {
       if (succeeded) {
         scheduleDeferredReviewRefresh(`mark-read:${requestId}:reconcile`);
       }
+    }
+  };
+
+  const persistVisibleReadStatus = async () => {
+    const unreadPapers = visibleList.filter((paper) => !paper.read_at);
+    if (unreadPapers.length === 0 || readMutationSubmitting) {
+      return;
+    }
+    const requestId = `bulk-mark-read-${++markReadSequenceRef.current}`;
+    const startedAt = performance.now();
+    beginLocalMutation({
+      requestId,
+      kind: "bulk-mark-read",
+      entityId: 0,
+      startedAt,
+    });
+    setBulkReadSubmitting(true);
+    logMarkReadDebug("bulk-mark-read.started", {
+      requestId,
+      count: unreadPapers.length,
+      paperIds: unreadPapers.slice(0, 25).map((paper) => paper.id),
+    });
+    try {
+      const settledResults = await Promise.allSettled(
+        unreadPapers.map(async (paper) => ({
+          paperId: paper.id,
+          status: await markPaperRead(paper.id),
+        })),
+      );
+      const results = settledResults.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : [],
+      );
+      const failedCount = settledResults.length - results.length;
+      flushSync(() => {
+        setPendingReadOverrides((current) => {
+          const next = {...current};
+          for (const result of results) {
+            next[result.paperId] = result.status.read_at;
+          }
+          return next;
+        });
+        setSelectedId((current) =>
+          current != null && results.some((result) => result.paperId === current)
+            ? null
+            : current,
+        );
+      });
+      if (failedCount > 0) {
+        pushMessage("paper.bulk_read.failed", {
+          text: `Marked ${results.length} paper${results.length === 1 ? "" : "s"} as read; ${failedCount} failed.`,
+          tone: results.length > 0 ? "warning" : "danger",
+        });
+      } else {
+        pushMessage("paper.bulk_read.succeeded", {
+          text: `Marked ${results.length} visible paper${results.length === 1 ? "" : "s"} as read.`,
+          tone: "success",
+        });
+      }
+      scheduleDeferredReviewRefresh(`bulk-mark-read:${requestId}:reconcile`);
+      logMarkReadDebug("bulk-mark-read.succeeded", {
+        requestId,
+        durationMs: Math.round(performance.now() - startedAt),
+        count: results.length,
+        failedCount,
+      });
+    } catch (error) {
+      pushMessage("paper.bulk_read.failed", {
+        text: errorText(error, "Could not mark visible papers as read."),
+        tone: "danger",
+      });
+      logMarkReadDebug("bulk-mark-read.failed", {
+        requestId,
+        durationMs: Math.round(performance.now() - startedAt),
+        message: errorText(error, "Could not mark visible papers as read."),
+      });
+    } finally {
+      setBulkReadSubmitting(false);
+      endLocalMutation(requestId);
     }
   };
 
@@ -1611,11 +1734,21 @@ export function App() {
     setThemePreference(nextResolvedTheme === currentSystemTheme ? "system" : nextResolvedTheme);
   }, [resolvedTheme, systemTheme]);
 
+  const toggleJournalFilter = React.useCallback((value: string) => {
+    setSelectedJournals((current) =>
+      current.includes(value)
+        ? current.filter((item) => item !== value)
+        : [...current, value].sort(),
+    );
+  }, []);
+
   // 统一重置筛选器，供侧栏和空状态按钮复用。
   const resetFilters = React.useCallback(() => {
-    setJournal("all");
+    setSelectedJournals([]);
     setDateFilter("30d");
     setReadFilter("unread");
+    setFeedbackFilter("all");
+    setSortOption("date-desc");
     setRelevance("all");
     setQuery("");
   }, []);
@@ -1755,17 +1888,22 @@ export function App() {
       <div className="mx-auto grid min-h-0 w-full max-w-375 flex-1 gap-4 overflow-hidden px-4 py-4 lg:grid-cols-[300px_minmax(0,1fr)_360px]">
         <FiltersSidebar
           dateFilter={dateFilter}
-          journal={journal}
+          feedbackFilter={feedbackFilter}
           journalOptions={journalOptions}
+          selectedJournals={selectedJournals}
           lastUpdateLabel={lastUpdateLabel}
           onDateFilterChange={setDateFilter}
-          onJournalChange={setJournal}
+          onFeedbackFilterChange={setFeedbackFilter}
+          onJournalClear={() => setSelectedJournals([])}
+          onJournalToggle={toggleJournalFilter}
           onReadFilterChange={setReadFilter}
           onReset={resetFilters}
+          onSortChange={setSortOption}
           profileName={profile.meta.name}
           profileVersion={profile.meta.version}
           readFilter={readFilter}
           shownCount={visibleList.length}
+          sortOption={sortOption}
           totalCount={needsFeedSetup ? 0 : report.papers.length}
           visibleTotals={visibleTotals}
         />
@@ -1774,7 +1912,9 @@ export function App() {
           hasNoFetchedPapers={hasNoFetchedPapers}
           loadError={reportLoadError}
           loading={(reportLoading || !feedsLoaded) && report.papers.length === 0}
+          markAllReadBusy={bulkReadSubmitting}
           needsFeedSetup={needsFeedSetup}
+          onMarkAllRead={() => void persistVisibleReadStatus()}
           onOpenAdmin={() => setAdminOpen(true)}
           onResetFilters={resetFilters}
           onRunSync={() => void handleRunAdminJob("/api/admin/run")}
@@ -1793,6 +1933,7 @@ export function App() {
           selectedId={needsFeedSetup ? null : selectedPaperId}
           setQuery={setQuery}
           setRelevance={setRelevance}
+          unreadVisibleCount={visibleList.filter((paper) => !paper.read_at).length}
           visibleBaseCount={visibleBase.length}
           visibleTotals={visibleTotals}
         />
