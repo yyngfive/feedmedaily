@@ -14,6 +14,7 @@ var (
 	whitespaceRE      = regexp.MustCompile(`\s+`)
 	tagRE             = regexp.MustCompile(`<[^>]+>`)
 	imgSrcRE          = regexp.MustCompile(`(?i)<img[^>]+src=["']([^"']+)["']`)
+	imgSrcAttrRE      = regexp.MustCompile(`(?i)(<img\b[^>]*\bsrc=["'])([^"']+)(["'][^>]*>)`)
 	metadataRE        = regexp.MustCompile(`(?i)\b(vol(?:ume)?|issue|pp?\.|pages?|doi|e?issn|published|online)\b`)
 	abstractHeadingRE = regexp.MustCompile(`(?i)(?:^|\s)ABSTRACT[:\s-]*`)
 	naturePrefixRE    = regexp.MustCompile(`(?i)^[^.]*?,\s*Published online:\s*.*?;\s*doi:\S+\s*`)
@@ -38,7 +39,7 @@ func extractRSSItemMetadata(feedTitle string, sourceURL string, link string, ite
 	} else if !elsevierActive {
 		abstractCandidates = append(abstractCandidates, descriptionHTML, descriptionText, descriptionText)
 	}
-	abstract, abstractHTML, images := chooseBestAbstract(abstractCandidates)
+	abstract, abstractHTML, images := chooseBestAbstract(abstractCandidates, link, sourceURL)
 	authors := collectRSSAuthors(item)
 	if len(authors) == 0 && len(elsevierDetails.Authors) > 0 {
 		authors = append([]string{}, elsevierDetails.Authors...)
@@ -56,12 +57,12 @@ func extractRSSItemMetadata(feedTitle string, sourceURL string, link string, ite
 	return abstract, abstractHTML, images, authors, journal, publishedDate
 }
 
-func chooseBestAbstract(candidates []string) (string, string, []store.AbstractImage) {
+func chooseBestAbstract(candidates []string, baseURLs ...string) (string, string, []store.AbstractImage) {
 	bestText := ""
 	bestHTML := ""
 	bestImages := []store.AbstractImage{}
 	for _, candidate := range candidates {
-		text, htmlValue, images := normalizeAbstractCandidate(candidate)
+		text, htmlValue, images := normalizeAbstractCandidate(candidate, baseURLs...)
 		if text == "" && len(images) == 0 && strings.TrimSpace(htmlValue) == "" {
 			continue
 		}
@@ -74,8 +75,8 @@ func chooseBestAbstract(candidates []string) (string, string, []store.AbstractIm
 	return bestText, bestHTML, bestImages
 }
 
-func normalizeAbstractCandidate(value string) (string, string, []store.AbstractImage) {
-	rawHTML := cleanCDATA(strings.TrimSpace(html.UnescapeString(value)))
+func normalizeAbstractCandidate(value string, baseURLs ...string) (string, string, []store.AbstractImage) {
+	rawHTML := normalizeImageURLs(cleanCDATA(strings.TrimSpace(html.UnescapeString(value))), baseURLs...)
 	images := extractImages(rawHTML)
 	plain := normalizeText(stripTags(rawHTML))
 	if plain == "" {
@@ -120,6 +121,34 @@ func extractImages(value string) []store.AbstractImage {
 		images = append(images, store.AbstractImage{Src: src})
 	}
 	return images
+}
+
+func normalizeImageURLs(value string, baseURLs ...string) string {
+	return imgSrcAttrRE.ReplaceAllStringFunc(value, func(match string) string {
+		parts := imgSrcAttrRE.FindStringSubmatch(match)
+		if len(parts) != 4 {
+			return match
+		}
+		return parts[1] + absoluteURL(parts[2], baseURLs...) + parts[3]
+	})
+}
+
+func absoluteURL(raw string, baseURLs ...string) string {
+	src := strings.TrimSpace(raw)
+	if src == "" {
+		return raw
+	}
+	parsed, err := neturl.Parse(src)
+	if err != nil || parsed.IsAbs() {
+		return src
+	}
+	for _, rawBase := range baseURLs {
+		base, err := neturl.Parse(strings.TrimSpace(rawBase))
+		if err == nil && base.Scheme != "" && base.Host != "" {
+			return base.ResolveReference(parsed).String()
+		}
+	}
+	return src
 }
 
 func normalizeText(value string) string {

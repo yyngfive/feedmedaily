@@ -109,7 +109,7 @@ func parseAtom(doc atomDoc, sourceURL string) []store.Paper {
 			entry.Summary,
 			entry.DCDescription,
 			entry.SummaryPlain,
-		})
+		}, link, sourceURL)
 		authors := make([]string, 0, len(entry.Authors))
 		for _, author := range entry.Authors {
 			if name := normalizeText(author.Name); name != "" {

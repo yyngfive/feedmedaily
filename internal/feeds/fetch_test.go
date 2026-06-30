@@ -77,6 +77,49 @@ func TestFetchAllParsesRSSAndContinuesOnFeedFailure(t *testing.T) {
 	}
 }
 
+func TestParseRSSNormalizesAbstractImageURLs(t *testing.T) {
+	papers, err := parseFeedBody("https://feeds.example.org/rss", 0, []byte(`<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Chemical Communications</title>
+    <item>
+      <title>Image URL sample</title>
+      <link>https://pubs.rsc.org/en/content/articlelanding/2026/cc/d6cc00345h</link>
+      <description><![CDATA[
+        <p>Abstract text.</p>
+        <img src="/images/abstract-relative.png">
+        <img src="//media.wiley.com/abstract-protocol.png">
+        <img src="https://cdn.example.org/abstract-absolute.png">
+      ]]></description>
+    </item>
+  </channel>
+</rss>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(papers) != 1 {
+		t.Fatalf("papers = %d", len(papers))
+	}
+
+	paper := papers[0]
+	want := []string{
+		"https://pubs.rsc.org/images/abstract-relative.png",
+		"https://media.wiley.com/abstract-protocol.png",
+		"https://cdn.example.org/abstract-absolute.png",
+	}
+	if len(paper.AbstractImages) != len(want) {
+		t.Fatalf("unexpected abstract images: %#v", paper.AbstractImages)
+	}
+	for i, src := range want {
+		if paper.AbstractImages[i].Src != src {
+			t.Fatalf("image %d src = %q, want %q", i, paper.AbstractImages[i].Src, src)
+		}
+		if paper.AbstractHTML == nil || !strings.Contains(*paper.AbstractHTML, `src="`+src+`"`) {
+			t.Fatalf("abstract html did not include normalized src %q: %#v", src, paper.AbstractHTML)
+		}
+	}
+}
+
 func TestFetchAllParsesNatureRDFRSS(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
