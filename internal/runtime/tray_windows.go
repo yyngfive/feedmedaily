@@ -11,8 +11,6 @@ import (
 	"unsafe"
 )
 
-const TrayMutexName = "FeedMeDailyTrayMutex"
-
 const (
 	trayDetachedProcess       = 0x00000008
 	trayCreateNewProcessGroup = 0x00000200
@@ -20,15 +18,25 @@ const (
 )
 
 var (
-	kernel32Tray        = syscall.NewLazyDLL("kernel32.dll")
-	procOpenMutexW      = kernel32Tray.NewProc("OpenMutexW")
-	procCloseHandleTray = kernel32Tray.NewProc("CloseHandle")
-	ensureTrayBinary    = EnsureSourceBinary
+	kernel32Tray              = syscall.NewLazyDLL("kernel32.dll")
+	procOpenMutexW            = kernel32Tray.NewProc("OpenMutexW")
+	procCloseHandleTray       = kernel32Tray.NewProc("CloseHandle")
+	ensureTrayBinary          = EnsureSourceBinary
+	isTrayRunningForConfigDir = isTrayRunningConfigDir
+	launchTrayProcessFunc     = launchTrayProcess
 )
 
-func IsTrayRunning() bool {
-	// 通过和托盘相同的命名互斥锁判断托盘是否已经在运行。
-	namePtr, err := syscall.UTF16PtrFromString(TrayMutexName)
+func IsTrayRunning(root string) bool {
+	configDir, err := ConfigDirForRoot(root)
+	if err != nil {
+		return false
+	}
+	return isTrayRunningForConfigDir(configDir)
+}
+
+func isTrayRunningConfigDir(configDir string) bool {
+	// 通过和托盘相同的 config-scoped 命名互斥锁判断托盘是否已经在运行。
+	namePtr, err := syscall.UTF16PtrFromString(TrayMutexName(configDir))
 	if err != nil {
 		return false
 	}
@@ -42,14 +50,18 @@ func IsTrayRunning() bool {
 
 func EnsureTrayRunning(root string) error {
 	// 如果托盘未运行，则在后台拉起一个新的托盘实例。
-	if IsTrayRunning() {
+	configDir, err := ConfigDirForRoot(root)
+	if err != nil {
+		return err
+	}
+	if isTrayRunningForConfigDir(configDir) {
 		return nil
 	}
 	command, cwd, err := trayLaunchCommand(root)
 	if err != nil {
 		return err
 	}
-	return launchTrayProcess(command, cwd)
+	return launchTrayProcessFunc(command, cwd)
 }
 
 func trayLaunchCommand(root string) ([]string, string, error) {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -60,6 +61,7 @@ var (
 	listZoteroCollectionsFunc     func(config.Settings) (zoterosvc.CollectionsResponse, error)                       = zoterosvc.ListCollections
 	savePaperToZoteroFunc         func(config.Settings, store.Paper, store.Classification, *string) (*string, error) = zoterosvc.SavePaper
 	notifyTraySettingsChangedFunc                                                                                    = trayapp.NotifySettingsChanged
+	abstractImageHTTPClient                                                                                          = &http.Client{Timeout: 20 * time.Second}
 )
 
 func NewServer(settings config.Settings, shutdown func()) *Server {
@@ -239,6 +241,7 @@ func (s *Server) handleAppMeta(w http.ResponseWriter, r *http.Request) {
 		"mode":                s.settings.Mode,
 		"install_dir":         s.settings.AppDir,
 		"config_dir":          s.settings.ConfigDir,
+		"tray_instance_id":    appruntime.TrayInstanceID(s.settings.ConfigDir),
 		"data_dir":            s.settings.DataDir,
 		"logs_dir":            s.settings.LogsDir,
 		"static_dir":          s.settings.WebDistDir,
@@ -445,13 +448,18 @@ func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) notifyTraySettingsChanged() {
 	// Web 保存共享调度配置后，尽力通知正在运行的托盘立刻刷新内存态。
-	if err := notifyTraySettingsChangedFunc(); err != nil {
+	if err := notifyTraySettingsChangedFunc(s.settings.ConfigDir); err != nil {
 		_, _ = logging.Write(s.settings.LogsDir, logging.Event{
 			Level:     "warning",
 			Component: "api",
 			Action:    "tray_settings_notify_failed",
 			Message:   "Saved scheduler settings, but notifying the running tray failed.",
 			Error:     err.Error(),
+			Data: map[string]any{
+				"config_dir":         s.settings.ConfigDir,
+				"tray_instance_id":   appruntime.TrayInstanceID(s.settings.ConfigDir),
+				"tray_settings_path": filepath.Join(s.settings.ConfigDir, "tray-settings.json"),
+			},
 		})
 	}
 }
@@ -682,21 +690,29 @@ func (s *Server) handleFeedbackByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePaperByID(w http.ResponseWriter, r *http.Request) {
-	// 兼容 POST /api/papers/{id}/read。
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed.")
-		return
-	}
+	// 兼容 /api/papers/{id}/read，并代理当前论文自己的摘要图片。
 	rawPath := strings.TrimPrefix(r.URL.Path, "/api/papers/")
 	parts := strings.Split(rawPath, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] != "read" {
+	if len(parts) != 2 || parts[0] == "" {
 		writeError(w, http.StatusNotFound, "Paper not found.")
 		return
 	}
 	paperID, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Paper not found.")
+		return
+	}
+	if parts[1] == "abstract-image" {
+		s.handlePaperAbstractImage(w, r, paperID)
+		return
+	}
+	if parts[1] != "read" {
+		writeError(w, http.StatusNotFound, "Paper not found.")
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed.")
 		return
 	}
 	sqliteStore, err := s.getWriteStore()
@@ -718,6 +734,92 @@ func (s *Server) handlePaperByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"paper_id": paperID, "read_at": readAt})
+}
+
+func (s *Server) handlePaperAbstractImage(w http.ResponseWriter, r *http.Request, paperID int64) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	src := strings.TrimSpace(r.URL.Query().Get("src"))
+	if src == "" || !safeRemoteImageURL(src) {
+		writeError(w, http.StatusBadRequest, "Unsupported image URL.")
+		return
+	}
+	sqliteStore, err := s.getReadStore()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, "Paper not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	paper, err := sqliteStore.PaperByID(paperID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if paper == nil || !paperHasAbstractImage(*paper, src) {
+		writeError(w, http.StatusNotFound, "Image not found.")
+		return
+	}
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodGet, src, nil)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Unsupported image URL.")
+		return
+	}
+	request.Header.Set("User-Agent", browserUserAgent())
+	request.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+	if strings.TrimSpace(paper.URL) != "" {
+		request.Header.Set("Referer", paper.URL)
+	}
+	response, err := abstractImageHTTPClient.Do(request)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	defer response.Body.Close()
+	contentType := response.Header.Get("Content-Type")
+	if response.StatusCode < 200 || response.StatusCode >= 300 || !strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		writeError(w, http.StatusBadGateway, "Image request failed.")
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	if length := response.Header.Get("Content-Length"); length != "" {
+		w.Header().Set("Content-Length", length)
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, response.Body)
+}
+
+func paperHasAbstractImage(paper store.Paper, src string) bool {
+	for _, image := range paper.AbstractImages {
+		if image.Src == src {
+			return true
+		}
+	}
+	return false
+}
+
+func safeRemoteImageURL(raw string) bool {
+	parsed, err := neturl.Parse(raw)
+	if err != nil || !parsed.IsAbs() {
+		return false
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "" || host == "localhost" {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip == nil || (!ip.IsLoopback() && !ip.IsPrivate() && !ip.IsUnspecified())
+}
+
+func browserUserAgent() string {
+	return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 }
 
 func (s *Server) handleProfileProposalByID(w http.ResponseWriter, r *http.Request) {
@@ -1682,6 +1784,7 @@ func schedulerResponse(settings appruntime.TraySchedulerSettings, mode string, s
 		"scheduler_backend":   "tray_local",
 		"scheduled_time":      settings.DailyTime,
 		"settings_path":       settingsPath,
+		"tray_instance_id":    appruntime.TrayInstanceID(filepath.Dir(settingsPath)),
 		"command":             command,
 		"state":               nil,
 		"next_run_time":       nil,

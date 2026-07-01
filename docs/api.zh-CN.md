@@ -83,6 +83,7 @@
 - `logs_dir`
 - `static_dir`
 - `tray_settings_path`
+- `tray_instance_id`
 - `server_url`
 - `scheduler_task_name`
 - `process_running`
@@ -223,6 +224,28 @@ Query：
 
 前端入口：`fetchLatestReport()`。
 
+### `GET /api/papers/{id}/abstract-image`
+
+用途：代理当前论文摘要 HTML 中登记过的图片。部分 publisher 图片需要文章页 `Referer` 或浏览器 UA，前端不能直接伪造这些 header，因此由本地后端代取。
+
+路径参数：
+
+- `id`：paper id。
+
+Query：
+
+- `src`：必须精确匹配该 paper 的 `abstract_images[].src`。
+
+成功响应：图片二进制，`Content-Type` 必须是 `image/*`。
+
+常见错误：
+
+- 400：`src` 缺失、不是 http/https 远程图片，或指向 localhost/private IP。
+- 404：paper 不存在，或 `src` 不属于该 paper 的摘要图片。
+- 502：publisher 图片请求失败，或返回的不是图片内容。
+
+前端入口：右侧详情面板渲染 `abstract_html` 时，会把匹配到的 `<img src>` 改写到此接口。
+
 ### `POST /api/papers/{id}/read`
 
 用途：把论文标记为已读。
@@ -357,6 +380,7 @@ secret 字段不以明文返回。
 - `scheduler_backend`
 - `scheduled_time`
 - `settings_path`
+- `tray_instance_id`
 - `platform`
 - `automatic_supported`
 - `advisory`

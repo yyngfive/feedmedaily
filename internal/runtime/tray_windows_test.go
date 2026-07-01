@@ -11,6 +11,55 @@ import (
 	"testing"
 )
 
+func TestTrayInstanceIDIsConfigScoped(t *testing.T) {
+	configA := filepath.Join(t.TempDir(), "config")
+	configB := filepath.Join(t.TempDir(), "config")
+	if TrayInstanceID(configA) != TrayInstanceID(configA) {
+		t.Fatal("same config dir produced different tray instance ids")
+	}
+	if TrayInstanceID(configA) == TrayInstanceID(configB) {
+		t.Fatal("different config dirs produced the same tray instance id")
+	}
+	if !strings.HasPrefix(TrayMutexName(configA), TrayInstanceID(configA)) {
+		t.Fatalf("mutex name %q does not include instance id %q", TrayMutexName(configA), TrayInstanceID(configA))
+	}
+}
+
+func TestEnsureTrayRunningIgnoresOtherConfigDirInstance(t *testing.T) {
+	root := t.TempDir()
+	otherRoot := t.TempDir()
+	writeRuntimeTestFile(t, filepath.Join(root, "FeedMeDailyTray.exe"))
+	writeRuntimeTestFile(t, filepath.Join(otherRoot, "go.mod"))
+	otherConfig, err := ConfigDirForRoot(otherRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checkedConfigDirs := []string{}
+	restoreRunning := replaceIsTrayRunningForConfigDir(func(configDir string) bool {
+		checkedConfigDirs = append(checkedConfigDirs, configDir)
+		return configDir == otherConfig
+	})
+	defer restoreRunning()
+
+	var launchedCommand []string
+	restoreLaunch := replaceLaunchTrayProcess(func(command []string, cwd string) error {
+		launchedCommand = append([]string(nil), command...)
+		return nil
+	})
+	defer restoreLaunch()
+
+	if err := EnsureTrayRunning(root); err != nil {
+		t.Fatal(err)
+	}
+	if len(checkedConfigDirs) != 1 || checkedConfigDirs[0] == otherConfig {
+		t.Fatalf("checked config dirs = %#v, other=%q", checkedConfigDirs, otherConfig)
+	}
+	if len(launchedCommand) == 0 {
+		t.Fatal("expected current root tray to launch")
+	}
+}
+
 func TestTrayLaunchCommandReleaseUsesPackagedTray(t *testing.T) {
 	root := t.TempDir()
 	writeRuntimeTestFile(t, filepath.Join(root, "FeedMeDailyTray.exe"))
@@ -80,5 +129,21 @@ func replaceEnsureTrayBinary(next func(string, string, string) (string, error)) 
 	ensureTrayBinary = next
 	return func() {
 		ensureTrayBinary = previous
+	}
+}
+
+func replaceIsTrayRunningForConfigDir(next func(string) bool) func() {
+	previous := isTrayRunningForConfigDir
+	isTrayRunningForConfigDir = next
+	return func() {
+		isTrayRunningForConfigDir = previous
+	}
+}
+
+func replaceLaunchTrayProcess(next func([]string, string) error) func() {
+	previous := launchTrayProcessFunc
+	launchTrayProcessFunc = next
+	return func() {
+		launchTrayProcessFunc = previous
 	}
 }

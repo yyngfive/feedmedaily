@@ -90,7 +90,7 @@ func TestToggleScheduleEnabledDoesNotOverwriteInvalidDiskSettings(t *testing.T) 
 	}
 
 	_, err := app.ToggleScheduleEnabled()
-	if err == nil || !strings.Contains(err.Error(), "parse tray settings") {
+	if err == nil || !strings.Contains(err.Error(), "parse tray scheduler settings") {
 		t.Fatalf("toggle error = %v", err)
 	}
 	data, err := os.ReadFile(settingsPath)

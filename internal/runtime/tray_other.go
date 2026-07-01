@@ -2,9 +2,7 @@
 
 package appruntime
 
-const TrayMutexName = "FeedMeDailyTrayMutex"
-
-func IsTrayRunning() bool {
+func IsTrayRunning(root string) bool {
 	// 非 Windows 平台当前没有托盘实现。
 	return false
 }

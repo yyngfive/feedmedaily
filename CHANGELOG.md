@@ -22,7 +22,8 @@ Changes since `0.3.3`:
 - Improved classifier stability so transient LLM request failures, malformed JSON responses, and title-translation failures no longer waste an otherwise successful sync. Failed classifier batches now retry and then fall back to single-paper classification where possible.
 - Fixed profile feedback reclassification semantics so applying a proposal only consumes accepted feedback, rejected feedback remains available, and manual profile saves automatically start a feedback-paper reclassification job.
 - Fixed the Web status bar's `Open Data`, `Open Logs`, and `Open Install` buttons so local folders use the same Windows ShellExecute path as the tray menu instead of the less reliable URL file handler path.
-- Fixed abstract image rendering for publisher feeds that provide relative or protocol-relative image URLs, and removed the duplicate abstract-images dropdown from the paper detail panel.
+- Fixed abstract image rendering for publisher feeds that provide relative/protocol-relative URLs or require article-page referrers, and removed the duplicate abstract-images dropdown from the paper detail panel.
+- Fixed Web scheduler saves targeting the wrong tray instance by scoping tray mutexes and reload notifications to the current config directory.
 
 ## 0.3.3 (2026-06-21)
 

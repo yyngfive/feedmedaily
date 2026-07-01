@@ -3,6 +3,19 @@ import {Button} from "@heroui/react";
 import {authorsLine, doiHref, feedbackLabel, paperDate} from "../../app/utils";
 import type {Paper} from "../../types";
 
+function abstractHtmlForDisplay(paper: Paper): string {
+  const images = new Set((paper.abstract_images ?? []).map((image) => image.src));
+  return (paper.abstract_html ?? "").replace(
+    /(<img\b[^>]*\bsrc=["'])([^"']+)(["'][^>]*>)/gi,
+    (match, prefix: string, src: string, suffix: string) => {
+      if (!images.has(src)) {
+        return match;
+      }
+      return `${prefix}/api/papers/${paper.id}/abstract-image?src=${encodeURIComponent(src)}${suffix}`;
+    },
+  );
+}
+
 export function DetailPanel({
   isUnread,
   markReadBusy,
@@ -28,6 +41,7 @@ export function DetailPanel({
   const feedbackText = feedbackLabel(paper);
   const zoteroSaved = paper.zotero_status?.saved ?? false;
   const hasAbstractHtml = Boolean(paper.abstract_html);
+  const abstractHtml = hasAbstractHtml ? abstractHtmlForDisplay(paper) : "";
 
   return (
     <aside className="h-full space-y-5 overflow-hidden rounded-lg border border-(--line) bg-(--paper-accent) p-5">
@@ -55,7 +69,7 @@ export function DetailPanel({
         {hasAbstractHtml ? (
           <div
             className="max-h-64 overflow-auto pr-1 text-sm leading-6 text-(--body) [&_a]:text-(--accent) [&_a]:underline [&_p+*]:mt-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-            dangerouslySetInnerHTML={{__html: paper.abstract_html ?? ""}}
+            dangerouslySetInnerHTML={{__html: abstractHtml}}
           />
         ) : paper.abstract ? (
           <p className="max-h-64 overflow-auto pr-1 text-sm leading-6 text-(--body)">

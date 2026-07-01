@@ -2,6 +2,7 @@ package appruntime
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,6 +92,42 @@ func DefaultUserDataDir() string {
 		return filepath.Join(".", AppPublicName)
 	}
 	return filepath.Join(homeDir, "AppData", "Local", AppPublicName)
+}
+
+func ConfigDirForRoot(root string) (string, error) {
+	appRoot, err := ResolveAppRoot(root)
+	if err != nil {
+		return "", err
+	}
+	if DetectMode(appRoot) == ModeRelease {
+		return filepath.Join(DefaultUserDataDir(), "config"), nil
+	}
+	return appRoot, nil
+}
+
+func TrayInstanceID(configDir string) string {
+	canonical := canonicalTrayConfigDir(configDir)
+	sum := sha256.Sum256([]byte(canonical))
+	return fmt.Sprintf("%sTray-%x", AppPublicName, sum[:6])
+}
+
+func TrayMutexName(configDir string) string {
+	return TrayInstanceID(configDir) + "-Mutex"
+}
+
+func TrayWindowTitle(configDir string) string {
+	return TrayInstanceID(configDir)
+}
+
+func canonicalTrayConfigDir(configDir string) string {
+	clean := filepath.Clean(strings.TrimSpace(configDir))
+	if abs, err := filepath.Abs(clean); err == nil {
+		clean = abs
+	}
+	if goruntime.GOOS == "windows" {
+		clean = strings.ToLower(clean)
+	}
+	return clean
 }
 
 func ResolveWebDistDir(root string) string {

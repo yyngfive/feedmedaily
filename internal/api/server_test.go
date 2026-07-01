@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,6 +57,9 @@ func TestAppHealthAndMeta(t *testing.T) {
 	}
 	if meta["data_dir"] != settings.DataDir || meta["static_dir"] != settings.WebDistDir {
 		t.Fatalf("meta did not preserve configured paths: %#v", meta)
+	}
+	if meta["tray_instance_id"] != appruntime.TrayInstanceID(settings.ConfigDir) {
+		t.Fatalf("unexpected tray instance in meta: %#v", meta)
 	}
 }
 
@@ -181,6 +185,55 @@ func TestReadOnlyBootstrapEndpoints(t *testing.T) {
 	}
 }
 
+func TestPaperAbstractImageProxyUsesPaperReferer(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	seedReadOnlyFixture(t, settings.DatabasePath)
+	db, err := sql.Open("sqlite", settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execSQLite(t, db, `
+UPDATE papers
+SET raw_json = '{"_abstract_html":"<img src=\"https://images.example/figure.png\">","_abstract_images":[{"src":"https://images.example/figure.png"}]}'
+WHERE id = 1
+`)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var seenReferer string
+	var seenUserAgent string
+	previousClient := abstractImageHTTPClient
+	abstractImageHTTPClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		seenReferer = request.Header.Get("Referer")
+		seenUserAgent = request.Header.Get("User-Agent")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"image/png"}},
+			Body:       io.NopCloser(strings.NewReader("png")),
+			Request:    request,
+		}, nil
+	})}
+	t.Cleanup(func() { abstractImageHTTPClient = previousClient })
+
+	handler := newTestHandler(t, settings)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/papers/1/abstract-image?src=https%3A%2F%2Fimages.example%2Ffigure.png", nil))
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "png" {
+		t.Fatalf("image proxy = %d %q", recorder.Code, recorder.Body.String())
+	}
+	if seenReferer != "https://example.com/api-paper" || !strings.Contains(seenUserAgent, "Mozilla/5.0") {
+		t.Fatalf("headers referer=%q ua=%q", seenReferer, seenUserAgent)
+	}
+
+	missingRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(missingRecorder, httptest.NewRequest(http.MethodGet, "/api/papers/1/abstract-image?src=https%3A%2F%2Fimages.example%2Fother.png", nil))
+	if missingRecorder.Code != http.StatusNotFound {
+		t.Fatalf("unlisted image status = %d", missingRecorder.Code)
+	}
+}
+
 func TestProfileCurrentPutUpdatesExistingProfile(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)
@@ -267,8 +320,11 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 		return nil
 	}
 	notifyCalls := 0
-	notifyTraySettingsChangedFunc = func() error {
+	notifyTraySettingsChangedFunc = func(configDir string) error {
 		notifyCalls++
+		if configDir != settings.ConfigDir {
+			t.Fatalf("notify configDir = %q, want %q", configDir, settings.ConfigDir)
+		}
 		return nil
 	}
 	handler := newTestHandler(t, settings)
@@ -1178,6 +1234,12 @@ func feedbackStateCount(t *testing.T, path string, state string) int {
 
 func contains(value string, needle string) bool {
 	return strings.Contains(value, needle)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
 }
 
 func writeFile(t *testing.T, path string, content string) {

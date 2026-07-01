@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yyngfive/scirssagent/internal/logging"
+	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 )
 
 type App struct {
@@ -338,7 +339,7 @@ func (a *App) maybeRunScheduledSync(now time.Time) {
 
 func scheduledTimeForDate(dailyTime string, now time.Time) (time.Time, bool) {
 	// 把 HH:MM 转成“今天的这个时刻”。
-	normalized := normalizeDailyTime(dailyTime)
+	normalized := appruntime.NormalizeDailyTime(dailyTime)
 	if normalized == "" {
 		return time.Time{}, false
 	}

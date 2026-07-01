@@ -1,22 +1,20 @@
 package trayapp
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	appconfig "github.com/yyngfive/scirssagent/internal/config"
+	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 )
 
 const (
 	appName            = "FeedMeDaily"
 	defaultHost        = "127.0.0.1"
 	defaultPort        = 8000
-	defaultDailyTime   = "10:00"
 	runtimeModeSource  = "source"
 	runtimeModeRelease = "release"
 )
@@ -41,12 +39,7 @@ type Layout struct {
 	ServerPort       int
 }
 
-type TraySettings struct {
-	ScheduleEnabled bool   `json:"schedule_enabled"`
-	DailyTime       string `json:"daily_time"`
-	LastRunDate     string `json:"last_run_date,omitempty"`
-	LaunchAtLogin   bool   `json:"launch_at_login"`
-}
+type TraySettings = appruntime.TraySchedulerSettings
 
 func ResolveLayout(root string) (Layout, error) {
 	// 根据 root 和运行模式，推导托盘、数据目录、图标和服务默认地址。
@@ -161,80 +154,6 @@ func defaultUserDataDir() string {
 }
 
 func LoadTraySettings(path string) (TraySettings, error) {
-	// 读取托盘自己的本地配置文件；缺失时返回默认设置。
-	settings := defaultTraySettings()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return settings, nil
-		}
-		return TraySettings{}, fmt.Errorf("read tray settings: %w", err)
-	}
-
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return TraySettings{}, fmt.Errorf("parse tray settings: %w", err)
-	}
-
-	if err := settings.Normalize(); err != nil {
-		return TraySettings{}, err
-	}
-	return settings, nil
-}
-
-func defaultTraySettings() TraySettings {
-	// 托盘配置默认值：不自动调度，默认时间 10:00，不开机自启。
-	return TraySettings{
-		ScheduleEnabled: false,
-		DailyTime:       defaultDailyTime,
-		LaunchAtLogin:   false,
-	}
-}
-
-func (s *TraySettings) Normalize() error {
-	// 把托盘配置中的时间字段规范成稳定格式。
-	if strings.TrimSpace(s.DailyTime) == "" {
-		s.DailyTime = defaultDailyTime
-	}
-	s.DailyTime = normalizeDailyTime(s.DailyTime)
-	if s.DailyTime == "" {
-		return errors.New("tray settings daily_time must be in HH:MM format")
-	}
-	return nil
-}
-
-func (s TraySettings) Save(path string) error {
-	// 用临时文件替换的方式保存 tray-settings.json。
-	if err := s.Normalize(); err != nil {
-		return err
-	}
-	payload, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode tray settings: %w", err)
-	}
-	tempPath := path + ".tmp"
-	if err := os.WriteFile(tempPath, payload, 0o644); err != nil {
-		return fmt.Errorf("write tray settings temp file: %w", err)
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		return fmt.Errorf("replace tray settings: %w", err)
-	}
-	return nil
-}
-
-func normalizeDailyTime(value string) string {
-	// 把时间输入规范化为 HH:MM，非法时返回空字符串。
-	clean := strings.TrimSpace(value)
-	parts := strings.Split(clean, ":")
-	if len(parts) != 2 {
-		return ""
-	}
-	hour, errHour := strconv.Atoi(parts[0])
-	minute, errMinute := strconv.Atoi(parts[1])
-	if errHour != nil || errMinute != nil {
-		return ""
-	}
-	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
-		return ""
-	}
-	return fmt.Sprintf("%02d:%02d", hour, minute)
+	// 托盘和 Web API 共用同一个 tray-settings.json 模型。
+	return appruntime.LoadTraySchedulerSettings(path)
 }

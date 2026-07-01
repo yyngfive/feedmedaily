@@ -123,9 +123,9 @@ var (
 		ok, _, err := procShellNotifyIconW.Call(uintptr(message), uintptr(unsafe.Pointer(data)))
 		return ok != 0, err
 	}
-	findTrayWindowCall = func() uintptr {
+	findTrayWindowCall = func(configDir string) uintptr {
 		className, _ := syscall.UTF16PtrFromString("FeedMeDailyTrayWindow")
-		title, _ := syscall.UTF16PtrFromString("FeedMeDaily Tray")
+		title, _ := syscall.UTF16PtrFromString(appruntime.TrayWindowTitle(configDir))
 		hwnd, _, _ := procFindWindowW.Call(uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(title)))
 		return hwnd
 	}
@@ -208,7 +208,7 @@ type windowsTray struct {
 
 func newWindowsTray(app *App) (*windowsTray, error) {
 	// 创建托盘实例，并通过命名互斥锁保证单实例运行。
-	mutexName, err := syscall.UTF16PtrFromString(appruntime.TrayMutexName)
+	mutexName, err := syscall.UTF16PtrFromString(appruntime.TrayMutexName(app.layout.ConfigDir))
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +262,7 @@ func (t *windowsTray) Run() error {
 		return fmt.Errorf("register window class: %v", err)
 	}
 
-	title, _ := syscall.UTF16PtrFromString("FeedMeDaily Tray")
+	title, _ := syscall.UTF16PtrFromString(appruntime.TrayWindowTitle(t.app.layout.ConfigDir))
 	hwnd, _, err := procCreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),

@@ -161,7 +161,10 @@ func TestWindowProcResumeSuspendRequestsRefresh(t *testing.T) {
 }
 
 func TestNotifySettingsChangedPostsReloadMessageToTrayWindow(t *testing.T) {
-	restoreFind := replaceFindTrayWindowCall(func() uintptr {
+	configDir := t.TempDir()
+	var seenConfigDir string
+	restoreFind := replaceFindTrayWindowCall(func(configDir string) uintptr {
+		seenConfigDir = configDir
 		return 606
 	})
 	defer restoreFind()
@@ -178,8 +181,11 @@ func TestNotifySettingsChangedPostsReloadMessageToTrayWindow(t *testing.T) {
 	})
 	defer restorePost()
 
-	if err := NotifySettingsChanged(); err != nil {
+	if err := NotifySettingsChanged(configDir); err != nil {
 		t.Fatal(err)
+	}
+	if seenConfigDir != configDir {
+		t.Fatalf("find configDir = %q, want %q", seenConfigDir, configDir)
 	}
 	wantPosted := []postedTrayMessage{{
 		hwnd:    606,
@@ -250,7 +256,7 @@ func replaceShellNotifyIconCall(next func(uint32, *notifyIconData) (bool, error)
 	}
 }
 
-func replaceFindTrayWindowCall(next func() uintptr) func() {
+func replaceFindTrayWindowCall(next func(string) uintptr) func() {
 	previous := findTrayWindowCall
 	findTrayWindowCall = next
 	return func() {

@@ -284,9 +284,9 @@ go run .\cmd\feedmedaily-tray --root .
 
 当前迁移分支的 scheduler 实际落在本地 tray 设置，而不是 Windows Task Scheduler。UI 和测试都应以 tray-local daily sync 为准。
 
-已知问题：
+联动检查：
 
-- Web UI 修改 scheduler 时间后，运行中的托盘仍可能继续显示或使用旧设置；后续需要继续排查 Web API 写入的 `tray-settings.json` 与托盘进程读取路径、窗口通知、实际运行二进制版本是否一致。
+- Web UI 修改 scheduler 时间后，右键托盘菜单应显示新时间；`/api/app/meta` 的 `tray_instance_id` 可用于确认 Web 与托盘是否对应同一个配置目录。
 - 托盘切换 daily sync 后，Web UI 依赖轮询刷新；如果 UI 未自动变化，先手动刷新页面确认磁盘状态，再继续排查前端轮询。
 
 ## 7. HTTP API 手工测试
