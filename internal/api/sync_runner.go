@@ -88,7 +88,7 @@ func runVerificationAwareSync(settings config.Settings, jobID string, callbackUR
 			callbacks.OnVerificationStarted(pending)
 		}
 
-		resumeResult := waitForVerification(pending, 20*time.Minute)
+		resumeResult := waitForVerification(pending, 10*time.Minute)
 		deletePendingVerification(pending.ID)
 		if strings.TrimSpace(resumeResult.Warning) != "" {
 			terminateVerifierProcess(settings, pending.ID)

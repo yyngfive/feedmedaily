@@ -8,6 +8,12 @@ The latest released version is `0.3.4`. The next planned release is `0.3.5`, so 
 
 Changes since `0.3.4`:
 
+### Fixed
+
+- Fixed the protected-feed verifier so ACS/other same-host feeds continue after a human Cloudflare check even when WebView2 lands on the first XML page without delivering the response body event.
+- Fixed intermittent ChemRxiv verifier stalls by retrying failed protected-feed navigations automatically instead of requiring repeated manual refreshes.
+- Reduced the protected-feed verification wait from 20 minutes to 10 minutes before skipping a feed and continuing the sync.
+
 ## 0.3.4 (2026-07-01)
 
 Changes since `0.3.3`:

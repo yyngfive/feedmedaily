@@ -39,6 +39,7 @@ const (
 	swShow        = 5
 	colorWindow   = 5
 	cwUseDefault  = ^uintptr(0x7fffffff)
+	maxNavRetries = 3
 	idcArrow      = 32512
 	hwndTopmost   = ^uintptr(0)
 	hwndNoTopmost = ^uintptr(1)
@@ -106,13 +107,15 @@ type verifierApp struct {
 	responseHandler *webResourceResponseReceivedHandler
 	contentHandlers []*responseContentHandler
 
-	mu               sync.Mutex
-	actions          []func()
-	remaining        []string
-	currentFeedURL   string
-	capturedFeeds    map[string]capturedFeed
-	completionPosted bool
-	needsUserPosted  bool
+	mu                sync.Mutex
+	actions           []func()
+	remaining         []string
+	currentFeedURL    string
+	capturedFeeds     map[string]capturedFeed
+	approvalRefresh   map[string]bool
+	navigationRetries map[string]int
+	completionPosted  bool
+	needsUserPosted   bool
 }
 
 var activeApp *verifierApp
@@ -137,10 +140,12 @@ func main() {
 
 func newVerifierApp(opts cliOptions) *verifierApp {
 	return &verifierApp{
-		opts:          opts,
-		log:           newVerifierLogger(opts),
-		remaining:     append([]string(nil), opts.FeedURLs...),
-		capturedFeeds: map[string]capturedFeed{},
+		opts:              opts,
+		log:               newVerifierLogger(opts),
+		remaining:         append([]string(nil), opts.FeedURLs...),
+		capturedFeeds:     map[string]capturedFeed{},
+		approvalRefresh:   map[string]bool{},
+		navigationRetries: map[string]int{},
 	}
 }
 
@@ -329,6 +334,7 @@ func (a *verifierApp) onNavigationCompleted(args uintptr) {
 		a.log.Printf("navigation completed feed=%s", a.currentFeedURL)
 		if a.needsUserPosted {
 			a.setStatus("Cloudflare approval received. FeedMeDaily is now collecting the remaining protected-feed XML documents.")
+			a.refreshAfterApproval(a.currentFeedURL)
 		} else {
 			a.setStatus("Checking whether this protected feed now resolves to XML.")
 		}
@@ -336,6 +342,73 @@ func (a *verifierApp) onNavigationCompleted(args uintptr) {
 	}
 	a.log.Printf("navigation failed feed=%s", a.currentFeedURL)
 	a.setStatus("The page has not fully loaded yet. If Cloudflare appears, complete the human verification and keep the window open.")
+	a.retryNavigation(a.currentFeedURL)
+}
+
+func (a *verifierApp) refreshAfterApproval(feedURL string) {
+	if strings.TrimSpace(feedURL) == "" {
+		return
+	}
+	a.mu.Lock()
+	if a.completionPosted || a.approvalRefresh[feedURL] {
+		a.mu.Unlock()
+		return
+	}
+	if _, ok := a.capturedFeeds[feedURL]; ok {
+		a.mu.Unlock()
+		return
+	}
+	a.approvalRefresh[feedURL] = true
+	a.mu.Unlock()
+
+	time.AfterFunc(900*time.Millisecond, func() {
+		a.enqueue(func() {
+			a.mu.Lock()
+			_, captured := a.capturedFeeds[feedURL]
+			shouldRefresh := !a.completionPosted && !captured && a.currentFeedURL == feedURL
+			a.mu.Unlock()
+			if !shouldRefresh {
+				return
+			}
+			a.log.Printf("refresh after approval feed=%s", feedURL)
+			a.chromium.Navigate(feedURL)
+		})
+	})
+}
+
+func (a *verifierApp) retryNavigation(feedURL string) {
+	if strings.TrimSpace(feedURL) == "" {
+		return
+	}
+	a.mu.Lock()
+	if a.completionPosted {
+		a.mu.Unlock()
+		return
+	}
+	if _, ok := a.capturedFeeds[feedURL]; ok {
+		a.mu.Unlock()
+		return
+	}
+	a.navigationRetries[feedURL]++
+	attempt := a.navigationRetries[feedURL]
+	a.mu.Unlock()
+	if attempt > maxNavRetries {
+		a.log.Printf("navigation retry limit reached feed=%s attempts=%d", feedURL, attempt-1)
+		return
+	}
+	time.AfterFunc(time.Duration(attempt*4)*time.Second, func() {
+		a.enqueue(func() {
+			a.mu.Lock()
+			_, captured := a.capturedFeeds[feedURL]
+			shouldRetry := !a.completionPosted && !captured && a.currentFeedURL == feedURL
+			a.mu.Unlock()
+			if !shouldRetry {
+				return
+			}
+			a.log.Printf("retry navigation feed=%s attempt=%d/%d", feedURL, attempt, maxNavRetries)
+			a.chromium.Navigate(feedURL)
+		})
+	})
 }
 
 func (a *verifierApp) onResponseReceived(args uintptr) {
