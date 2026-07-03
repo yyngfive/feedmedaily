@@ -1156,10 +1156,11 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 	}
 	job := launchVerificationAwareSyncJob(
 		s.settings,
-		func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error) {
+		func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error) {
 			summary, err := runSyncFunc(s.settings, jobruntime.RunOptions{
 				FeedBodyOverrides: overrides,
 				SkippedFeeds:      skippedFeeds,
+				VerifyFeedHost:    verifyHost,
 			}, progress)
 			if err != nil {
 				return nil, err
@@ -1329,7 +1330,7 @@ func (s *Server) handleFeedVerificationComplete(w http.ResponseWriter, r *http.R
 	if strings.TrimSpace(result.ContentType) != "" {
 		logData["content_type"] = result.ContentType
 	}
-	logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification received. Re-running RSS fetch with verified XML.", "", logData)
+	logJobEvent(s.settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification received. Continuing RSS fetch with verified XML.", "", logData)
 	select {
 	case pending.Result <- result:
 	default:

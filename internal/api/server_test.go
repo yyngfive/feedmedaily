@@ -1302,17 +1302,16 @@ func TestAdminRunWaitsForCloudflareVerificationAndResumes(t *testing.T) {
 	runCalls := 0
 	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, progress jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
 		runCalls++
-		if len(opts.FeedBodyOverrides) == 0 {
-			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
-				Requests: []feeds.VerificationRequest{{
-					URL:    "https://chemrxiv.org/action/showFeed?type=latest&format=rss",
-					Target: "cloudflare",
-					Reason: "challenge",
-				}},
-			}
+		if opts.VerifyFeedHost == nil {
+			t.Fatal("expected host verification callback")
 		}
-		if string(opts.FeedBodyOverrides["https://chemrxiv.org/action/showFeed?type=latest&format=rss"]) != "<rdf:RDF />" {
-			t.Fatalf("unexpected override body: %#v", opts.FeedBodyOverrides)
+		verification := opts.VerifyFeedHost([]feeds.VerificationRequest{{
+			URL:    "https://chemrxiv.org/action/showFeed?type=latest&format=rss",
+			Target: "cloudflare",
+			Reason: "challenge",
+		}})
+		if string(verification.FeedBodies["https://chemrxiv.org/action/showFeed?type=latest&format=rss"]) != "<rdf:RDF />" {
+			t.Fatalf("unexpected verification body: %#v", verification.FeedBodies)
 		}
 		return jobruntime.RunSummary{
 			Fetched:    1,
@@ -1374,7 +1373,7 @@ func TestAdminRunWaitsForCloudflareVerificationAndResumes(t *testing.T) {
 	if !ok || completedJob.Status != "completed" {
 		t.Fatalf("unexpected completed job: %#v", completedJob)
 	}
-	if runCalls != 2 {
+	if runCalls != 1 {
 		t.Fatalf("runCalls = %d", runCalls)
 	}
 }
@@ -1390,27 +1389,25 @@ func TestAdminRunCanFallbackToBrowserManualXMLAfterVerifierAbort(t *testing.T) {
 		return nil
 	}
 	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
-		if string(opts.FeedBodyOverrides["https://www.cell.com/cell/current.rss"]) == "<rss><channel><title>Cell</title><item><title>Paper</title><link>https://example.com/paper</link></item></channel></rss>" {
-			return jobruntime.RunSummary{
-				Fetched:    1,
-				Inserted:   1,
-				Updated:    0,
-				Classified: 1,
-				Errors:     nil,
-			}, nil
+		if opts.VerifyFeedHost == nil {
+			t.Fatal("expected host verification callback")
 		}
-		if len(opts.FeedBodyOverrides) == 0 {
-			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
-				Requests: []feeds.VerificationRequest{{
-					URL:     "https://www.cell.com/cell/current.rss",
-					Target:  "cloudflare",
-					Reason:  "challenge",
-					Journal: "Cell",
-				}},
-			}
+		verification := opts.VerifyFeedHost([]feeds.VerificationRequest{{
+			URL:     "https://www.cell.com/cell/current.rss",
+			Target:  "cloudflare",
+			Reason:  "challenge",
+			Journal: "Cell",
+		}})
+		if string(verification.FeedBodies["https://www.cell.com/cell/current.rss"]) != "<rss><channel><title>Cell</title><item><title>Paper</title><link>https://example.com/paper</link></item></channel></rss>" {
+			t.Fatalf("unexpected verification result: %#v", verification)
 		}
-		t.Fatalf("unexpected resumed run: %#v", opts.FeedBodyOverrides)
-		return jobruntime.RunSummary{}, nil
+		return jobruntime.RunSummary{
+			Fetched:    1,
+			Inserted:   1,
+			Updated:    0,
+			Classified: 1,
+			Errors:     nil,
+		}, nil
 	}
 
 	startVerificationFlowFunc = func(_ config.Settings, pending *pendingVerification) error {
@@ -1496,16 +1493,15 @@ func TestAdminRunReusesHostScopedVerificationForMultipleFeeds(t *testing.T) {
 	runCalls := 0
 	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
 		runCalls++
-		if len(opts.FeedBodyOverrides) == 0 {
-			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
-				Requests: []feeds.VerificationRequest{
-					{URL: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=jacsat", Target: "cloudflare", Reason: "challenge", Journal: "JACS"},
-					{URL: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ancham", Target: "cloudflare", Reason: "challenge", Journal: "Analytical Chemistry"},
-				},
-			}
+		if opts.VerifyFeedHost == nil {
+			t.Fatal("expected host verification callback")
 		}
-		if len(opts.FeedBodyOverrides) != 2 {
-			t.Fatalf("expected two overridden ACS feeds, got %#v", opts.FeedBodyOverrides)
+		verification := opts.VerifyFeedHost([]feeds.VerificationRequest{
+			{URL: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=jacsat", Target: "cloudflare", Reason: "challenge", Journal: "JACS"},
+			{URL: "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ancham", Target: "cloudflare", Reason: "challenge", Journal: "Analytical Chemistry"},
+		})
+		if len(verification.FeedBodies) != 2 {
+			t.Fatalf("expected two verified ACS feeds, got %#v", verification.FeedBodies)
 		}
 		return jobruntime.RunSummary{Fetched: 2, Inserted: 2, Classified: 2}, nil
 	}
@@ -1541,7 +1537,7 @@ func TestAdminRunReusesHostScopedVerificationForMultipleFeeds(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForJobCompletion(t, runPayload.Job.ID)
-	if runCalls != 2 {
+	if runCalls != 1 {
 		t.Fatalf("runCalls = %d", runCalls)
 	}
 }
@@ -1552,17 +1548,16 @@ func TestVerificationCompleteRequiresCallbackXML(t *testing.T) {
 	defer restore()
 
 	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
-		if len(opts.FeedBodyOverrides) == 0 {
-			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
-				Requests: []feeds.VerificationRequest{{
-					URL:     "https://www.cell.com/cell/current.rss",
-					Target:  "cloudflare",
-					Reason:  "challenge",
-					Journal: "Cell",
-				}},
-			}
+		if opts.VerifyFeedHost == nil {
+			t.Fatal("expected host verification callback")
 		}
-		t.Fatalf("did not expect resumed run without callback data")
+		verification := opts.VerifyFeedHost([]feeds.VerificationRequest{{
+			URL:     "https://www.cell.com/cell/current.rss",
+			Target:  "cloudflare",
+			Reason:  "challenge",
+			Journal: "Cell",
+		}})
+		t.Fatalf("did not expect verification to finish: %#v", verification)
 		return jobruntime.RunSummary{}, nil
 	}
 	startVerificationFlowFunc = func(_ config.Settings, _ *pendingVerification) error {
@@ -1609,17 +1604,16 @@ func TestVerificationManualSubmitRejectsEmptyXML(t *testing.T) {
 	defer restore()
 
 	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
-		if len(opts.FeedBodyOverrides) == 0 {
-			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
-				Requests: []feeds.VerificationRequest{{
-					URL:     "https://www.cell.com/cell/current.rss",
-					Target:  "cloudflare",
-					Reason:  "challenge",
-					Journal: "Cell",
-				}},
-			}
+		if opts.VerifyFeedHost == nil {
+			t.Fatal("expected host verification callback")
 		}
-		t.Fatalf("did not expect resumed run")
+		verification := opts.VerifyFeedHost([]feeds.VerificationRequest{{
+			URL:     "https://www.cell.com/cell/current.rss",
+			Target:  "cloudflare",
+			Reason:  "challenge",
+			Journal: "Cell",
+		}})
+		t.Fatalf("did not expect verification to finish: %#v", verification)
 		return jobruntime.RunSummary{}, nil
 	}
 	startVerificationFlowFunc = func(_ config.Settings, _ *pendingVerification) error {
@@ -1658,17 +1652,16 @@ func TestVerificationManualSubmitRejectsMalformedXML(t *testing.T) {
 	defer restore()
 
 	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
-		if len(opts.FeedBodyOverrides) == 0 {
-			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
-				Requests: []feeds.VerificationRequest{{
-					URL:     "https://www.cell.com/cell/current.rss",
-					Target:  "cloudflare",
-					Reason:  "challenge",
-					Journal: "Cell",
-				}},
-			}
+		if opts.VerifyFeedHost == nil {
+			t.Fatal("expected host verification callback")
 		}
-		t.Fatalf("did not expect resumed run")
+		verification := opts.VerifyFeedHost([]feeds.VerificationRequest{{
+			URL:     "https://www.cell.com/cell/current.rss",
+			Target:  "cloudflare",
+			Reason:  "challenge",
+			Journal: "Cell",
+		}})
+		t.Fatalf("did not expect verification to finish: %#v", verification)
 		return jobruntime.RunSummary{}, nil
 	}
 	startVerificationFlowFunc = func(_ config.Settings, _ *pendingVerification) error {
@@ -1704,17 +1697,16 @@ func TestVerificationManualSubmitRejectsWrongFeedURL(t *testing.T) {
 	defer restore()
 
 	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
-		if len(opts.FeedBodyOverrides) == 0 {
-			return jobruntime.RunSummary{}, &jobruntime.VerificationRequiredError{
-				Requests: []feeds.VerificationRequest{{
-					URL:     "https://www.cell.com/cell/current.rss",
-					Target:  "cloudflare",
-					Reason:  "challenge",
-					Journal: "Cell",
-				}},
-			}
+		if opts.VerifyFeedHost == nil {
+			t.Fatal("expected host verification callback")
 		}
-		t.Fatalf("did not expect resumed run")
+		verification := opts.VerifyFeedHost([]feeds.VerificationRequest{{
+			URL:     "https://www.cell.com/cell/current.rss",
+			Target:  "cloudflare",
+			Reason:  "challenge",
+			Journal: "Cell",
+		}})
+		t.Fatalf("did not expect verification to finish: %#v", verification)
 		return jobruntime.RunSummary{}, nil
 	}
 	startVerificationFlowFunc = func(_ config.Settings, _ *pendingVerification) error {

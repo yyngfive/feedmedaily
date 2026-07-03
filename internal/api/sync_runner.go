@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,7 +10,7 @@ import (
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
 )
 
-type syncExecuteFunc func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error)
+type syncExecuteFunc func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error)
 
 type verificationAwareSyncCallbacks struct {
 	OnWaiting                 func(*pendingVerification)
@@ -53,63 +52,57 @@ func runVerificationAwareSync(settings config.Settings, jobID string, callbackUR
 	if strings.TrimSpace(jobID) == "" {
 		jobID = "sync-" + nextJobID()
 	}
-
-	for {
-		result, err := run(progress, overrideBodies, skippedFeeds)
-		if err == nil {
-			return result, nil
-		}
-
-		var verificationErr *jobruntime.VerificationRequiredError
-		if !errors.As(err, &verificationErr) || len(verificationErr.Requests) == 0 {
-			return nil, err
-		}
-
-		groupedRequests := groupVerificationRequests(verificationErr.Requests)
-		pending := storePendingVerificationWithCallback(jobID, groupedRequests[0], groupedRequests, callbackURL)
-		session, sessionErr := verificationHostSessionForHost(settings, pending.Host)
-		if sessionErr == nil && strings.TrimSpace(session.State) != "" {
-			pending.SessionState = session.State
-		}
-		if callbacks.OnWaiting != nil && pending.SessionState != verificationSessionStateVerified {
-			callbacks.OnWaiting(pending)
-		}
-
-		if err := startVerificationFlowFunc(settings, pending); err != nil {
-			deletePendingVerification(pending.ID)
-			skippedFeeds[pending.FeedURL] = err.Error()
-			if callbacks.OnVerificationStartFailed != nil {
-				callbacks.OnVerificationStartFailed(pending, err)
-			}
-			continue
-		}
-
-		if callbacks.OnVerificationStarted != nil {
-			callbacks.OnVerificationStarted(pending)
-		}
-
-		resumeResult := waitForVerification(pending, 10*time.Minute)
-		deletePendingVerification(pending.ID)
-		if strings.TrimSpace(resumeResult.Warning) != "" {
-			terminateVerifierProcess(settings, pending.ID)
-			skippedFeeds[pending.FeedURL] = resumeResult.Warning
-			if callbacks.OnVerificationSkipped != nil {
-				callbacks.OnVerificationSkipped(pending, resumeResult)
-			}
-			continue
-		}
-
-		if len(resumeResult.FeedBodies) > 0 {
-			for feedURL, body := range resumeResult.FeedBodies {
-				overrideBodies[feedURL] = body
-			}
-		} else {
-			overrideBodies[pending.FeedURL] = resumeResult.FeedXML
-		}
-		if callbacks.OnVerificationResumed != nil {
-			callbacks.OnVerificationResumed(pending)
-		}
+	verifyHost := func(requests []feeds.VerificationRequest) feeds.VerificationResult {
+		return verifyFeedHost(settings, jobID, callbackURL, requests, callbacks)
 	}
+
+	return run(progress, overrideBodies, skippedFeeds, verifyHost)
+}
+
+func verifyFeedHost(settings config.Settings, jobID string, callbackURL string, requests []feeds.VerificationRequest, callbacks verificationAwareSyncCallbacks) feeds.VerificationResult {
+	groupedRequests := groupVerificationRequests(requests)
+	if len(groupedRequests) == 0 {
+		return feeds.VerificationResult{Warning: "manual verification required but no feed URL was provided"}
+	}
+	pending := storePendingVerificationWithCallback(jobID, groupedRequests[0], groupedRequests, callbackURL)
+	session, sessionErr := verificationHostSessionForHost(settings, pending.Host)
+	if sessionErr == nil && strings.TrimSpace(session.State) != "" {
+		pending.SessionState = session.State
+	}
+	if callbacks.OnWaiting != nil && pending.SessionState != verificationSessionStateVerified {
+		callbacks.OnWaiting(pending)
+	}
+
+	if err := startVerificationFlowFunc(settings, pending); err != nil {
+		deletePendingVerification(pending.ID)
+		if callbacks.OnVerificationStartFailed != nil {
+			callbacks.OnVerificationStartFailed(pending, err)
+		}
+		return feeds.VerificationResult{Warning: err.Error()}
+	}
+
+	if callbacks.OnVerificationStarted != nil {
+		callbacks.OnVerificationStarted(pending)
+	}
+
+	resumeResult := waitForVerification(pending, 10*time.Minute)
+	deletePendingVerification(pending.ID)
+	if strings.TrimSpace(resumeResult.Warning) != "" {
+		terminateVerifierProcess(settings, pending.ID)
+		if callbacks.OnVerificationSkipped != nil {
+			callbacks.OnVerificationSkipped(pending, resumeResult)
+		}
+		return feeds.VerificationResult{Warning: resumeResult.Warning}
+	}
+
+	feedBodies := cloneFeedBodies(resumeResult.FeedBodies)
+	if len(feedBodies) == 0 && len(resumeResult.FeedXML) > 0 {
+		feedBodies = map[string][]byte{pending.FeedURL: append([]byte(nil), resumeResult.FeedXML...)}
+	}
+	if callbacks.OnVerificationResumed != nil {
+		callbacks.OnVerificationResumed(pending)
+	}
+	return feeds.VerificationResult{FeedBodies: feedBodies}
 }
 
 func processVerificationCallback(settings config.Settings, payload verificationCallbackPayload) (verificationCallbackAck, error) {
@@ -246,7 +239,7 @@ func processVerificationCallback(settings config.Settings, payload verificationC
 			logData["verification_session_state"] = session.State
 		}
 		if result.Status == "success" {
-			logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification received. Re-running RSS fetch with verified XML.", "", logData)
+			logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_completed", "pipeline.feeds.fetching", "Verification received. Continuing RSS fetch with verified XML.", "", logData)
 			go func(logsDir string, jobID string, verificationID string, feedURL string, journal string) {
 				time.Sleep(2 * time.Second)
 				process, ok := snapshotVerifierProcess(verificationID)

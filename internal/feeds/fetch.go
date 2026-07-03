@@ -7,6 +7,7 @@ import (
 	"html"
 	"net/http"
 	neturl "net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,12 +16,15 @@ import (
 )
 
 type FetchProgressFunc func(current int, total int, label string)
+type VerifyHostFunc func(requests []VerificationRequest) VerificationResult
 
 type FetchOptions struct {
 	MaxPapers      int
 	OverrideBodies map[string][]byte
+	BodyCache      map[string][]byte
 	SkippedFeeds   map[string]string
 	Progress       FetchProgressFunc
+	VerifyHost     VerifyHostFunc
 }
 
 type FetchResult struct {
@@ -41,6 +45,11 @@ type VerificationRequest struct {
 	Target  string `json:"target"`
 	Reason  string `json:"reason"`
 	Journal string `json:"journal,omitempty"`
+}
+
+type VerificationResult struct {
+	FeedBodies map[string][]byte
+	Warning    string
 }
 
 type FeedVerificationRequiredError struct {
@@ -210,6 +219,24 @@ func feedOverrideBody(url string, overrides map[string][]byte) ([]byte, bool) {
 	return body, true
 }
 
+func feedCachedBody(url string, cache map[string][]byte) ([]byte, bool) {
+	if len(cache) == 0 {
+		return nil, false
+	}
+	body, ok := cache[url]
+	if !ok || len(body) == 0 {
+		return nil, false
+	}
+	return body, true
+}
+
+func rememberFeedBody(url string, cache map[string][]byte, body []byte) {
+	if cache == nil || len(body) == 0 {
+		return
+	}
+	cache[url] = append([]byte(nil), body...)
+}
+
 func skippedFeedReason(url string, skipped map[string]string) (string, bool) {
 	if len(skipped) == 0 {
 		return "", false
@@ -221,12 +248,34 @@ func skippedFeedReason(url string, skipped map[string]string) (string, bool) {
 	return strings.TrimSpace(reason), true
 }
 
+func sortSubscriptionsByHost(subscriptions []Subscription) []Subscription {
+	sorted := append([]Subscription(nil), subscriptions...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		left := feedHostKey(sorted[i].URL)
+		right := feedHostKey(sorted[j].URL)
+		if left == right {
+			return false
+		}
+		return left < right
+	})
+	return sorted
+}
+
+func feedHostKey(rawURL string) string {
+	parsed, err := neturl.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+}
+
 // FetchAll reads configured feeds, fetches them, and normalizes entries into paper candidates.
 func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 	subscriptions, err := ReadSubscriptions(feedsPath)
 	if err != nil {
 		return FetchResult{}, err
 	}
+	subscriptions = sortSubscriptionsByHost(subscriptions)
 	totalFeeds := len(subscriptions)
 	if opts.Progress != nil {
 		opts.Progress(0, totalFeeds, "")
@@ -244,7 +293,8 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 		FeedURLs:             make([]string, 0, len(subscriptions)),
 		VerificationRequests: []VerificationRequest{},
 	}
-	for index, subscription := range subscriptions {
+	for index := 0; index < len(subscriptions); index++ {
+		subscription := subscriptions[index]
 		result.FeedURLs = append(result.FeedURLs, subscription.URL)
 		label := fetchProgressLabel(subscription.Journal, subscription.URL)
 		if opts.Progress != nil {
@@ -254,10 +304,22 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", subscription.URL, reason))
 			continue
 		}
-		papers, err := fetchFeed(subscription.URL, opts)
+		fetched, err := fetchFeed(subscription.URL, opts)
 		if err != nil {
 			var verificationErr *FeedVerificationRequiredError
 			if errors.As(err, &verificationErr) {
+				requests, nextIndex := hostVerificationRequests(subscriptions, index, verificationErr, opts)
+				if opts.VerifyHost != nil {
+					result.FeedURLs = appendResultFeedURLs(result.FeedURLs, subscriptions[index+1:nextIndex])
+					for progressIndex := index + 1; progressIndex < nextIndex; progressIndex++ {
+						if opts.Progress != nil {
+							opts.Progress(progressIndex+1, totalFeeds, fetchProgressLabel(subscriptions[progressIndex].Journal, subscriptions[progressIndex].URL))
+						}
+					}
+					result.Papers = append(result.Papers, resolveHostVerification(requests, opts, &result)...)
+					index = nextIndex - 1
+					continue
+				}
 				result.VerificationRequests = append(result.VerificationRequests, VerificationRequest{
 					URL:     subscription.URL,
 					Target:  verificationErr.Target,
@@ -269,7 +331,8 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", subscription.URL, err))
 			continue
 		}
-		result.Papers = append(result.Papers, papers...)
+		rememberFeedBody(subscription.URL, opts.BodyCache, fetched.Body)
+		result.Papers = append(result.Papers, fetched.Papers...)
 	}
 	if opts.MaxPapers > 0 && len(result.Papers) > opts.MaxPapers {
 		_, _ = logging.WriteDefault(logging.Event{
@@ -294,6 +357,77 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 	return result, nil
 }
 
+func appendResultFeedURLs(existing []string, subscriptions []Subscription) []string {
+	for _, subscription := range subscriptions {
+		existing = append(existing, subscription.URL)
+	}
+	return existing
+}
+
+func hostVerificationRequests(subscriptions []Subscription, start int, verificationErr *FeedVerificationRequiredError, opts FetchOptions) ([]VerificationRequest, int) {
+	if start >= len(subscriptions) {
+		return nil, start
+	}
+	host := feedHostKey(subscriptions[start].URL)
+	end := start
+	for end < len(subscriptions) && feedHostKey(subscriptions[end].URL) == host {
+		end++
+	}
+	requests := make([]VerificationRequest, 0, end-start)
+	for _, subscription := range subscriptions[start:end] {
+		if _, ok := skippedFeedReason(subscription.URL, opts.SkippedFeeds); ok {
+			continue
+		}
+		if _, ok := feedOverrideBody(subscription.URL, opts.OverrideBodies); ok {
+			continue
+		}
+		if _, ok := feedCachedBody(subscription.URL, opts.BodyCache); ok {
+			continue
+		}
+		requests = append(requests, VerificationRequest{
+			URL:     subscription.URL,
+			Target:  verificationErr.Target,
+			Reason:  verificationErr.Reason,
+			Journal: subscription.Journal,
+		})
+	}
+	if len(requests) == 0 {
+		requests = append(requests, VerificationRequest{
+			URL:     subscriptions[start].URL,
+			Target:  verificationErr.Target,
+			Reason:  verificationErr.Reason,
+			Journal: subscriptions[start].Journal,
+		})
+	}
+	return requests, end
+}
+
+func resolveHostVerification(requests []VerificationRequest, opts FetchOptions, result *FetchResult) []store.Paper {
+	verification := opts.VerifyHost(requests)
+	if strings.TrimSpace(verification.Warning) != "" {
+		for _, request := range requests {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", request.URL, strings.TrimSpace(verification.Warning)))
+		}
+		return nil
+	}
+	papers := []store.Paper{}
+	for _, request := range requests {
+		body, ok := verification.FeedBodies[request.URL]
+		if !ok || len(body) == 0 {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: verification did not return feed XML", request.URL))
+			continue
+		}
+		parsed, err := parseFeedBody(request.URL, 0, body)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", request.URL, err))
+			continue
+		}
+		rememberFeedBody(request.URL, opts.BodyCache, body)
+		papers = append(papers, parsed...)
+	}
+	return papers
+}
+
 func fetchProgressLabel(journal string, rawURL string) string {
 	if strings.TrimSpace(journal) != "" {
 		return strings.TrimSpace(journal)
@@ -305,9 +439,19 @@ func fetchProgressLabel(journal string, rawURL string) string {
 	return strings.TrimSpace(rawURL)
 }
 
-func fetchFeed(url string, opts FetchOptions) ([]store.Paper, error) {
+type fetchedFeed struct {
+	Papers []store.Paper
+	Body   []byte
+}
+
+func fetchFeed(url string, opts FetchOptions) (fetchedFeed, error) {
 	if body, ok := feedOverrideBody(url, opts.OverrideBodies); ok {
-		return parseFeedBody(url, 0, body)
+		papers, err := parseFeedBody(url, 0, body)
+		return fetchedFeed{Papers: papers, Body: body}, err
+	}
+	if body, ok := feedCachedBody(url, opts.BodyCache); ok {
+		papers, err := parseFeedBody(url, 0, body)
+		return fetchedFeed{Papers: papers, Body: body}, err
 	}
 	attemptCount := len(fetchRetryBackoffs) + 1
 	attempted := 0
@@ -316,9 +460,9 @@ func fetchFeed(url string, opts FetchOptions) ([]store.Paper, error) {
 	var lastErr error
 	for attempt := 1; attempt <= attemptCount; attempt++ {
 		attempted = attempt
-		papers, statusCode, challenge, retryable, err := fetchFeedAttempt(url, attempt)
+		fetched, statusCode, challenge, retryable, err := fetchFeedAttempt(url, attempt)
 		if err == nil {
-			return papers, nil
+			return fetched, nil
 		}
 		lastStatusCode = statusCode
 		lastChallenge = challenge
@@ -345,13 +489,13 @@ func fetchFeed(url string, opts FetchOptions) ([]store.Paper, error) {
 			"challenge_suspected": lastChallenge,
 		},
 	})
-	return nil, lastErr
+	return fetchedFeed{}, lastErr
 }
 
-func fetchFeedAttempt(url string, attempt int) ([]store.Paper, int, bool, bool, error) {
+func fetchFeedAttempt(url string, attempt int) (fetchedFeed, int, bool, bool, error) {
 	request, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return nil, 0, false, false, err
+		return fetchedFeed{}, 0, false, false, err
 	}
 	applyFeedRequestHeaders(request)
 	started := time.Now()
@@ -370,7 +514,7 @@ func fetchFeedAttempt(url string, attempt int) ([]store.Paper, int, bool, bool, 
 				"request_method": http.MethodGet,
 			},
 		})
-		return nil, 0, false, true, err
+		return fetchedFeed{}, 0, false, true, err
 	}
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "info",
@@ -387,18 +531,18 @@ func fetchFeedAttempt(url string, attempt int) ([]store.Paper, int, bool, bool, 
 	})
 	body, err := ioReadAll(response)
 	if err != nil {
-		return nil, response.StatusCode, false, true, err
+		return fetchedFeed{}, response.StatusCode, false, true, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		retryable := isRetryableFeedStatus(response.StatusCode)
 		if shouldRequireFeedVerification(url, response, false) {
-			return nil, response.StatusCode, false, retryable, &FeedVerificationRequiredError{
+			return fetchedFeed{}, response.StatusCode, false, retryable, &FeedVerificationRequiredError{
 				URL:    url,
 				Target: verificationTargetForURL(url),
 				Reason: "challenge",
 			}
 		}
-		return nil, response.StatusCode, false, retryable, fmt.Errorf("request failed with %s", response.Status)
+		return fetchedFeed{}, response.StatusCode, false, retryable, fmt.Errorf("request failed with %s", response.Status)
 	}
 	if challenge := looksLikeChallengeResponse(body); challenge {
 		_, _ = logging.WriteDefault(logging.Event{
@@ -414,17 +558,17 @@ func fetchFeedAttempt(url string, attempt int) ([]store.Paper, int, bool, bool, 
 			},
 		})
 		if shouldRequireFeedVerification(url, response, true) {
-			return nil, response.StatusCode, true, true, &FeedVerificationRequiredError{
+			return fetchedFeed{}, response.StatusCode, true, true, &FeedVerificationRequiredError{
 				URL:    url,
 				Target: verificationTargetForURL(url),
 				Reason: "challenge",
 			}
 		}
-		return nil, response.StatusCode, true, true, fmt.Errorf("feed returned challenge-like HTML content")
+		return fetchedFeed{}, response.StatusCode, true, true, fmt.Errorf("feed returned challenge-like HTML content")
 	}
 	papers, err := parseFeedBody(url, attempt, body)
 	if err != nil {
-		return nil, response.StatusCode, false, false, err
+		return fetchedFeed{}, response.StatusCode, false, false, err
 	}
-	return papers, response.StatusCode, false, false, nil
+	return fetchedFeed{Papers: papers, Body: body}, response.StatusCode, false, false, nil
 }

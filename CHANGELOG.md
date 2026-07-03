@@ -8,8 +8,13 @@ The latest released version is `0.3.4`. The next planned release is `0.3.5`, so 
 
 Changes since `0.3.4`:
 
+### Changed
+
+- Reworked the Settings drawer into Dashboard, Feeds, Profile, Model, and App pages so sync jobs, feed editing, profile review, model credentials, and app/runtime settings are no longer crowded into one config surface.
+
 ### Fixed
 
+- Changed protected-feed sync recovery to continue inside the same feed-fetch pass after host verification, so verified publishers no longer make the progress loop restart from feed 1 or refetch already completed feeds.
 - Fixed the protected-feed verifier so ACS/other same-host feeds continue after a human Cloudflare check even when WebView2 lands on the first XML page without delivering the response body event.
 - Fixed intermittent ChemRxiv verifier stalls by retrying failed protected-feed navigations automatically instead of requiring repeated manual refreshes.
 - Reduced the protected-feed verification wait from 20 minutes to 10 minutes before skipping a feed and continuing the sync.

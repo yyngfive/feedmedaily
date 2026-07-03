@@ -67,14 +67,14 @@ Cloudflare-protected or challenge-gated feeds use a Windows-first verification a
 - protected-feed requests are grouped by `verification_host`, so one verifier session can walk multiple feeds on the same host without reopening a fresh challenge flow for each feed
 - once the protected page resolves to RSS/Atom/RDF content, the verifier POSTs the captured XML back to `/api/feeds/verification/callback`
 - if the native helper cannot capture XML quickly, it posts a `needs_user` callback so the admin UI stays in explicit verification mode instead of appearing stuck on the last fetch item
-- the backend resumes the paused job by injecting that XML into the normal Go feed parser
+- the backend resumes the paused fetch loop by injecting that XML into the normal Go feed parser without restarting already completed feeds
 - if the verifier exits without captured XML, the job stays in `waiting_for_user` and the admin panel can switch that same verification into a system-browser fallback via `/api/feeds/verification/browser`
 - browser fallback does not try to reuse browser cookies automatically; instead the user completes the challenge in their normal browser, copies the final raw RSS/Atom/RDF source, and submits it to `/api/feeds/verification/manual-submit`
 - successful manual submissions are validated through the same feed parser path as normal fetches before the paused sync resumes
 
 The backend also persists host-level verification session metadata in `data/verification-sessions.json`, including verifier kind, current session state, and the latest success/failure timestamps. That lets later sync runs try verified hosts optimistically first, then fall back to `needs_reverify` when a site challenges again.
 
-The Go native helper in `cmd/feedmedaily-protected-verifier/` now serves as the default path for all protected hosts, not just ACS. The product treats verification as a host-scoped session rather than a single-feed callback, so the same verified WebView2 session can capture multiple same-host RSS responses before the backend resumes the paused sync with those XML bodies injected as fetch overrides. Helper diagnostics are written under `logs/protected-verifier/`, and the backend terminates a verifier process if its pending verification request times out so stale helper windows do not accumulate. Release builds package this helper as `{app}\FeedMeDailyProtectedVerifier\FeedMeDailyProtectedVerifier.exe`; source mode builds the same Go helper into `.tmp/runtime-bin/FeedMeDailyProtectedVerifier/FeedMeDailyProtectedVerifier.exe`.
+The Go native helper in `cmd/feedmedaily-protected-verifier/` now serves as the default path for all protected hosts, not just ACS. The product treats verification as a host-scoped session rather than a single-feed callback, so the same verified WebView2 session can capture multiple same-host RSS responses and return those XML bodies to the active fetch loop. Feed fetching is internally sorted by host for execution only, preserving the user's saved feed list while allowing one host verification to cover the remaining same-host feeds; successful feeds are kept in memory for that sync and are not refetched after verification resumes. Helper diagnostics are written under `logs/protected-verifier/`, and the backend terminates a verifier process if its pending verification request times out so stale helper windows do not accumulate. Release builds package this helper as `{app}\FeedMeDailyProtectedVerifier\FeedMeDailyProtectedVerifier.exe`; source mode builds the same Go helper into `.tmp/runtime-bin/FeedMeDailyProtectedVerifier/FeedMeDailyProtectedVerifier.exe`.
 
 Current limitation: even with a persistent verifier profile, some publisher challenges may still trust the user's full system browser more than an embedded WebView2 surface. The manual browser/XML fallback therefore remains part of the supported recovery path for protected feeds.
 
@@ -146,8 +146,8 @@ Behavioral baseline:
 - the default review view is `Unread + Last 30 days`
 - paper cards stay summary-only
 - paper actions live in the detail panel
-- admin owns configuration editing, feed editing, manual jobs, feedback review, and profile proposal review
-- manual update checks are exposed both in `Settings -> Update check` and in the footer status bar, and both routes trigger the same force-refresh update request
+- the settings drawer is split into `Dashboard`, `Feeds`, `Profile`, `Model`, and `App`: Dashboard owns sync/reclassify/protected-feed interruption controls, Feeds owns RSS subscription editing, Profile owns profile/proposal/feedback review, Model owns classifier/profile model settings, and App owns Zotero, local paths, scheduling, update checks, and runtime metadata
+- manual update checks are exposed both in `Settings -> App -> Update check` and in the footer status bar, and both routes trigger the same force-refresh update request
 - app-update, scheduler, settings, proposal, and feedback hydration are non-critical background loads and must not block the card list from appearing
 - `Mark as read` and feedback mutations commit their local UI result first and use a non-blocking report reconcile pass afterward, so the card list stays visible during background refreshes
 

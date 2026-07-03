@@ -153,7 +153,7 @@ export function App() {
   const [zoteroError, setZoteroError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [appControlBusy, setAppControlBusy] = React.useState(false);
-  const [adminTab, setAdminTab] = React.useState<AdminTab>("config");
+  const [adminTab, setAdminTab] = React.useState<AdminTab>("dashboard");
   const [themePreference, setThemePreference] = React.useState<"system" | "light" | "dark">(
     "system",
   );

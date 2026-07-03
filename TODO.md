@@ -21,14 +21,13 @@
 
 - [ ] 增加一个内置的Feed List以及官方RSS List跳转页
 - [X] 增加获取feed、metadata、llm分类时的具体进度条（当前已有状态消息提示，但还不是进度条）
-- [ ] 卡住时增加一个手动跳过当前Feed RSS获取的按钮
 
 ## Initialization & Settings
 
 - [X] 精简参数界面，把确认按钮放在下方
 - [X] 增加DeepSeek开发者中心链接指引
 - [X] 增加起始界面的说明文档
-- [ ] thinking 自动降级时补更明确的前端提示和设置说明
+- [X] 设置抽屉拆分为 Dashboard / Feeds / Profile / Model / App
 
 ## Filter
 
@@ -81,4 +80,3 @@
 
 - [X] 后台服务检测到托盘程序未启动，自动打开托盘
 - [ ] Web UI 修改自动同步时间后，运行中的托盘菜单和自动同步逻辑仍未同步到新设置
-

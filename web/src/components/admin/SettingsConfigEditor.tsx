@@ -60,12 +60,14 @@ export function SettingsConfigEditor({
   intro,
   saving,
   saveLabel = "Save local settings",
+  title = "Local configuration",
   onSave,
 }: {
   fields: SettingsConfigField[];
   intro?: React.ReactNode;
   saving: boolean;
   saveLabel?: string;
+  title?: string;
   onSave: (fields: Record<string, SettingsConfigUpdate>) => Promise<void>;
 }) {
   const [values, setValues] = React.useState<Record<string, string>>({});
@@ -108,10 +110,10 @@ export function SettingsConfigEditor({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-(--line) bg-(--paper-accent) p-4">
+      <div className="border-b border-(--line) pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-3xl space-y-2">
-            <h3 className="text-sm font-semibold text-(--ink)">Local configuration</h3>
+            <h3 className="text-sm font-semibold text-(--ink)">{title}</h3>
             <p className="text-sm leading-6 text-muted">
               Secret fields are never sent back in plain text. In source mode this writes to the
               local <code>.env</code>; in release mode it writes to the per-user FeedMeDaily
@@ -126,98 +128,103 @@ export function SettingsConfigEditor({
       </div>
 
       {groups.map((group) => (
-        <section
-          key={group.section}
-          className="rounded-lg border border-(--line) bg-(--paper-accent) p-4"
-        >
+        <section key={group.section} className="border-b border-(--line) pb-5 last:border-b-0">
           <h3 className="text-sm font-semibold text-(--ink)">{group.section}</h3>
-          <div className="mt-3 grid gap-4 md:grid-cols-2">
+          <div className="mt-3 divide-y divide-(--line)">
             {group.fields.map((field) => {
               const value = values[field.key] ?? "";
               const secretValue = secretValues[field.key] ?? "";
               const secretClear = Boolean(secretClears[field.key]);
               return (
-                <label key={field.key} className="block rounded-lg border border-(--line) p-3">
-                  <span className="text-sm font-medium text-(--ink)">{field.label}</span>
-                  <span className="mt-1 block text-sm leading-6 text-muted">
-                    {field.description}
-                  </span>
-                  {field.input_type === "select" ? (
-                    <select
-                      aria-label={field.label}
-                      className="mt-3 w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink)"
-                      value={value}
-                      onChange={(event) =>
-                        setValues((current) => ({...current, [field.key]: event.target.value}))
-                      }
-                    >
-                      {field.options.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : field.secret ? (
-                    <>
-                      <input
+                <div
+                  key={field.key}
+                  className="grid gap-3 py-4 md:grid-cols-[minmax(0,0.75fr)_minmax(260px,1fr)] md:items-start"
+                >
+                  <label className="space-y-1" htmlFor={`settings-${field.key}`}>
+                    <span className="block text-sm font-medium text-(--ink)">{field.label}</span>
+                    <span className="block text-sm leading-6 text-muted">{field.description}</span>
+                  </label>
+                  <div className="min-w-0">
+                    {field.input_type === "select" ? (
+                      <select
                         aria-label={field.label}
-                        className="mt-3 w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink) placeholder:text-muted"
-                        placeholder={
-                          field.configured ? "Leave blank to keep the current secret" : "Paste a new secret"
+                        className="w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink)"
+                        id={`settings-${field.key}`}
+                        value={value}
+                        onChange={(event) =>
+                          setValues((current) => ({...current, [field.key]: event.target.value}))
                         }
-                        type="password"
-                        value={secretValue}
-                        onChange={(event) => {
-                          setSecretValues((current) => ({
-                            ...current,
-                            [field.key]: event.target.value,
-                          }));
-                          if (event.target.value.trim()) {
-                            setSecretClears((current) => ({...current, [field.key]: false}));
+                      >
+                        {field.options.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : field.secret ? (
+                      <>
+                        <input
+                          aria-label={field.label}
+                          className="w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink) placeholder:text-muted"
+                          id={`settings-${field.key}`}
+                          placeholder={
+                            field.configured ? "Leave blank to keep the current secret" : "Paste a new secret"
                           }
-                        }}
-                      />
-                      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted">
-                        <span>{fieldSourceSummary(field)}</span>
-                        {field.configured || field.stored_in_dotenv ? (
-                          <button
-                            className={`rounded-full border px-2 py-1 ${
-                              secretClear
-                                ? "border-[--danger-line] bg-[--danger-bg] text-[--danger-ink]"
-                                : "border-(--line) text-(--subtle-ink)"
-                            }`}
-                            type="button"
-                            onClick={() =>
-                              setSecretClears((current) => ({
-                                ...current,
-                                [field.key]: !current[field.key],
-                              }))
+                          type="password"
+                          value={secretValue}
+                          onChange={(event) => {
+                            setSecretValues((current) => ({
+                              ...current,
+                              [field.key]: event.target.value,
+                            }));
+                            if (event.target.value.trim()) {
+                              setSecretClears((current) => ({...current, [field.key]: false}));
                             }
-                          >
-                            {secretClear ? "Will clear on save" : "Clear stored value"}
-                          </button>
-                        ) : null}
-                      </div>
-                    </>
-                  ) : (
-                    <input
-                      aria-label={field.label}
-                      className="mt-3 w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink) placeholder:text-muted"
-                      inputMode={field.input_type === "number" ? "numeric" : undefined}
-                      placeholder={field.default_value ?? ""}
-                      type={field.input_type === "number" ? "number" : "text"}
-                      value={value}
-                      onChange={(event) =>
-                        setValues((current) => ({...current, [field.key]: event.target.value}))
-                      }
-                    />
-                  )}
-                  {!field.secret ? (
-                    <span className="mt-3 block text-sm leading-6 text-muted">
-                      {fieldSourceSummary(field)}
-                    </span>
-                  ) : null}
-                </label>
+                          }}
+                        />
+                        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs leading-5 text-muted">
+                          <span>{fieldSourceSummary(field)}</span>
+                          {field.configured || field.stored_in_dotenv ? (
+                            <button
+                              className={`rounded-md border px-2 py-1 ${
+                                secretClear
+                                  ? "border-[--danger-line] bg-[--danger-bg] text-[--danger-ink]"
+                                  : "border-(--line) text-(--subtle-ink)"
+                              }`}
+                              type="button"
+                              onClick={() =>
+                                setSecretClears((current) => ({
+                                  ...current,
+                                  [field.key]: !current[field.key],
+                                }))
+                              }
+                            >
+                              {secretClear ? "Will clear on save" : "Clear stored value"}
+                            </button>
+                          ) : null}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          aria-label={field.label}
+                          className="w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink) placeholder:text-muted"
+                          id={`settings-${field.key}`}
+                          inputMode={field.input_type === "number" ? "numeric" : undefined}
+                          placeholder={field.default_value ?? ""}
+                          type={field.input_type === "number" ? "number" : "text"}
+                          value={value}
+                          onChange={(event) =>
+                            setValues((current) => ({...current, [field.key]: event.target.value}))
+                          }
+                        />
+                        <span className="mt-2 block text-xs leading-5 text-muted">
+                          {fieldSourceSummary(field)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
               );
             })}
           </div>

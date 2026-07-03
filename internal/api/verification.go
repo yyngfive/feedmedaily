@@ -57,7 +57,7 @@ const (
 	verificationMethodBrowserManual = "browser_manual"
 )
 
-func launchVerificationAwareSyncJob(settings config.Settings, run func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string) (map[string]any, error)) jobInfo {
+func launchVerificationAwareSyncJob(settings config.Settings, run func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error)) jobInfo {
 	job := jobInfo{
 		ID:         nextJobID(),
 		JobType:    "sync",
@@ -196,11 +196,11 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 				})
 			},
 			OnVerificationResumed: func(_ *pendingVerification) {
-				logJobEvent(settings.LogsDir, &job, "info", "verification_resumed", "pipeline.feeds.fetching", "Verification received. Re-running RSS fetch with verified XML.", "", nil)
+				logJobEvent(settings.LogsDir, &job, "info", "verification_resumed", "pipeline.feeds.fetching", "Verification received. Continuing RSS fetch with verified XML.", "", nil)
 				updateJob(job.ID, func(current *jobInfo) {
 					current.Status = "running"
 					current.MessageKey = "pipeline.feeds.fetching"
-					current.Message = "Verification received. Re-running RSS fetch with verified XML."
+					current.Message = "Verification received. Continuing RSS fetch with verified XML."
 					clearJobProgress(current)
 					current.VerificationRequired = false
 					current.VerificationTarget = ""
