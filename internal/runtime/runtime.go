@@ -271,11 +271,6 @@ func sourceBinaryBuildArgs(root string, packagePath string, outputName string, o
 	args := []string{
 		"build",
 	}
-	// Wails verifier binaries need the production tag even in source mode, otherwise
-	// the fallback "use wails build" stub is compiled in and the window never starts.
-	if packagePath == "./cmd/feedmedaily-verifier" {
-		args = append(args, "-tags", "production")
-	}
 	args = append(
 		args,
 		"-ldflags",
