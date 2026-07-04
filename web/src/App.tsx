@@ -1352,6 +1352,29 @@ export function App() {
     ]);
   };
 
+  const handleAddFeeds = (items: FeedSubscription[]) => {
+    setFeeds((current) => {
+      const seen = new Set(current.map((feed) => feed.url.trim()).filter(Boolean));
+      const nextFeeds = items
+        .map((item) => ({journal: item.journal.trim(), url: item.url.trim()}))
+        .filter((item) => {
+          if (!item.journal || !item.url || seen.has(item.url)) {
+            return false;
+          }
+          seen.add(item.url);
+          return true;
+        })
+        .map((item) => ({
+          ...item,
+          client_id:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random()}`,
+        }));
+      return nextFeeds.length > 0 ? [...current, ...nextFeeds] : current;
+    });
+  };
+
   const handleRemoveFeed = (index: number) => {
     setFeeds((current) => current.filter((_item, itemIndex) => itemIndex !== index));
   };
@@ -1840,6 +1863,7 @@ export function App() {
         onClose={() => setAdminOpen(false)}
         onFeedChange={handleFeedChange}
         onAddFeed={handleAddFeed}
+        onAddFeeds={handleAddFeeds}
         onCheckForUpdates={() => void handleCheckAppUpdate()}
         onRemoveFeed={handleRemoveFeed}
         onSaveConfig={handleSaveConfig}

@@ -12,6 +12,7 @@ Changes since `0.3.4`:
 
 - Reworked the Settings drawer into Dashboard, Feeds, Profile, Model, and App pages so sync jobs, feed editing, profile review, model credentials, and app/runtime settings are no longer crowded into one config surface.
 - Refined Settings spacing and status layout: Dashboard now groups runtime/update metadata, shows latest sync results and warnings in a structured block, Feeds uses stable editable rows, and Profile rule editing uses one multiline editor per rule class.
+- Added a publisher-grouped RSS catalog to Settings > Feeds, with release builds refreshing the bundled catalog from `yyngfive/sci-rss-list`.
 - Fixed the active profile path at `data/classification_profile.json` and removed the profile-path setting from local configuration.
 
 ### Fixed

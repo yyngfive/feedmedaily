@@ -1,5 +1,6 @@
 param(
-  [switch]$SkipInstaller
+  [switch]$SkipInstaller,
+  [switch]$SkipFeedCatalogUpdate
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,6 +12,7 @@ $trayBuildScript = Join-Path $root "tools\build_go_tray.ps1"
 $trayBuildOutput = Join-Path $root "build\feedmedaily-tray.exe"
 $daemonBuildOutput = Join-Path $root "build\feedmedailyd.exe"
 $protectedVerifierBuildOutput = Join-Path $root "build\FeedMeDailyProtectedVerifier"
+$feedCatalogUpdateScript = Join-Path $root "tools\update_feed_catalog.ps1"
 
 function Invoke-NativeStep {
   param(
@@ -115,6 +117,10 @@ try {
   $projectVersion = Get-ProjectVersion
 
   Write-Host "Building FeedMeDaily version $projectVersion"
+
+  if (-not $SkipFeedCatalogUpdate -and (Test-Path $feedCatalogUpdateScript)) {
+    & $feedCatalogUpdateScript
+  }
 
   Invoke-NativeStep `
     -Description "Frontend build" `
