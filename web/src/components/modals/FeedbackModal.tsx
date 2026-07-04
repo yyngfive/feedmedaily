@@ -1,5 +1,6 @@
 import {Button} from "@heroui/react";
 
+import {TextAreaField} from "../common/FormFields";
 import {ModalShell} from "../common/ModalShell";
 import {SelectField} from "../common/SelectField";
 import type {Paper, Relevance} from "../../types";
@@ -53,15 +54,13 @@ export function FeedbackModal({
         value={value}
         onChange={(nextValue) => onValueChange(nextValue as Relevance)}
       />
-      <label className="block text-sm font-medium text-[var(--ink)]">
-        Note
-        <textarea
-          className="mt-2 min-h-28 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm"
-          placeholder="Why should this be classified differently?"
-          value={note}
-          onChange={(event) => onNoteChange(event.target.value)}
-        />
-      </label>
+      <TextAreaField
+        label="Note"
+        placeholder="Why should this be classified differently?"
+        rows={5}
+        value={note}
+        onChange={onNoteChange}
+      />
     </ModalShell>
   );
 }

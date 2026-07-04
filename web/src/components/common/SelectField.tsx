@@ -1,5 +1,5 @@
-import type {Key} from "react";
-import {Label, ListBox, ListBoxItem, Select} from "@heroui/react";
+import type {Key, ReactNode} from "react";
+import {Description, Label, ListBox, ListBoxItem, Select} from "@heroui/react";
 
 export type SelectOption = {
   label: string;
@@ -7,23 +7,32 @@ export type SelectOption = {
 };
 
 export function SelectField({
+  className = "",
+  description,
   disabled = false,
+  hideLabel = false,
+  id,
   label,
   onChange,
   options,
   value,
 }: {
+  className?: string;
+  description?: ReactNode;
   disabled?: boolean;
+  hideLabel?: boolean;
+  id?: string;
   label: string;
   onChange: (value: string) => void;
   options: SelectOption[];
   value: string;
 }) {
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
+    <div className={`space-y-2 ${className}`}>
+      <Label className={hideLabel ? "sr-only" : undefined}>{label}</Label>
       <Select
         aria-label={label}
+        id={id}
         isDisabled={disabled}
         selectedKey={value}
         onSelectionChange={(key: Key | null) => onChange(String(key ?? ""))}
@@ -42,6 +51,7 @@ export function SelectField({
           </ListBox>
         </Select.Popover>
       </Select>
+      {description ? <Description>{description}</Description> : null}
     </div>
   );
 }

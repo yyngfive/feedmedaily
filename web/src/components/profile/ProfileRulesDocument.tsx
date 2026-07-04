@@ -1,6 +1,7 @@
 import {Button, Card} from "@heroui/react";
 import React from "react";
 
+import {TextAreaField, TextInputField} from "../common/FormFields";
 import type {ClassificationProfile} from "../../types";
 
 type ProfileDraft = {
@@ -50,11 +51,12 @@ function RuleListEditor({
   return (
     <section className="space-y-2">
       <h3 className="text-sm font-semibold text-(--ink)">{title}</h3>
-      <textarea
-        aria-label={title}
-        className="min-h-36 w-full resize-y rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm leading-6 text-(--ink)"
+      <TextAreaField
+        hideLabel
+        label={title}
+        rows={7}
         value={items.join("\n")}
-        onChange={(event) => onChange(event.target.value.split(/\r?\n/))}
+        onChange={(value) => onChange(value.split(/\r?\n/))}
       />
     </section>
   );
@@ -70,11 +72,11 @@ function DraftField({
   title: string;
 }) {
   return (
-    <label className="block space-y-2">
+    <div className="block space-y-2">
       <span className="text-sm font-semibold text-(--ink)">{title}</span>
       {hint ? <p className="text-sm leading-6 text-muted">{hint}</p> : null}
       {children}
-    </label>
+    </div>
   );
 }
 
@@ -163,18 +165,21 @@ export function ProfileRulesDocument({
         {editing ? (
           <>
             <DraftField title="Profile name">
-              <input
-                className="w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink)"
+              <TextInputField
+                hideLabel
+                label="Profile name"
                 value={draft.name}
-                onChange={(event) => setDraft((current) => ({...current, name: event.target.value}))}
+                onChange={(value) => setDraft((current) => ({...current, name: value}))}
               />
             </DraftField>
 
             <DraftField title="Scope">
-              <textarea
-                className="min-h-28 w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm leading-6 text-(--ink)"
+              <TextAreaField
+                hideLabel
+                label="Scope"
+                rows={5}
                 value={draft.scope}
-                onChange={(event) => setDraft((current) => ({...current, scope: event.target.value}))}
+                onChange={(value) => setDraft((current) => ({...current, scope: value}))}
               />
             </DraftField>
 

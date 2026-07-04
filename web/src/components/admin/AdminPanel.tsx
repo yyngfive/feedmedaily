@@ -1,9 +1,10 @@
-import { Button, Card, Input, Spinner } from "@heroui/react";
+import { Button, Card, Spinner } from "@heroui/react";
 import React from "react";
 
 import { relevanceLabel } from "../../app/constants";
 import { feedCatalog } from "../../feedCatalog";
 import type { SettingsConfigUpdate } from "../../types";
+import {CheckboxRow, TextAreaField, TextInputField} from "../common/FormFields";
 import { ProfileProposalReview } from "../profile/ProfileProposalReview";
 import { ProfileRulesDocument } from "../profile/ProfileRulesDocument";
 import { SettingsConfigEditor } from "./SettingsConfigEditor";
@@ -174,11 +175,14 @@ function VerificationPanel({
         <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-amber-900/80">
           Paste final RSS/XML
         </label>
-        <textarea
-          className="min-h-36 w-full rounded-md border border-amber-300/70 bg-white px-3 py-2 font-mono text-xs leading-5 text-amber-950 outline-none transition focus:border-amber-500"
+        <TextAreaField
+          hideLabel
+          className="font-mono text-xs leading-5"
+          label="Paste final RSS/XML"
           placeholder="Paste the raw RSS, Atom, or RDF XML source here."
+          rows={8}
           value={xml}
-          onChange={(event) => onXMLChange(event.target.value)}
+          onChange={onXMLChange}
         />
         {submitError ? (
           <p className="text-sm leading-6 text-rose-700">{submitError}</p>
@@ -552,12 +556,13 @@ export function AdminPanel({
                         Not Listed?
                       </a>
                     </div>
-                    <Input
-                      aria-label="Search feed catalog"
+                    <TextInputField
+                      hideLabel
                       className="mt-3 w-full"
+                      label="Search feed catalog"
                       placeholder="Search journal, publisher, or subject"
                       value={catalogQuery}
-                      onChange={(event) => setCatalogQuery(event.target.value)}
+                      onChange={setCatalogQuery}
                     />
                     <div className="mt-3 flex max-h-24 flex-wrap gap-2 overflow-y-auto pr-1">
                       {catalogPublishers.map((publisher) => (
@@ -581,17 +586,13 @@ export function AdminPanel({
                           const selected = selectedCatalogURLs.includes(item.url);
                           const exists = existingFeedURLs.has(item.url.trim());
                           return (
-                            <label
+                            <CheckboxRow
                               key={item.url}
-                              className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-md border border-(--line) px-3 py-2 text-sm"
+                              checked={selected}
+                              className="rounded-md border border-(--line) px-3 py-2 text-sm"
+                              disabled={exists}
+                              onChange={() => toggleCatalogFeed(item.url)}
                             >
-                              <input
-                                checked={selected}
-                                className="mt-1"
-                                disabled={exists}
-                                type="checkbox"
-                                onChange={() => toggleCatalogFeed(item.url)}
-                              />
                               <span className="min-w-0">
                                 <span className="flex flex-wrap items-center gap-2">
                                   <span className="font-medium text-(--ink)">{item.journal}</span>
@@ -601,7 +602,7 @@ export function AdminPanel({
                                   {item.url}
                                 </span>
                               </span>
-                            </label>
+                            </CheckboxRow>
                           );
                         })
                       )}
@@ -617,18 +618,20 @@ export function AdminPanel({
                   </div>
 
                   <div className="mt-3 grid gap-3 md:grid-cols-[minmax(180px,0.7fr)_minmax(260px,1fr)_auto]">
-                    <Input
-                      aria-label="New feed journal name"
+                    <TextInputField
+                      hideLabel
+                      label="New feed journal name"
                       placeholder="Journal name"
-                      
                       value={newFeedJournal}
-                      onChange={(event) => setNewFeedJournal(event.target.value)}
+                      onChange={setNewFeedJournal}
                     />
-                    <Input
-                      aria-label="New feed URL"
+                    <TextInputField
+                      hideLabel
+                      label="New feed URL"
                       placeholder="RSS URL"
+                      type="url"
                       value={newFeedURL}
-                      onChange={(event) => setNewFeedURL(event.target.value)}
+                      onChange={setNewFeedURL}
                     />
                     <Button
                       isDisabled={!newFeedJournal.trim() || !newFeedURL.trim()}
@@ -665,17 +668,20 @@ export function AdminPanel({
                               key={item.client_id ?? String(index)}
                               className="grid gap-3 rounded-md border border-(--line) bg-(--paper) p-3 md:grid-cols-[minmax(160px,0.7fr)_minmax(280px,1fr)_96px]"
                             >
-                              <Input
-                                aria-label={`Feed name ${index + 1}`}
+                              <TextInputField
+                                hideLabel
                                 className="w-full"
+                                label={`Feed name ${index + 1}`}
                                 value={item.journal}
-                                onChange={(event) => onFeedChange(index, "journal", event.target.value)}
+                                onChange={(value) => onFeedChange(index, "journal", value)}
                               />
-                              <Input
-                                aria-label={`Feed URL ${index + 1}`}
+                              <TextInputField
+                                hideLabel
                                 className="w-full"
+                                label={`Feed URL ${index + 1}`}
+                                type="url"
                                 value={item.url}
-                                onChange={(event) => onFeedChange(index, "url", event.target.value)}
+                                onChange={(value) => onFeedChange(index, "url", value)}
                               />
                               <Button size="sm" variant="ghost" onPress={() => onRemoveFeed(index)}>
                                 Delete

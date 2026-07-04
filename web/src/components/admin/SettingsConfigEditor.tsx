@@ -1,6 +1,8 @@
 import {Button} from "@heroui/react";
 import React from "react";
 
+import {TextInputField} from "../common/FormFields";
+import {SelectField} from "../common/SelectField";
 import type {SettingsConfigField, SettingsConfigUpdate} from "../../types";
 
 function fieldSourceSummary(field: SettingsConfigField): string {
@@ -140,44 +142,38 @@ export function SettingsConfigEditor({
                   key={field.key}
                   className="grid gap-3 py-4 md:grid-cols-[minmax(0,0.75fr)_minmax(260px,1fr)] md:items-start"
                 >
-                  <label className="space-y-1" htmlFor={`settings-${field.key}`}>
+                  <div className="space-y-1">
                     <span className="block text-sm font-medium text-(--ink)">{field.label}</span>
                     <span className="block text-sm leading-6 text-muted">{field.description}</span>
-                  </label>
+                  </div>
                   <div className="min-w-0">
                     {field.input_type === "select" ? (
-                      <select
-                        aria-label={field.label}
-                        className="w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink)"
+                      <SelectField
+                        hideLabel
                         id={`settings-${field.key}`}
+                        label={field.label}
+                        options={field.options}
                         value={value}
-                        onChange={(event) =>
-                          setValues((current) => ({...current, [field.key]: event.target.value}))
+                        onChange={(nextValue) =>
+                          setValues((current) => ({...current, [field.key]: nextValue}))
                         }
-                      >
-                        {field.options.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     ) : field.secret ? (
                       <>
-                        <input
-                          aria-label={field.label}
-                          className="w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink) placeholder:text-muted"
-                          id={`settings-${field.key}`}
+                        <TextInputField
+                          hideLabel
+                          label={field.label}
                           placeholder={
                             field.configured ? "Leave blank to keep the current secret" : "Paste a new secret"
                           }
                           type="password"
                           value={secretValue}
-                          onChange={(event) => {
+                          onChange={(nextValue) => {
                             setSecretValues((current) => ({
                               ...current,
-                              [field.key]: event.target.value,
+                              [field.key]: nextValue,
                             }));
-                            if (event.target.value.trim()) {
+                            if (nextValue.trim()) {
                               setSecretClears((current) => ({...current, [field.key]: false}));
                             }
                           }}
@@ -185,14 +181,10 @@ export function SettingsConfigEditor({
                         <div className="mt-2 flex flex-wrap items-center gap-3 text-xs leading-5 text-muted">
                           <span>{fieldSourceSummary(field)}</span>
                           {field.configured || field.stored_in_dotenv ? (
-                            <button
-                              className={`rounded-md border px-2 py-1 ${
-                                secretClear
-                                  ? "border-[--danger-line] bg-[--danger-bg] text-[--danger-ink]"
-                                  : "border-(--line) text-(--subtle-ink)"
-                              }`}
-                              type="button"
-                              onClick={() =>
+                            <Button
+                              size="sm"
+                              variant={secretClear ? "secondary" : "outline"}
+                              onPress={() =>
                                 setSecretClears((current) => ({
                                   ...current,
                                   [field.key]: !current[field.key],
@@ -200,22 +192,21 @@ export function SettingsConfigEditor({
                               }
                             >
                               {secretClear ? "Will clear on save" : "Clear stored value"}
-                            </button>
+                            </Button>
                           ) : null}
                         </div>
                       </>
                     ) : (
                       <>
-                        <input
-                          aria-label={field.label}
-                          className="w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink) placeholder:text-muted"
-                          id={`settings-${field.key}`}
+                        <TextInputField
+                          hideLabel
                           inputMode={field.input_type === "number" ? "numeric" : undefined}
+                          label={field.label}
                           placeholder={field.default_value ?? ""}
-                          type={field.input_type === "number" ? "number" : "text"}
+                          type={field.input_type === "number" ? "number" : field.input_type === "url" ? "url" : "text"}
                           value={value}
-                          onChange={(event) =>
-                            setValues((current) => ({...current, [field.key]: event.target.value}))
+                          onChange={(nextValue) =>
+                            setValues((current) => ({...current, [field.key]: nextValue}))
                           }
                         />
                         <span className="mt-2 block text-xs leading-5 text-muted">

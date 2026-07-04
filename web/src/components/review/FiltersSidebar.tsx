@@ -9,6 +9,7 @@ import {
   sortOptions,
 } from "../../app/constants";
 import type {DateFilter, FeedbackFilter, ReadFilter, SortOption} from "../../app/constants";
+import {CheckboxRow} from "../common/FormFields";
 import {SelectField, type SelectOption} from "../common/SelectField";
 import type {Relevance} from "../../types";
 
@@ -98,18 +99,14 @@ export function FiltersSidebar({
               <p className="px-1 py-2 text-sm text-muted">No journals yet.</p>
             ) : (
               journalOptions.map((option) => (
-                <label
+                <CheckboxRow
                   key={option.value}
-                  className="flex cursor-pointer items-start gap-2 rounded px-1.5 py-1 text-sm text-(--body) hover:bg-(--paper-accent)"
+                  checked={selectedJournalSet.has(option.value)}
+                  className="rounded px-1.5 py-1 text-sm text-(--body) hover:bg-(--paper-accent)"
+                  onChange={() => onJournalToggle(option.value)}
                 >
-                  <input
-                    className="mt-1"
-                    type="checkbox"
-                    checked={selectedJournalSet.has(option.value)}
-                    onChange={() => onJournalToggle(option.value)}
-                  />
                   <span className="min-w-0 flex-1 break-words">{option.label}</span>
-                </label>
+                </CheckboxRow>
               ))
             )}
           </div>

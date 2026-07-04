@@ -115,3 +115,31 @@ a {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.input,
+.textarea,
+.select__trigger {
+  border: 1px solid var(--line);
+  background: var(--paper-accent);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--muted);
+}
+
+.input:hover,
+.textarea:hover,
+.select__trigger:hover {
+  border-color: var(--line-strong);
+}
+
+.input:focus-visible,
+.textarea:focus-visible,
+.select__trigger[data-focus-visible="true"] {
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  outline-offset: 1px;
+}

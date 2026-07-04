@@ -9,6 +9,8 @@ import type {
   SettingsConfigField,
   SettingsConfigUpdate,
 } from "../../types";
+import {TextAreaField, TextInputField} from "../common/FormFields";
+import {SelectField} from "../common/SelectField";
 import {StatusBanner, type StatusTone} from "../common/StatusBanner";
 
 const aiAdvancedKeys = [
@@ -188,30 +190,25 @@ function SettingFieldRow({
     : field.default_value ?? "";
 
   return (
-    <label className="grid gap-4 py-2 md:grid-cols-[minmax(0,0.7fr)_minmax(280px,0.8fr)] md:items-center">
+    <div className="grid gap-4 py-2 md:grid-cols-[minmax(0,0.7fr)_minmax(280px,0.8fr)] md:items-center">
       <div className="space-y-1">
         <span className="text-sm font-medium text-(--ink)">{field.label}</span>
       </div>
 
       <div className="min-w-0">
         {field.input_type === "select" ? (
-          <select
-            aria-label={field.label}
-            className="w-full rounded-md border border-(--line) bg-(--paper-accent) px-3 py-2 text-sm text-(--ink)"
+          <SelectField
+            hideLabel
+            label={field.label}
+            options={field.options}
             value={value}
-            onChange={(event) => onChange(event.target.value)}
-          >
-            {field.options.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            onChange={onChange}
+          />
         ) : (
-          <input
-            aria-label={field.label}
-            className="w-full rounded-md border border-(--line) bg-(--paper-accent) px-3 py-2 text-sm text-(--ink) placeholder:text-muted"
+          <TextInputField
+            hideLabel
             inputMode={field.input_type === "number" ? "numeric" : undefined}
+            label={field.label}
             placeholder={placeholder}
             type={
               field.secret
@@ -223,11 +220,11 @@ function SettingFieldRow({
                     : "text"
             }
             value={value}
-            onChange={(event) => onChange(event.target.value)}
+            onChange={onChange}
           />
         )}
       </div>
-    </label>
+    </div>
   );
 }
 
@@ -271,11 +268,11 @@ function DraftField({
   title: string;
 }) {
   return (
-    <label className="block space-y-2">
+    <div className="block space-y-2">
       <span className="text-sm font-semibold text-(--ink)">{title}</span>
       {hint ? <p className="text-sm leading-6 text-muted">{hint}</p> : null}
       {children}
-    </label>
+    </div>
   );
 }
 
@@ -296,11 +293,12 @@ function RuleTextareaSection({
         <h3 className="text-sm font-semibold text-(--ink)">{title}</h3>
         <p className="text-sm text-muted">{hint}</p>
       </div>
-      <textarea
-        aria-label={title}
-        className="min-h-24 w-full resize-y rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm leading-6 text-(--ink)"
+      <TextAreaField
+        hideLabel
+        label={title}
+        rows={4}
         value={text}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
       />
     </section>
   );
@@ -373,12 +371,13 @@ function ProposalDraftCard({
         ) : (
           <>
             <DraftField title="Profile name">
-              <input
-                className="w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink)"
+              <TextInputField
+                hideLabel
+                label="Profile name"
                 value={draft.name}
-                onChange={(event) =>
+                onChange={(value) =>
                   onChangeDraft((current) =>
-                    current ? {...current, name: event.target.value} : current,
+                    current ? {...current, name: value} : current,
                   )
                 }
               />
@@ -388,12 +387,14 @@ function ProposalDraftCard({
               title="Scope"
               hint="Describe the research boundary and what should count as a strong match."
             >
-              <textarea
-                className="min-h-24 w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm leading-6 text-(--ink)"
+              <TextAreaField
+                hideLabel
+                label="Scope"
+                rows={4}
                 value={draft.scope}
-                onChange={(event) =>
+                onChange={(value) =>
                   onChangeDraft((current) =>
-                    current ? {...current, scope: event.target.value} : current,
+                    current ? {...current, scope: value} : current,
                   )
                 }
               />
@@ -619,41 +620,42 @@ export function Onboarding({
               <h1 className="text-2xl font-semibold text-(--ink)">Basic Settings</h1>
             </Card.Header>
             <Card.Content className="space-y-1">
-              <label className="block p-2">
-                <span className="text-sm font-medium text-(--ink)">Profile Prompt</span>
-                <span className="mt-1 block text-sm leading-6 text-muted">
-                  Describe the topics, methods, validation expectations, and paper types you want
-                  the profile to prioritize or avoid.
-                </span>
-                <textarea
-                  className="mt-3 min-h-56 w-full rounded-md border border-(--line) bg-(--paper-accent) px-3 py-2 text-sm text-(--ink) placeholder:text-muted"
-                  placeholder="For example: I care about AI-driven protein design, structure prediction, and experimental validation. Prioritize strong method papers and reproducible evaluation. Avoid broad reviews and speculative work without evidence."
-                  value={interestDescription}
-                  onChange={(event) => setInterestDescription(event.target.value)}
-                />
-              </label>
-              <label className="block p-2">
-                <span className="text-sm font-medium text-(--ink)">LLM API Key</span>
-                <span className="mt-1 block text-sm leading-6 text-muted">
-                  DeepSeek is the default provider. Get and fund your key at{" "}
-                  <a
-                    className="underline underline-offset-2"
-                    href="https://platform.deepseek.com/"
-                    rel="noopener noreferrer"
-                    target="_blank"
-                  >
-                    platform.deepseek.com
-                  </a>
-                  .
-                </span>
-                <input
-                  className="mt-3 w-full rounded-md border border-(--line) bg-(--paper-accent) px-3 py-2 text-sm text-(--ink) placeholder:text-muted"
-                  placeholder={sharedKeyHint ? "Leave blank to keep the current model keys" : "sk-..."}
-                  type="password"
-                  value={sharedApiKey}
-                  onChange={(event) => setSharedApiKey(event.target.value)}
-                />
-              </label>
+              <TextAreaField
+                className="p-2"
+                description={
+                  <>
+                    Describe the topics, methods, validation expectations, and paper types you want
+                    the profile to prioritize or avoid.
+                  </>
+                }
+                label="Profile Prompt"
+                placeholder="For example: I care about AI-driven protein design, structure prediction, and experimental validation. Prioritize strong method papers and reproducible evaluation. Avoid broad reviews and speculative work without evidence."
+                rows={9}
+                value={interestDescription}
+                onChange={setInterestDescription}
+              />
+              <TextInputField
+                className="p-2"
+                description={
+                  <>
+                    DeepSeek is the default provider. Get and fund your key at{" "}
+                    <a
+                      className="underline underline-offset-2"
+                      href="https://platform.deepseek.com/"
+                      rel="noopener noreferrer"
+                      target="_blank"
+                    >
+                      platform.deepseek.com
+                    </a>
+                    .
+                  </>
+                }
+                label="LLM API Key"
+                placeholder={sharedKeyHint ? "Leave blank to keep the current model keys" : "sk-..."}
+                type="password"
+                value={sharedApiKey}
+                onChange={setSharedApiKey}
+              />
 
               {latestBootstrapJob ? (
                 <StatusBanner

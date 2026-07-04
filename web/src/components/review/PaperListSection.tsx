@@ -3,6 +3,7 @@ import {Virtuoso} from "react-virtuoso";
 
 import {relevanceTabs, type RelevanceFilter} from "../../app/constants";
 import {EmptyStateCard} from "../common/EmptyStateCard";
+import {TextInputField} from "../common/FormFields";
 import {StatusBanner} from "../common/StatusBanner";
 import {PaperCard} from "./PaperCard";
 import type {Paper, Relevance} from "../../types";
@@ -84,15 +85,12 @@ export function PaperListSection({
             ))}
           </div>
 
-          <label className="block w-full">
-            <span className="text-sm font-medium text-(--ink)">Search</span>
-            <input
-              className="mt-2 w-full rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm text-(--ink) placeholder:text-muted"
-              placeholder="Search title, abstract, author, journal"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
+          <TextInputField
+            label="Search"
+            placeholder="Search title, abstract, author, journal"
+            value={query}
+            onChange={setQuery}
+          />
 
           <div className="flex justify-end">
             <Button
