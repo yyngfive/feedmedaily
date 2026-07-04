@@ -126,7 +126,6 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 - `cmd/feedmedailyd/`：本地 Go 后端入口，负责 HTTP API、静态前端、同步任务和本地服务生命周期。
 - `cmd/feedmedaily-tray/`：Windows 托盘入口，负责单实例、启动后端、打开 UI、同步触发、开机自启和本地调度。
 - `cmd/feedmedaily-protected-verifier/`：Go 原生 WebView2 受保护订阅验证器。
-- `cmd/feedmedaily-verifier/`：旧 Wails 验证器源码，保留作参考。
 - `internal/api/`：本地 HTTP API、job 状态、受保护订阅验证 API、静态资源服务。
 - `internal/jobs/`：同步 pipeline、重分类、Profile proposal 后台作业。
 - `internal/feeds/`：RSS/Atom/RDF 抓取、解析、订阅文件读写、特殊出版社抽取逻辑。
