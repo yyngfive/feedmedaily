@@ -54,7 +54,7 @@ Legacy reference files still remain in the repository for comparison and regress
 
 `Run Sync Now` is fully owned by Go end-to-end: feed fetch, ingest, conditional metadata enrichment, classification, report refresh, and background job state all run through `feedmedailyd`.
 
-The job polling endpoints expose both human-readable messages and structured progress fields so the UI can show stage-aware status such as current feed `i/N`, metadata/classification completion percentages, and step-based profile generation progress.
+The job polling endpoints expose both human-readable messages and structured progress fields so the UI can show stage-aware status such as current feed `i/N`, metadata/classification completion percentages, step-based profile generation progress, and structured latest-job summaries. Sync warning details are read from the existing job result errors and matched back to the current feed list by URL.
 
 The API service reuses long-lived SQLite stores across requests instead of reopening the database per handler. Read-heavy endpoints and mutation endpoints are split across separate store roles so the UI can keep `/api/report/latest` responsive while feedback or read-status writes are in flight. The SQLite runtime now enables WAL plus a busy-timeout-oriented connection string, and the `/api/report/latest` read path batch-selects each paper's latest classification, latest open feedback, and latest Zotero save state with SQL windowing rather than issuing per-paper follow-up lookups. `/api/app/update` keeps a short-lived in-memory status cache for routine polling and page initialization, but also accepts a force-refresh path so manual checks can bypass that cache immediately.
 
@@ -129,6 +129,7 @@ Editable local configuration is exposed through the UI:
 - each field reports whether its value comes from local config, the system environment, or a built-in default
 - first-run onboarding presents one shared LLM API key entry plus optional advanced per-role overrides for classifier and profile generation
 - saving local configuration reloads the running backend settings immediately, so follow-up jobs in the same session use the new API keys and model settings
+- the active profile file path is fixed at `data/classification_profile.json` under the current runtime data directory and is not user-configurable
 
 ## UI Architecture
 
@@ -146,8 +147,8 @@ Behavioral baseline:
 - the default review view is `Unread + Last 30 days`
 - paper cards stay summary-only
 - paper actions live in the detail panel
-- the settings drawer is split into `Dashboard`, `Feeds`, `Profile`, `Model`, and `App`: Dashboard owns sync/reclassify/protected-feed interruption controls, Feeds owns RSS subscription editing, Profile owns profile/proposal/feedback review, Model owns classifier/profile model settings, and App owns Zotero, local paths, scheduling, update checks, and runtime metadata
-- manual update checks are exposed both in `Settings -> App -> Update check` and in the footer status bar, and both routes trigger the same force-refresh update request
+- the settings drawer is split into `Dashboard`, `Feeds`, `Profile`, `Model`, and `App`: Dashboard owns sync/reclassify/protected-feed interruption controls plus update/runtime status and latest-job summaries, Feeds owns RSS subscription editing with stable editable rows, Profile owns profile/proposal/feedback review with multiline rule editing, Model owns classifier/profile model settings, and App owns Zotero, local app fields, and scheduling
+- manual update checks are exposed both in `Settings -> Dashboard -> Update check` and in the footer status bar, and both routes trigger the same force-refresh update request
 - app-update, scheduler, settings, proposal, and feedback hydration are non-critical background loads and must not block the card list from appearing
 - `Mark as read` and feedback mutations commit their local UI result first and use a non-blocking report reconcile pass afterward, so the card list stays visible during background refreshes
 

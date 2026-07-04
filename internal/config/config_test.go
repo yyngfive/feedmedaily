@@ -124,6 +124,30 @@ func TestSettingsConfigDoesNotExposeUpdateManifestURL(t *testing.T) {
 	}
 }
 
+func TestProfilePathIsFixedUnderDataDir(t *testing.T) {
+	root := t.TempDir()
+	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
+	writeConfigTestFile(t, filepath.Join(root, ".env"), "SCIRSS_PROFILE_PATH=elsewhere/profile.json\n")
+
+	settings, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.ProfilePath != filepath.Join(root, "data", "classification_profile.json") {
+		t.Fatalf("profile path = %q", settings.ProfilePath)
+	}
+
+	response, err := SettingsConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range response.Fields {
+		if field.Key == "SCIRSS_PROFILE_PATH" {
+			t.Fatalf("profile path should not be configurable: %#v", field)
+		}
+	}
+}
+
 func TestUpdateLocalSettingsReleaseUsesSettingsAndSecretStores(t *testing.T) {
 	root := t.TempDir()
 	dataRoot := filepath.Join(root, "user-data")

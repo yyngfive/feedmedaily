@@ -1,12 +1,11 @@
-import {Button, Card, Input, Spinner} from "@heroui/react";
+import { Button, Card, Input, Spinner } from "@heroui/react";
 import React from "react";
 
-import {relevanceLabel} from "../../app/constants";
-import {statusMessage} from "../../app/utils";
-import type {SettingsConfigUpdate} from "../../types";
-import {ProfileProposalReview} from "../profile/ProfileProposalReview";
-import {ProfileRulesDocument} from "../profile/ProfileRulesDocument";
-import {SettingsConfigEditor} from "./SettingsConfigEditor";
+import { relevanceLabel } from "../../app/constants";
+import type { SettingsConfigUpdate } from "../../types";
+import { ProfileProposalReview } from "../profile/ProfileProposalReview";
+import { ProfileRulesDocument } from "../profile/ProfileRulesDocument";
+import { SettingsConfigEditor } from "./SettingsConfigEditor";
 import type {
   AppMeta,
   AppUpdate,
@@ -21,32 +20,110 @@ import type {
 
 export type AdminTab = "dashboard" | "feeds" | "profile" | "model" | "app";
 
-const adminTabs: Array<{id: AdminTab; label: string}> = [
-  {id: "dashboard", label: "Dashboard"},
-  {id: "feeds", label: "Feeds"},
-  {id: "profile", label: "Profile"},
-  {id: "model", label: "Model"},
-  {id: "app", label: "App"},
+const adminTabs: Array<{ id: AdminTab; label: string }> = [
+  { id: "dashboard", label: "Dashboard" },
+  { id: "feeds", label: "Feeds" },
+  { id: "profile", label: "Profile" },
+  { id: "model", label: "Model" },
+  { id: "app", label: "App" },
 ];
 
 const modelSections = new Set(["Classifier model", "Profile model"]);
-const appSections = new Set(["Zotero", "Local files", "Local app"]);
+const appSections = new Set(["Zotero", "Local app"]);
 
 function fieldsInSections(fields: SettingsConfigField[], sections: Set<string>) {
   return fields.filter((field) => sections.has(field.section));
 }
 
-function SectionTitle({
-  children,
-  title,
-}: {
-  children?: React.ReactNode;
-  title: string;
-}) {
+function formatJobTime(value?: string | null) {
+  if (!value || Number.isNaN(Date.parse(value))) {
+    return "Not available";
+  }
+  return new Date(value).toLocaleString();
+}
+
+function jobResultNumber(job: JobInfo, key: string) {
+  const value = job.result?.[key];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  return 0;
+}
+
+function jobResultErrors(job: JobInfo) {
+  const value = job.result?.errors;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function splitJobError(value: string) {
+  const divider = value.indexOf(": ");
+  if (divider < 0) {
+    return { detail: value.trim(), url: "" };
+  }
+  return {
+    detail: value.slice(divider + 2).trim(),
+    url: value.slice(0, divider).trim(),
+  };
+}
+
+function LatestJobPanel({ feeds, job }: { feeds: FeedSubscription[]; job: JobInfo }) {
+  const feedNames = new Map(feeds.map((feed) => [feed.url.trim(), feed.journal.trim()]));
+  const errors = jobResultErrors(job).map((item) => {
+    const parsed = splitJobError(item);
+    return {
+      detail: parsed.detail,
+      label: parsed.url ? feedNames.get(parsed.url) || parsed.url : "Other warning",
+      url: parsed.url,
+    };
+  });
+  const isSync = job.job_type === "sync";
+
   return (
-    <div className="space-y-1">
-      <h3 className="text-sm font-semibold text-(--ink)">{title}</h3>
-      {children ? <div className="text-sm leading-6 text-muted">{children}</div> : null}
+    <div className="mt-3 rounded-md border border-(--line) bg-(--paper) p-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold text-(--ink)">Latest job</p>
+          <p className="mt-1 text-muted">
+            {job.job_type} · {job.status}
+          </p>
+        </div>
+        <div className="text-left text-muted sm:text-right">
+          <p>Started: {formatJobTime(job.started_at)}</p>
+          <p>Finished: {formatJobTime(job.finished_at)}</p>
+        </div>
+      </div>
+      {isSync ? (
+        <dl className="mt-3 grid gap-2 text-muted sm:grid-cols-5">
+          {(["fetched", "inserted", "updated", "classified"] as const).map((key) => (
+            <div key={key} className="rounded-md border border-(--line) px-3 py-2">
+              <dt className="capitalize">{key}</dt>
+              <dd className="mt-1 font-semibold text-(--ink)">{jobResultNumber(job, key)}</dd>
+            </div>
+          ))}
+          <div className="rounded-md border border-(--line) px-3 py-2">
+            <dt>Warnings</dt>
+            <dd className="mt-1 font-semibold text-(--ink)">{job.warning_count ?? errors.length}</dd>
+          </div>
+        </dl>
+      ) : null}
+      {job.error ? <p className="mt-3 text-rose-700">{job.error}</p> : null}
+      {errors.length > 0 ? (
+        <div className="mt-3 space-y-2">
+          <p className="font-medium text-(--ink)">Warnings</p>
+          {errors.map((item, index) => (
+            <div key={`${item.url}-${index}`} className="rounded-md border border-(--line) px-3 py-2">
+              <p className="font-medium text-(--ink)">{item.label}</p>
+              {item.url ? <p className="break-all text-xs text-muted">{item.url}</p> : null}
+              <p className="mt-1 leading-6 text-(--body)">{item.detail}</p>
+            </div>
+          ))}
+        </div>
+      ) : job.message ? (
+        <p className="mt-3 leading-6 text-(--body)">{job.message}</p>
+      ) : null}
     </div>
   );
 }
@@ -178,7 +255,7 @@ export function AdminPanel({
   onAddFeed: () => void;
   onApplyProposal: (
     id: number,
-    selection?: {accepted_change_ids: string[]; rejected_change_ids: string[]},
+    selection?: { accepted_change_ids: string[]; rejected_change_ids: string[] },
   ) => Promise<void> | void;
   onCheckForUpdates: () => void;
   onClose: () => void;
@@ -258,15 +335,12 @@ export function AdminPanel({
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/20">
-      <aside className="h-full w-full max-w-[min(1180px,94vw)] overflow-auto border-l border-(--line) bg-(--paper) p-4 shadow-xl">
-        <div className="mx-auto max-w-5xl">
+      <aside className="h-full w-full max-w-[min(1040px,96vw)] overflow-auto border-l border-(--line) bg-(--paper) p-5 shadow-xl">
+        <div className="w-full">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 space-y-3">
               <div>
-                <h2 className="mt-2 text-2xl font-semibold text-(--ink)">Settings</h2>
-                <p className="mt-1 text-sm leading-6 text-muted">
-                  Manage feeds, profile behavior, model access, and local app runtime.
-                </p>
+                <h2 className="mt-2 mb-4 text-2xl font-semibold text-(--ink)">Settings</h2>
               </div>
               <div className="flex flex-wrap gap-2">
                 {adminTabs.map((tab) => (
@@ -287,83 +361,22 @@ export function AdminPanel({
           </div>
 
           <div className="mt-5 space-y-5" hidden={activeTab !== "dashboard"}>
-            <Card className="border border-(--line) bg-(--paper-accent)">
-              <Card.Header className="flex flex-wrap items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <h3 className="text-xl font-semibold text-(--ink)">Dashboard</h3>
-                  <p className="text-sm leading-6 text-muted">
-                    Run sync jobs and inspect the current local service state.
-                  </p>
-                </div>
-                {appMeta ? (
-                  <div className="text-right text-sm text-muted">
-                    <p className="font-medium text-(--ink)">{appMeta.name} v{appMeta.version}</p>
-                    <p>{appMeta.mode}</p>
-                  </div>
-                ) : null}
+            <Card className="rounded-md border border-(--line) bg-(--paper-accent) shadow-none">
+              <Card.Header>
+                <h3 className="text-xl font-semibold text-(--ink)">Dashboard</h3>
               </Card.Header>
               <Card.Content className="space-y-6">
-                <section className="border-b border-(--line) pb-5">
-                  <SectionTitle title="Service status">
-                    {appMeta ? (
-                      <>
-                        <span>{appMeta.process_running ? "Backend process is running." : "Backend process state is unknown."}</span>
-                        {appMeta.server_url ? <span className="ml-2">{appMeta.server_url}</span> : null}
-                      </>
-                    ) : (
-                      "Release metadata is unavailable."
-                    )}
-                  </SectionTitle>
-                  {latestJob ? (
-                    <p className="mt-3 rounded-md border border-(--line) px-3 py-2 text-sm leading-6 text-(--body)">
-                      <span className="font-medium text-(--ink)">Latest job:</span>{" "}
-                      {statusMessage(latestJob)}
-                    </p>
-                  ) : (
-                    <p className="mt-3 text-sm text-muted">No tracked jobs yet.</p>
-                  )}
-                </section>
 
-                <section className="border-b border-(--line) pb-5">
-                  <SectionTitle title="Sync">
-                    Fetch feeds, classify new papers, and rebuild the review list.
-                  </SectionTitle>
+                <section className="border-b border-(--line) py-5">
                   {!hasFeeds ? (
-                    <p className="mt-3 text-sm leading-6 text-muted">
+                    <p className="mb-3 text-sm leading-6 text-muted">
                       Add and save at least one RSS feed before running a manual sync.
                     </p>
                   ) : null}
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button isDisabled={!hasFeeds} size="sm" onPress={onRunSync}>
-                      Sync now
+                      Sync
                     </Button>
-                  </div>
-                </section>
-
-                <section className="border-b border-(--line) pb-5">
-                  <SectionTitle title="Profile jobs">
-                    Generate a proposal from feedback, then review it on the Profile page.
-                  </SectionTitle>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button
-                      isDisabled={proposalGenerating}
-                      size="sm"
-                      variant="secondary"
-                      onPress={onGenerateProposal}
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        {proposalGenerating ? <Spinner color="current" size="sm" /> : null}
-                        Generate profile proposal
-                      </span>
-                    </Button>
-                  </div>
-                </section>
-
-                <section className="border-b border-(--line) pb-5">
-                  <SectionTitle title="Maintenance">
-                    Re-run classification when the profile or feed corpus changes.
-                  </SectionTitle>
-                  <div className="mt-3 flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onPress={onReclassifyRecent}>
                       Reclassify recent 50
                     </Button>
@@ -374,6 +387,94 @@ export function AdminPanel({
                       Reclassify all
                     </Button>
                   </div>
+                </section>
+                <section className="border-b border-(--line) pb-5">
+                  <h3 className="text-sm font-semibold text-(--ink)">Service</h3>
+                  <p className="mt-2 text-sm leading-6 text-muted">
+                    {appMeta
+                      ? appMeta.process_running
+                        ? "Backend process is running."
+                        : "Backend process state is unknown."
+                      : "Release metadata is unavailable."}
+                    {appMeta?.server_url ? <span className="ml-2">{appMeta.server_url}</span> : null}
+                  </p>
+                  {latestJob ? (
+                    <LatestJobPanel feeds={feeds} job={latestJob} />
+                  ) : (
+                    <p className="mt-3 text-sm text-muted">No tracked jobs yet.</p>
+                  )}
+                </section>
+
+                <section>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-(--ink)">Runtime</h3>
+                    {appMeta ? (
+                      <span className="text-sm text-muted">
+                        {appMeta.name} v{appMeta.version} · {appMeta.mode}
+                      </span>
+                    ) : null}
+                  </div>
+                  {appMeta ? (
+                    <div className="mt-3 space-y-2 text-sm leading-6 text-muted">
+                      <p className="break-all">Server: <code>{appMeta.server_url ?? "Unavailable"}</code></p>
+                      <p className="break-all">Install dir: <code>{appMeta.install_dir}</code></p>
+                      <p className="break-all">Static dir: <code>{appMeta.static_dir}</code></p>
+                      <p className="break-all">Data: <code>{appMeta.data_dir}</code></p>
+                      <p className="break-all">Logs: <code>{appMeta.logs_dir}</code></p>
+                      <p className="break-all">Config: <code>{appMeta.config_dir ?? "Unavailable"}</code></p>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-muted">Release metadata is unavailable.</p>
+                  )}
+                </section>
+
+                <section className="border-t border-(--line) pt-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-(--ink)">Update check</h3>
+                    <Button
+                      isDisabled={appUpdateChecking}
+                      size="sm"
+                      variant="outline"
+                      onPress={onCheckForUpdates}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        {appUpdateChecking ? <Spinner color="current" size="sm" /> : null}
+                        {appUpdateChecking ? "Checking..." : "Check for updates"}
+                      </span>
+                    </Button>
+                  </div>
+                  {appUpdate ? (
+                    <div className="mt-3 text-sm leading-6 text-muted">
+                      <p>Status: {appUpdate.status}</p>
+                      {appUpdate.latest_version ? <p>Latest version: {appUpdate.latest_version}</p> : null}
+                      {lastCheckedLabel ? <p>Last checked: {lastCheckedLabel}</p> : null}
+                      {appUpdate.detail ? <p>{appUpdate.detail}</p> : null}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {appUpdate.download_url ? (
+                          <a
+                            className="rounded-md border border-(--line) px-3 py-2 text-sm text-(--ink)"
+                            href={appUpdate.download_url}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            Download installer
+                          </a>
+                        ) : null}
+                        {appUpdate.release_notes_url ? (
+                          <a
+                            className="rounded-md border border-(--line) px-3 py-2 text-sm text-(--ink)"
+                            href={appUpdate.release_notes_url}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            Release notes
+                          </a>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-muted">Update information is unavailable.</p>
+                  )}
                 </section>
 
                 {verificationJob ? (
@@ -393,16 +494,13 @@ export function AdminPanel({
           </div>
 
           <div className="mt-5 space-y-5" hidden={activeTab !== "feeds"}>
-            <Card className="border border-(--line) bg-(--paper-accent)">
-              <Card.Header className="space-y-1">
+            <Card className="rounded-md border border-(--line) bg-(--paper-accent) shadow-none">
+              <Card.Header>
                 <h3 className="text-xl font-semibold text-(--ink)">Feeds</h3>
-                <p className="text-sm leading-6 text-muted">
-                  RSS subscriptions are stored in local app state.
-                </p>
               </Card.Header>
               <Card.Content className="space-y-5">
                 <section className="border-b border-(--line) pb-5">
-                  <SectionTitle title="Quick add" />
+                  <h3 className="text-sm font-semibold text-(--ink)">Quick add</h3>
                   <div className="mt-3 grid gap-3 md:grid-cols-[minmax(180px,0.7fr)_minmax(260px,1fr)_auto]">
                     <Input
                       aria-label="New feed journal name"
@@ -428,56 +526,49 @@ export function AdminPanel({
 
                 <section>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <SectionTitle title="Feed subscriptions" />
+                    <h3 className="text-sm font-semibold text-(--ink)">Feed subscriptions</h3>
                     <Button size="sm" isDisabled={feedsSaving} onPress={onSaveFeeds}>
                       {feedsSaving ? "Saving..." : "Save feeds"}
                     </Button>
                   </div>
-                  <div className="mt-3 max-h-[58vh] overflow-auto rounded-md border border-(--line)">
-                    <table className="w-full border-collapse text-sm">
-                      <thead className="sticky top-0 bg-(--paper)">
-                        <tr className="text-left text-(--ink)">
-                          <th className="px-3 py-2 font-semibold">Name</th>
-                          <th className="px-3 py-2 font-semibold">URL</th>
-                          <th className="w-20 px-3 py-2 font-semibold">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {feeds.length === 0 ? (
-                          <tr>
-                            <td className="px-3 py-4 text-muted" colSpan={3}>
-                              No RSS feeds configured yet.
-                            </td>
-                          </tr>
-                        ) : (
-                          feeds.map((item, index) => (
-                            <tr key={item.client_id ?? String(index)} className="border-t border-(--line)">
-                              <td className="px-3 py-2 align-top">
-                                <Input
-                                  aria-label={`Feed name ${index + 1}`}
-                                  className="w-full"
-                                  value={item.journal}
-                                  onChange={(event) => onFeedChange(index, "journal", event.target.value)}
-                                />
-                              </td>
-                              <td className="px-3 py-2 align-top">
-                                <Input
-                                  aria-label={`Feed URL ${index + 1}`}
-                                  className="w-full"
-                                  value={item.url}
-                                  onChange={(event) => onFeedChange(index, "url", event.target.value)}
-                                />
-                              </td>
-                              <td className="px-3 py-2 align-top">
-                                <Button size="sm" variant="ghost" onPress={() => onRemoveFeed(index)}>
-                                  Delete
-                                </Button>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                  <div className="mt-3 space-y-2">
+                    {feeds.length === 0 ? (
+                      <p className="rounded-md border border-(--line) px-3 py-4 text-sm text-muted">
+                        No RSS feeds configured yet.
+                      </p>
+                    ) : (
+                      <>
+                        <div className="hidden grid-cols-[minmax(160px,0.7fr)_minmax(280px,1fr)_96px] gap-3 px-3 text-sm font-semibold text-(--ink) md:grid">
+                          <span>Name</span>
+                          <span>URL</span>
+                          <span>Action</span>
+                        </div>
+                        <div className="max-h-[58vh] space-y-2 overflow-y-auto pr-1">
+                          {feeds.map((item, index) => (
+                            <div
+                              key={item.client_id ?? String(index)}
+                              className="grid gap-3 rounded-md border border-(--line) bg-(--paper) p-3 md:grid-cols-[minmax(160px,0.7fr)_minmax(280px,1fr)_96px]"
+                            >
+                              <Input
+                                aria-label={`Feed name ${index + 1}`}
+                                className="w-full"
+                                value={item.journal}
+                                onChange={(event) => onFeedChange(index, "journal", event.target.value)}
+                              />
+                              <Input
+                                aria-label={`Feed URL ${index + 1}`}
+                                className="w-full"
+                                value={item.url}
+                                onChange={(event) => onFeedChange(index, "url", event.target.value)}
+                              />
+                              <Button size="sm" variant="ghost" onPress={() => onRemoveFeed(index)}>
+                                Delete
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </section>
               </Card.Content>
@@ -486,6 +577,19 @@ export function AdminPanel({
 
           <div className="mt-5 space-y-5" hidden={activeTab !== "profile"}>
             <div className="space-y-4">
+              <div className="flex justify-end">
+                <Button
+                  isDisabled={proposalGenerating}
+                  size="sm"
+                  variant="secondary"
+                  onPress={onGenerateProposal}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    {proposalGenerating ? <Spinner color="current" size="sm" /> : null}
+                    Generate profile proposal
+                  </span>
+                </Button>
+              </div>
               {pendingProposal ? (
                 profile ? (
                   <ProfileProposalReview
@@ -494,7 +598,7 @@ export function AdminPanel({
                     onRejectProposal={onRejectProposal}
                   />
                 ) : (
-                  <Card className="border border-(--line) bg-(--paper-accent)">
+                  <Card className="rounded-md border border-(--line) bg-(--paper-accent) shadow-none">
                     <Card.Content className="p-4 text-sm text-muted">
                       No current profile available for proposal review.
                     </Card.Content>
@@ -508,12 +612,12 @@ export function AdminPanel({
                   saving={profileSaving}
                 />
               ) : (
-                <Card className="border border-(--line) bg-(--paper-accent)">
+                <Card className="rounded-md border border-(--line) bg-(--paper-accent) shadow-none">
                   <Card.Content className="p-4 text-sm text-muted">No profile available yet.</Card.Content>
                 </Card>
               )}
 
-              <Card className="border border-(--line) bg-(--paper-accent)">
+              <Card className="rounded-md border border-(--line) bg-(--paper-accent) shadow-none">
                 <Card.Header className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-(--ink)">Feedback queue</h3>
                   <span className="text-sm text-muted">{openFeedback.length} open</span>
@@ -567,12 +671,9 @@ export function AdminPanel({
           </div>
 
           <div className="mt-5 space-y-5" hidden={activeTab !== "model"}>
-            <Card className="border border-(--line) bg-(--paper-accent)">
-              <Card.Header className="space-y-1">
+            <Card className="rounded-md border border-(--line) bg-(--paper-accent) shadow-none">
+              <Card.Header>
                 <h3 className="text-xl font-semibold text-(--ink)">Model</h3>
-                <p className="text-sm leading-6 text-muted">
-                  Configure the two model roles used for classification and profile generation.
-                </p>
               </Card.Header>
               <Card.Content>
                 <SettingsConfigEditor
@@ -587,12 +688,9 @@ export function AdminPanel({
           </div>
 
           <div className="mt-5 space-y-5" hidden={activeTab !== "app"}>
-            <Card className="border border-(--line) bg-(--paper-accent)">
-              <Card.Header className="space-y-1">
+            <Card className="rounded-md border border-(--line) bg-(--paper-accent) shadow-none">
+              <Card.Header>
                 <h3 className="text-xl font-semibold text-(--ink)">App</h3>
-                <p className="text-sm leading-6 text-muted">
-                  Manage integrations, local files, scheduling, updates, and runtime paths.
-                </p>
               </Card.Header>
               <Card.Content className="space-y-6">
                 <SettingsConfigEditor
@@ -609,10 +707,7 @@ export function AdminPanel({
                 />
 
                 <section className="border-b border-(--line) pb-5">
-                  <SectionTitle title="Scheduled sync">
-                    FeedMeDaily uses the tray app's local daily sync settings when automatic scheduling
-                    is available.
-                  </SectionTitle>
+                  <h3 className="text-sm font-semibold text-(--ink)">Scheduled sync</h3>
                   {showSchedulerAdvisory ? (
                     <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
                       <p className="font-medium">Automatic scheduling is unavailable on this platform.</p>
@@ -673,78 +768,6 @@ export function AdminPanel({
                   </div>
                 </section>
 
-                <section className="border-b border-(--line) pb-5">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <SectionTitle title="Update check">
-                      Check the remote release manifest without auto-updating.
-                    </SectionTitle>
-                    <Button
-                      isDisabled={appUpdateChecking}
-                      size="sm"
-                      variant="outline"
-                      onPress={onCheckForUpdates}
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        {appUpdateChecking ? <Spinner color="current" size="sm" /> : null}
-                        {appUpdateChecking ? "Checking..." : "Check for updates"}
-                      </span>
-                    </Button>
-                  </div>
-                  {appUpdate ? (
-                    <div className="mt-3 text-sm leading-6 text-muted">
-                      <p>
-                        Current version: <span className="font-semibold text-(--ink)">{appUpdate.current_version}</span>
-                      </p>
-                      <p>Status: {appUpdate.status}</p>
-                      {appUpdate.latest_version ? <p>Latest version: {appUpdate.latest_version}</p> : null}
-                      {lastCheckedLabel ? <p>Last checked: {lastCheckedLabel}</p> : null}
-                      {appUpdate.detail ? <p>{appUpdate.detail}</p> : null}
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {appUpdate.download_url ? (
-                          <a
-                            className="rounded-md border border-(--line) px-3 py-2 text-sm text-(--ink)"
-                            href={appUpdate.download_url}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            Download installer
-                          </a>
-                        ) : null}
-                        {appUpdate.release_notes_url ? (
-                          <a
-                            className="rounded-md border border-(--line) px-3 py-2 text-sm text-(--ink)"
-                            href={appUpdate.release_notes_url}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            Release notes
-                          </a>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="mt-3 text-sm text-muted">Update information is unavailable.</p>
-                  )}
-                </section>
-
-                <section>
-                  <SectionTitle title="Runtime paths" />
-                  {appMeta ? (
-                    <div className="mt-3 space-y-2 text-sm leading-6 text-muted">
-                      <p>
-                        App: <span className="font-medium text-(--ink)">{appMeta.name} v{appMeta.version}</span>
-                      </p>
-                      <p>Mode: {appMeta.mode}</p>
-                      <p className="break-all">Install dir: <code>{appMeta.install_dir}</code></p>
-                      <p className="break-all">Static dir: <code>{appMeta.static_dir}</code></p>
-                      <p className="break-all">Data: <code>{appMeta.data_dir}</code></p>
-                      <p className="break-all">Logs: <code>{appMeta.logs_dir}</code></p>
-                      <p className="break-all">Config: <code>{appMeta.config_dir ?? "Unavailable"}</code></p>
-                    </div>
-                  ) : (
-                    <p className="mt-3 text-sm text-muted">Release metadata is unavailable.</p>
-                  )}
-                </section>
               </Card.Content>
             </Card>
           </div>

@@ -30,7 +30,7 @@ const zoteroKeys = [
   "SCIRSS_ZOTERO_COLLECTION_KEY",
 ];
 
-const localAppKeys = ["SCIRSS_PROFILE_PATH", "SCIRSS_SERVER_HOST", "SCIRSS_SERVER_PORT"];
+const localAppKeys = ["SCIRSS_SERVER_HOST", "SCIRSS_SERVER_PORT"];
 
 type ProfileDraft = {
   name: string;

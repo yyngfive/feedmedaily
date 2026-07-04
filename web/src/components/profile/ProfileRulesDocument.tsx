@@ -1,4 +1,4 @@
-import {Button, Card, Input} from "@heroui/react";
+import {Button, Card} from "@heroui/react";
 import React from "react";
 
 import type {ClassificationProfile} from "../../types";
@@ -40,49 +40,22 @@ function RuleSection({items, title}: {items: string[]; title: string}) {
 
 function RuleListEditor({
   items,
-  onAdd,
   onChange,
-  onRemove,
   title,
 }: {
   items: string[];
-  onAdd: () => void;
-  onChange: (index: number, value: string) => void;
-  onRemove: (index: number) => void;
+  onChange: (items: string[]) => void;
   title: string;
 }) {
   return (
-    <section className="space-y-3 rounded-lg border border-(--line) bg-(--paper) p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-(--ink)">{title}</h3>
-          <p className="text-sm leading-6 text-muted">One rule per row. Keep rules compact and reason-based.</p>
-        </div>
-        <Button size="sm" variant="outline" onPress={onAdd}>
-          Add rule
-        </Button>
-      </div>
-      {items.length === 0 ? (
-        <p className="text-sm text-muted">No rules yet.</p>
-      ) : (
-        <div className="space-y-3">
-          {items.map((item, index) => (
-            <div
-              key={`${title}-${index}`}
-              className="grid gap-3 rounded-lg border border-(--line) p-3 md:grid-cols-[minmax(0,1fr)_auto]"
-            >
-              <Input
-                aria-label={`${title} rule ${index + 1}`}
-                value={item}
-                onChange={(event) => onChange(index, event.target.value)}
-              />
-              <Button size="sm" variant="ghost" onPress={() => onRemove(index)}>
-                Delete
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
+    <section className="space-y-2">
+      <h3 className="text-sm font-semibold text-(--ink)">{title}</h3>
+      <textarea
+        aria-label={title}
+        className="min-h-36 w-full resize-y rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm leading-6 text-(--ink)"
+        value={items.join("\n")}
+        onChange={(event) => onChange(event.target.value.split(/\r?\n/))}
+      />
     </section>
   );
 }
@@ -209,65 +182,17 @@ export function ProfileRulesDocument({
               <RuleListEditor
                 items={draft.directRules}
                 title="Direct rules"
-                onAdd={() =>
-                  setDraft((current) => ({...current, directRules: [...current.directRules, ""]}))
-                }
-                onChange={(index, value) =>
-                  setDraft((current) => ({
-                    ...current,
-                    directRules: current.directRules.map((item, itemIndex) =>
-                      itemIndex === index ? value : item,
-                    ),
-                  }))
-                }
-                onRemove={(index) =>
-                  setDraft((current) => ({
-                    ...current,
-                    directRules: current.directRules.filter((_item, itemIndex) => itemIndex !== index),
-                  }))
-                }
+                onChange={(directRules) => setDraft((current) => ({...current, directRules}))}
               />
               <RuleListEditor
                 items={draft.indirectRules}
                 title="Indirect rules"
-                onAdd={() =>
-                  setDraft((current) => ({...current, indirectRules: [...current.indirectRules, ""]}))
-                }
-                onChange={(index, value) =>
-                  setDraft((current) => ({
-                    ...current,
-                    indirectRules: current.indirectRules.map((item, itemIndex) =>
-                      itemIndex === index ? value : item,
-                    ),
-                  }))
-                }
-                onRemove={(index) =>
-                  setDraft((current) => ({
-                    ...current,
-                    indirectRules: current.indirectRules.filter((_item, itemIndex) => itemIndex !== index),
-                  }))
-                }
+                onChange={(indirectRules) => setDraft((current) => ({...current, indirectRules}))}
               />
               <RuleListEditor
                 items={draft.unrelatedRules}
                 title="Unrelated rules"
-                onAdd={() =>
-                  setDraft((current) => ({...current, unrelatedRules: [...current.unrelatedRules, ""]}))
-                }
-                onChange={(index, value) =>
-                  setDraft((current) => ({
-                    ...current,
-                    unrelatedRules: current.unrelatedRules.map((item, itemIndex) =>
-                      itemIndex === index ? value : item,
-                    ),
-                  }))
-                }
-                onRemove={(index) =>
-                  setDraft((current) => ({
-                    ...current,
-                    unrelatedRules: current.unrelatedRules.filter((_item, itemIndex) => itemIndex !== index),
-                  }))
-                }
+                onChange={(unrelatedRules) => setDraft((current) => ({...current, unrelatedRules}))}
               />
             </div>
           </>

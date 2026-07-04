@@ -188,13 +188,6 @@ var Options = []Option{
 		},
 	},
 	{
-		Key:         "SCIRSS_PROFILE_PATH",
-		Label:       "Profile file path",
-		Description: "Path for the active classification profile file.",
-		Section:     "Local files",
-		InputType:   "text",
-	},
-	{
 		Key:         "SCIRSS_ZOTERO_API_KEY",
 		Label:       "Zotero API key",
 		Description: "Used for Zotero collection lookup and paper save operations.",
@@ -290,7 +283,7 @@ func Load(root string) (Settings, error) {
 		return Settings{}, err
 	}
 	valueMap := resolvedValueMap(values)
-	settings.ProfilePath = resolveProfilePath(appRoot, valueMap["SCIRSS_PROFILE_PATH"])
+	settings.ProfilePath = filepath.Join(dataDir, "classification_profile.json")
 	settings.ClassifierAPIKey = optionalValue(valueMap["SCIRSS_CLASSIFIER_API_KEY"])
 	settings.ClassifierBaseURL = valueOrDefault(valueMap["SCIRSS_CLASSIFIER_BASE_URL"], "https://api.deepseek.com")
 	settings.ClassifierModel = valueOrDefault(valueMap["SCIRSS_CLASSIFIER_MODEL"], "deepseek-v4-flash")
@@ -535,29 +528,10 @@ func releaseSecretsPath() string {
 }
 
 func defaultValueForOption(option Option, root string, mode string) (string, bool) {
-	// 某些字段的默认值依赖当前模式和目录结构，例如 profile 路径。
-	if option.Key == "SCIRSS_PROFILE_PATH" {
-		_, _, dataDir, _, _ := layoutDirs(root, mode)
-		if mode == appruntime.ModeRelease {
-			return filepath.Join(dataDir, "classification_profile.json"), true
-		}
-		return filepath.Join("data", "classification_profile.json"), true
-	}
 	if option.Default == "" {
 		return "", false
 	}
 	return option.Default, true
-}
-
-func resolveProfilePath(root string, value string) string {
-	// 允许用户传绝对路径；相对路径则相对应用根目录解析。
-	if strings.TrimSpace(value) == "" {
-		value = filepath.Join("data", "classification_profile.json")
-	}
-	if filepath.IsAbs(value) {
-		return filepath.Clean(value)
-	}
-	return filepath.Join(root, filepath.Clean(value))
 }
 
 func resolvedValueMap(values []ResolvedValue) map[string]string {
