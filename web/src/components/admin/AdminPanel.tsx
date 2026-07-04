@@ -2,6 +2,7 @@ import { Button, Card, Input, Spinner } from "@heroui/react";
 import React from "react";
 
 import { relevanceLabel } from "../../app/constants";
+import { feedCatalog } from "../../feedCatalog";
 import type { SettingsConfigUpdate } from "../../types";
 import { ProfileProposalReview } from "../profile/ProfileProposalReview";
 import { ProfileRulesDocument } from "../profile/ProfileRulesDocument";
@@ -210,6 +211,7 @@ export function AdminPanel({
   hasFeeds,
   jobs,
   onAddFeed,
+  onAddFeeds,
   onApplyProposal,
   onCheckForUpdates,
   onClose,
@@ -253,6 +255,7 @@ export function AdminPanel({
   hasFeeds: boolean;
   jobs: JobInfo[];
   onAddFeed: () => void;
+  onAddFeeds: (feeds: FeedSubscription[]) => void;
   onApplyProposal: (
     id: number,
     selection?: { accepted_change_ids: string[]; rejected_change_ids: string[] },
@@ -291,6 +294,8 @@ export function AdminPanel({
   const [verificationXML, setVerificationXML] = React.useState("");
   const [newFeedJournal, setNewFeedJournal] = React.useState("");
   const [newFeedURL, setNewFeedURL] = React.useState("");
+  const [catalogQuery, setCatalogQuery] = React.useState("");
+  const [selectedCatalogURLs, setSelectedCatalogURLs] = React.useState<string[]>([]);
   const pendingProposal = proposals.find((item) => item.state === "pending") ?? null;
   const openFeedback = feedback.filter((item) => item.state === "open");
   const latestJob = jobs[0] ?? null;
@@ -312,6 +317,33 @@ export function AdminPanel({
   React.useEffect(() => {
     setVerificationXML("");
   }, [verificationJob?.id]);
+
+  const existingFeedURLs = React.useMemo(
+    () => new Set(feeds.map((feed) => feed.url.trim()).filter(Boolean)),
+    [feeds],
+  );
+  const catalogMatches = React.useMemo(() => {
+    const query = catalogQuery.trim().toLowerCase();
+    if (!query) {
+      return feedCatalog;
+    }
+    return feedCatalog.filter((item) =>
+      `${item.journal} ${item.publisher}`.toLowerCase().includes(query),
+    );
+  }, [catalogQuery]);
+  const selectedCatalogFeeds = React.useMemo(
+    () => feedCatalog.filter((item) => selectedCatalogURLs.includes(item.url)),
+    [selectedCatalogURLs],
+  );
+  const addSelectedCatalogFeeds = () => {
+    onAddFeeds(selectedCatalogFeeds.map((item) => ({journal: item.journal, url: item.url})));
+    setSelectedCatalogURLs([]);
+  };
+  const toggleCatalogFeed = (url: string) => {
+    setSelectedCatalogURLs((current) =>
+      current.includes(url) ? current.filter((item) => item !== url) : [...current, url],
+    );
+  };
 
   const addDraftFeed = () => {
     const journal = newFeedJournal.trim();
@@ -501,7 +533,72 @@ export function AdminPanel({
               <Card.Content className="space-y-5">
                 <section className="border-b border-(--line) pb-5">
                   <h3 className="text-sm font-semibold text-(--ink)">Quick add</h3>
-                  <div className="mt-3 grid gap-3 md:grid-cols-[minmax(180px,0.7fr)_minmax(260px,1fr)_auto]">
+                  <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(280px,0.95fr)_minmax(280px,1fr)]">
+                    <div className="rounded-md border border-(--line) bg-(--paper) p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-(--ink)">Catalog</p>
+                        <a
+                          className="text-sm text-muted underline-offset-3 hover:underline"
+                          href="https://github.com/yyngfive/sci-rss-list"
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          More methods
+                        </a>
+                      </div>
+                      <Input
+                        aria-label="Search feed catalog"
+                        className="mt-3"
+                        placeholder="Search journal or publisher"
+                        value={catalogQuery}
+                        onChange={(event) => setCatalogQuery(event.target.value)}
+                      />
+                      <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
+                        {catalogMatches.length === 0 ? (
+                          <p className="rounded-md border border-(--line) px-3 py-3 text-sm text-muted">
+                            No catalog matches.
+                          </p>
+                        ) : (
+                          catalogMatches.map((item) => {
+                            const selected = selectedCatalogURLs.includes(item.url);
+                            const exists = existingFeedURLs.has(item.url.trim());
+                            return (
+                              <label
+                                key={item.url}
+                                className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-md border border-(--line) px-3 py-2 text-sm"
+                              >
+                                <input
+                                  checked={selected}
+                                  className="mt-1"
+                                  disabled={exists}
+                                  type="checkbox"
+                                  onChange={() => toggleCatalogFeed(item.url)}
+                                />
+                                <span className="min-w-0">
+                                  <span className="flex flex-wrap items-center gap-2">
+                                    <span className="font-medium text-(--ink)">{item.journal}</span>
+                                    <span className="text-xs text-muted">{item.publisher}</span>
+                                    {exists ? <span className="text-xs text-muted">Added</span> : null}
+                                  </span>
+                                  <span className="mt-1 block break-all text-xs text-muted">
+                                    {item.url}
+                                  </span>
+                                </span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                      <Button
+                        className="mt-3"
+                        isDisabled={selectedCatalogFeeds.length === 0}
+                        size="sm"
+                        onPress={addSelectedCatalogFeeds}
+                      >
+                        Add selected
+                      </Button>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-[minmax(150px,0.7fr)_minmax(220px,1fr)_auto] lg:grid-cols-1">
                     <Input
                       aria-label="New feed journal name"
                       placeholder="Journal name"
@@ -521,6 +618,7 @@ export function AdminPanel({
                     >
                       {feeds.length === 0 ? "Add first feed" : "Add feed"}
                     </Button>
+                    </div>
                   </div>
                 </section>
 
