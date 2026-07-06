@@ -28,6 +28,8 @@
   --info-bg: #eff6ff;
   --info-line: #93c5fd;
   --info-ink: #1d4ed8;
+  --control-radius: 8px;
+  --field-radius: var(--control-radius);
 }
 
 :root[data-theme="dark"] {
@@ -118,11 +120,33 @@ a {
 
 .input,
 .textarea,
-.select__trigger {
+.select__trigger,
+.checkbox__control {
   border: 1px solid var(--line);
   background: var(--paper-accent);
   color: var(--ink);
   box-shadow: none;
+}
+
+.input,
+.textarea,
+.select__trigger {
+  border-radius: var(--control-radius);
+}
+
+.checkbox__control {
+  border-radius: calc(var(--control-radius) / 2);
+}
+
+.checkbox[data-selected] .checkbox__control,
+.checkbox[data-indeterminate] .checkbox__control {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--paper-accent);
+}
+
+.select__popover {
+  border-radius: var(--control-radius);
 }
 
 .input::placeholder,
@@ -132,13 +156,15 @@ a {
 
 .input:hover,
 .textarea:hover,
-.select__trigger:hover {
+.select__trigger:hover,
+.checkbox[data-hovered] .checkbox__control {
   border-color: var(--line-strong);
 }
 
 .input:focus-visible,
 .textarea:focus-visible,
-.select__trigger[data-focus-visible="true"] {
+.select__trigger[data-focus-visible="true"],
+.checkbox[data-focus-visible] .checkbox__control {
   border-color: var(--accent);
   outline: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
   outline-offset: 1px;

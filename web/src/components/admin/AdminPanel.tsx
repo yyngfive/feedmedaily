@@ -323,6 +323,20 @@ export function AdminPanel({
     setVerificationXML("");
   }, [verificationJob?.id]);
 
+  React.useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const originalBodyOverflow = document.body.style.overflow;
+    const originalDocumentOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = originalBodyOverflow;
+      document.documentElement.style.overflow = originalDocumentOverflow;
+    };
+  }, [open]);
+
   const catalogPublishers = React.useMemo(
     () => ["All", ...Array.from(new Set(feedCatalog.map((item) => item.publisher))).sort()],
     [],
@@ -378,8 +392,8 @@ export function AdminPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/20">
-      <aside className="h-full w-full max-w-[min(1040px,96vw)] overflow-auto border-l border-(--line) bg-(--paper) p-5 shadow-xl">
+    <div className="fixed inset-0 z-40 flex justify-end overscroll-contain bg-slate-900/20">
+      <aside className="h-full w-full max-w-[min(1040px,96vw)] overflow-auto overscroll-contain border-l border-(--line) bg-(--paper) p-5 shadow-xl">
         <div className="w-full">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 space-y-3">

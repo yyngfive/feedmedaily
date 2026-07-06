@@ -8,6 +8,11 @@ The latest released version is `0.4.0`. The next planned release is `0.4.1`, so 
 
 Changes since `0.4.0`:
 
+### Fixed
+
+- Fixed Settings drawer and checkbox interactions so opening Settings or selecting lower list items no longer scrolls the underlying review page or jumps the drawer unexpectedly.
+- Unified form control radius across inputs, selects, select popovers, and checkbox controls for a more consistent UI.
+
 ## 0.4.0 (2026-07-06)
 
 Changes since `0.3.4`:

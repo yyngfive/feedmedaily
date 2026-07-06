@@ -8,6 +8,7 @@
 ## UI
 
 - [X] open logs、data、 install按钮失效
+- [X] 设置页面滚动问题
 
 ## Profile
 
@@ -19,7 +20,8 @@
 
 ## Feed
 
-- [ ] 增加一个内置的Feed List以及官方RSS List跳转页
+- [X] 增加一个内置的Feed List以及官方RSS List跳转页
+- [ ] PNAS官方区分了学科
 - [X] 增加获取feed、metadata、llm分类时的具体进度条（当前已有状态消息提示，但还不是进度条）
 
 ## Initialization & Settings

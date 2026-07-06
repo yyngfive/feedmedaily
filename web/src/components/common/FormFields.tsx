@@ -1,4 +1,4 @@
-import type {InputHTMLAttributes, ReactNode} from "react";
+import React, {type InputHTMLAttributes, type ReactNode} from "react";
 import {Checkbox, Description, Input, Label, TextArea, TextField} from "@heroui/react";
 
 type TextInputFieldProps = {
@@ -25,6 +25,34 @@ type TextAreaFieldProps = {
   value: string;
   onChange: (value: string) => void;
 };
+
+type ScrollSnapshot = {
+  element: HTMLElement;
+  left: number;
+  top: number;
+};
+
+function captureScrollParents(node: HTMLElement | null): ScrollSnapshot[] {
+  const snapshots: ScrollSnapshot[] = [];
+  const seen = new Set<HTMLElement>();
+  for (let current = node?.parentElement ?? null; current; current = current.parentElement) {
+    if (current.scrollHeight > current.clientHeight || current.scrollWidth > current.clientWidth) {
+      snapshots.push({element: current, left: current.scrollLeft, top: current.scrollTop});
+      seen.add(current);
+    }
+  }
+  const root = document.scrollingElement;
+  if (root instanceof HTMLElement && !seen.has(root)) {
+    snapshots.push({element: root, left: root.scrollLeft, top: root.scrollTop});
+  }
+  return snapshots;
+}
+
+function restoreScrollParents(snapshots: ScrollSnapshot[]) {
+  for (const item of snapshots) {
+    item.element.scrollTo({left: item.left, top: item.top});
+  }
+}
 
 export function TextInputField({
   className = "",
@@ -91,12 +119,31 @@ export function CheckboxRow({
   disabled?: boolean;
   onChange: (checked: boolean) => void;
 }) {
+  const rootRef = React.useRef<HTMLLabelElement | null>(null);
+  const scrollSnapshotRef = React.useRef<ScrollSnapshot[]>([]);
+  const captureScroll = () => {
+    scrollSnapshotRef.current = captureScrollParents(rootRef.current);
+  };
+  const restoreScroll = () => restoreScrollParents(scrollSnapshotRef.current);
+  const handleChange = (nextChecked: boolean) => {
+    if (scrollSnapshotRef.current.length === 0) {
+      captureScroll();
+    }
+    onChange(nextChecked);
+    queueMicrotask(restoreScroll);
+    window.requestAnimationFrame(restoreScroll);
+    window.setTimeout(restoreScroll, 0);
+    window.setTimeout(restoreScroll, 50);
+  };
+
   return (
     <Checkbox
+      ref={rootRef}
       className={`w-full ${className}`}
       isDisabled={disabled}
       isSelected={checked}
-      onChange={onChange}
+      onChange={handleChange}
+      onPointerDownCapture={captureScroll}
     >
       <Checkbox.Content className="!flex !flex-row items-start gap-2 text-left">
         <Checkbox.Control className="mt-1 shrink-0">

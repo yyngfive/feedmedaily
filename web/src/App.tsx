@@ -1830,7 +1830,7 @@ export function App() {
   }
 
   return (
-    <main className="flex h-screen flex-col overflow-hidden bg-[--paper] text-[--ink]">
+    <main className="fixed inset-0 flex flex-col overflow-hidden bg-[--paper] text-[--ink]">
       <TopBar
         message={message}
         onOpenAdmin={() => setAdminOpen(true)}
