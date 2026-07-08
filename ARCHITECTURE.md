@@ -45,13 +45,13 @@ Legacy reference files still remain in the repository for comparison and regress
 - settings endpoints for config, feeds, and scheduler
 - report, feedback, paper-read, and profile proposal APIs
 - profile bootstrap, proposal generation, proposal apply/reject, and reclassify flows
-- Zotero collection listing and save flows
+- Zotero recursive collection-tree listing and save flows
 - admin job endpoints including sync and reclassify
 - protected-feed verification start, callback, and completion endpoints
 - structured job-progress payloads for fetch, metadata, classification, report refresh, and profile-generation status updates
 - static React asset serving and SPA fallback
 
-`Run Sync Now` is fully owned by Go end-to-end: feed fetch, ingest, conditional metadata enrichment, classification, report refresh, and background job state all run through `feedmedailyd`.
+`Run Sync Now` is fully owned by Go end-to-end: feed fetch, ingest, conditional metadata enrichment, classification, report refresh, and background job state all run through `feedmedailyd`. The same `/api/admin/run` endpoint also accepts an optional saved-feed URL list so Dashboard can run a targeted manual sync without changing the stored subscriptions.
 
 The job polling endpoints expose both human-readable messages and structured progress fields so the UI can show stage-aware status such as current feed `i/N`, metadata/classification completion percentages, step-based profile generation progress, and structured latest-job summaries. Sync warning details are read from the existing job result errors and matched back to the current feed list by URL.
 

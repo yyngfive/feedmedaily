@@ -277,7 +277,7 @@ export function AdminPanel({
   onReclassifyRecent: () => void;
   onRejectProposal: (id: number) => void;
   onRemoveFeed: (index: number) => void;
-  onRunSync: () => void;
+  onRunSync: (feedURLs?: string[]) => void;
   onSaveConfig: (fields: Record<string, SettingsConfigUpdate>) => Promise<void>;
   onSaveProfile: (profile: ClassificationProfile) => Promise<void> | void;
   onSaveScheduler: (dailyTime: string) => Promise<void>;
@@ -301,6 +301,9 @@ export function AdminPanel({
   const [catalogPublisher, setCatalogPublisher] = React.useState("All");
   const [catalogQuery, setCatalogQuery] = React.useState("");
   const [selectedCatalogURLs, setSelectedCatalogURLs] = React.useState<string[]>([]);
+  const [syncFeedQuery, setSyncFeedQuery] = React.useState("");
+  const [selectedSyncFeedURLs, setSelectedSyncFeedURLs] = React.useState<string[]>([]);
+  const [feedsEditing, setFeedsEditing] = React.useState(false);
   const pendingProposal = proposals.find((item) => item.state === "pending") ?? null;
   const openFeedback = feedback.filter((item) => item.state === "open");
   const latestJob = jobs[0] ?? null;
@@ -322,6 +325,11 @@ export function AdminPanel({
   React.useEffect(() => {
     setVerificationXML("");
   }, [verificationJob?.id]);
+
+  React.useEffect(() => {
+    const savedURLs = new Set(feeds.map((feed) => feed.url.trim()).filter(Boolean));
+    setSelectedSyncFeedURLs((current) => current.filter((url) => savedURLs.has(url)));
+  }, [feeds]);
 
   React.useEffect(() => {
     if (!open) {
@@ -361,6 +369,31 @@ export function AdminPanel({
     () => feedCatalog.filter((item) => selectedCatalogURLs.includes(item.url)),
     [selectedCatalogURLs],
   );
+  const syncFeedMatches = React.useMemo(() => {
+    const query = syncFeedQuery.trim().toLowerCase();
+    return feeds.filter((feed) => {
+      if (!feed.url.trim()) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      return `${feed.journal} ${feed.url}`.toLowerCase().includes(query);
+    });
+  }, [feeds, syncFeedQuery]);
+  const savedSyncFeedURLs = React.useMemo(
+    () => feeds.map((feed) => feed.url.trim()).filter(Boolean),
+    [feeds],
+  );
+  const runDashboardSync = () => {
+    const selected = selectedSyncFeedURLs.filter((url) => savedSyncFeedURLs.includes(url));
+    onRunSync(selected.length > 0 && selected.length < savedSyncFeedURLs.length ? selected : undefined);
+  };
+  const toggleSyncFeed = (url: string) => {
+    setSelectedSyncFeedURLs((current) =>
+      current.includes(url) ? current.filter((item) => item !== url) : [...current, url],
+    );
+  };
   const toggleCatalogFeed = (url: string) => {
     setSelectedCatalogURLs((current) =>
       current.includes(url) ? current.filter((item) => item !== url) : [...current, url],
@@ -369,6 +402,7 @@ export function AdminPanel({
   const addSelectedCatalogFeeds = () => {
     onAddFeeds(selectedCatalogFeeds.map((item) => ({journal: item.journal, url: item.url})));
     setSelectedCatalogURLs([]);
+    setFeedsEditing(true);
   };
 
   const addDraftFeed = () => {
@@ -385,6 +419,7 @@ export function AdminPanel({
     }, 0);
     setNewFeedJournal("");
     setNewFeedURL("");
+    setFeedsEditing(true);
   };
 
   if (!open) {
@@ -432,7 +467,7 @@ export function AdminPanel({
                     </p>
                   ) : null}
                   <div className="flex flex-wrap gap-2">
-                    <Button isDisabled={!hasFeeds} size="sm" onPress={onRunSync}>
+                    <Button isDisabled={!hasFeeds} size="sm" onPress={runDashboardSync}>
                       Sync
                     </Button>
                     <Button size="sm" variant="outline" onPress={onReclassifyRecent}>
@@ -445,6 +480,59 @@ export function AdminPanel({
                       Reclassify all
                     </Button>
                   </div>
+                  {hasFeeds ? (
+                    <div className="mt-4 w-full">
+                      <div className="flex flex-wrap items-end gap-2">
+                        <TextInputField
+                          hideLabel
+                          className="min-w-60 flex-1"
+                          label="Search feeds for targeted sync"
+                          placeholder="Search feeds"
+                          value={syncFeedQuery}
+                          onChange={setSyncFeedQuery}
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onPress={() => setSelectedSyncFeedURLs(savedSyncFeedURLs)}
+                        >
+                          Select all
+                        </Button>
+                        <Button
+                          isDisabled={selectedSyncFeedURLs.length === 0}
+                          size="sm"
+                          variant="ghost"
+                          onPress={() => setSelectedSyncFeedURLs([])}
+                        >
+                          Clear
+                        </Button>
+                      </div>
+                      <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
+                        {syncFeedMatches.length === 0 ? (
+                          <p className="rounded-md border border-(--line) px-3 py-3 text-sm text-muted">
+                            No feed matches.
+                          </p>
+                        ) : (
+                          syncFeedMatches.map((feed) => {
+                            const url = feed.url.trim();
+                            return (
+                              <CheckboxRow
+                                key={feed.client_id ?? url}
+                                checked={selectedSyncFeedURLs.includes(url)}
+                                className="rounded-md border border-(--line) px-3 py-2 text-sm"
+                                onChange={() => toggleSyncFeed(url)}
+                              >
+                                <span className="min-w-0">
+                                  <span className="font-medium text-(--ink)">{feed.journal}</span>
+                                  <span className="mt-1 block break-all text-xs text-muted">{feed.url}</span>
+                                </span>
+                              </CheckboxRow>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
                 </section>
                 <section className="border-b border-(--line) pb-5">
                   <h3 className="text-sm font-semibold text-(--ink)">Service</h3>
@@ -578,7 +666,7 @@ export function AdminPanel({
                       value={catalogQuery}
                       onChange={setCatalogQuery}
                     />
-                    <div className="mt-3 flex max-h-24 flex-wrap gap-2 overflow-y-auto pr-1">
+                    <div className="mt-3 flex max-h-32 flex-wrap gap-2 overflow-y-auto pr-1">
                       {catalogPublishers.map((publisher) => (
                         <Button
                           key={publisher}
@@ -659,16 +747,43 @@ export function AdminPanel({
 
                 <section>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-(--ink)">Feed subscriptions</h3>
-                    <Button size="sm" isDisabled={feedsSaving} onPress={onSaveFeeds}>
-                      {feedsSaving ? "Saving..." : "Save feeds"}
-                    </Button>
+                    <h3 className="text-sm font-semibold text-(--ink)">
+                      Feed subscriptions ({feeds.length})
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {feeds.length > 0 ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onPress={() => setFeedsEditing((current) => !current)}
+                        >
+                          {feedsEditing ? "Cancel" : "Edit"}
+                        </Button>
+                      ) : null}
+                      {feedsEditing ? (
+                        <Button size="sm" isDisabled={feedsSaving} onPress={onSaveFeeds}>
+                          {feedsSaving ? "Saving..." : "Save feeds"}
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="mt-3 space-y-2">
                     {feeds.length === 0 ? (
                       <p className="rounded-md border border-(--line) px-3 py-4 text-sm text-muted">
                         No RSS feeds configured yet.
                       </p>
+                    ) : !feedsEditing ? (
+                      <div className="max-h-[58vh] space-y-2 overflow-y-auto pr-1">
+                        {feeds.map((item, index) => (
+                          <div
+                            key={item.client_id ?? String(index)}
+                            className="rounded-md border border-(--line) bg-(--paper) px-3 py-2 text-sm"
+                          >
+                            <p className="font-medium text-(--ink)">{item.journal || "Untitled feed"}</p>
+                            <p className="mt-1 break-all text-xs text-muted">{item.url}</p>
+                          </div>
+                        ))}
+                      </div>
                     ) : (
                       <>
                         <div className="hidden grid-cols-[minmax(160px,0.7fr)_minmax(280px,1fr)_96px] gap-3 px-3 text-sm font-semibold text-(--ink) md:grid">

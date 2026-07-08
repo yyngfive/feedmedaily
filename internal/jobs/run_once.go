@@ -17,6 +17,7 @@ import (
 type RunOptions struct {
 	MaxPapers         int
 	Reclassify        bool
+	SelectedFeedURLs  []string
 	FeedBodyOverrides map[string][]byte
 	SkippedFeeds      map[string]string
 	VerifyFeedHost    feeds.VerifyHostFunc
@@ -52,11 +53,12 @@ var fetchAllFeedsFunc = feeds.FetchAll
 func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (RunSummary, error) {
 	logging.SetDefaultDir(settings.LogsDir)
 	fetchResult, err := fetchAllFeedsFunc(settings.FeedsPath, feeds.FetchOptions{
-		MaxPapers:      opts.MaxPapers,
-		OverrideBodies: opts.FeedBodyOverrides,
-		BodyCache:      opts.FeedBodyOverrides,
-		SkippedFeeds:   opts.SkippedFeeds,
-		VerifyHost:     opts.VerifyFeedHost,
+		MaxPapers:        opts.MaxPapers,
+		SelectedFeedURLs: opts.SelectedFeedURLs,
+		OverrideBodies:   opts.FeedBodyOverrides,
+		BodyCache:        opts.FeedBodyOverrides,
+		SkippedFeeds:     opts.SkippedFeeds,
+		VerifyHost:       opts.VerifyFeedHost,
 		Progress: func(current int, total int, label string) {
 			message := fmt.Sprintf("Fetching feeds %d/%d.", current, total)
 			if current > 0 && label != "" {

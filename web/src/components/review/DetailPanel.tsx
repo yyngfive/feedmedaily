@@ -1,6 +1,6 @@
 import {Button} from "@heroui/react";
 
-import {authorsLine, doiHref, feedbackLabel, paperDate} from "../../app/utils";
+import {doiHref, feedbackLabel, paperDate} from "../../app/utils";
 import type {Paper} from "../../types";
 
 function abstractHtmlForDisplay(paper: Paper): string {
@@ -33,7 +33,7 @@ export function DetailPanel({
 }) {
   if (!paper) {
     return (
-      <aside className="h-full overflow-hidden rounded-lg border border-(--line) bg-(--paper-accent) p-5 text-sm text-muted">
+      <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-(--line) bg-(--paper-accent) p-5 text-sm text-muted">
         No paper selected.
       </aside>
     );
@@ -42,16 +42,24 @@ export function DetailPanel({
   const zoteroSaved = paper.zotero_status?.saved ?? false;
   const hasAbstractHtml = Boolean(paper.abstract_html);
   const abstractHtml = hasAbstractHtml ? abstractHtmlForDisplay(paper) : "";
+  const authors = paper.authors ?? [];
 
   return (
-    <aside className="h-full space-y-5 overflow-hidden rounded-lg border border-(--line) bg-(--paper-accent) p-5">
+    <aside className="h-full space-y-5 overflow-auto rounded-lg border border-(--line) bg-(--paper-accent) p-5">
       <div className="space-y-3">
         <h2 className="text-xl font-semibold leading-7 text-(--ink)">{paper.title}</h2>
         <p className="text-base leading-6 text-muted">{paper.journal || "Unknown journal"}</p>
-        <p className="text-sm leading-6 text-muted">
-          {paperDate(paper)} · {authorsLine(paper)}
-        </p>
+        <p className="text-sm leading-6 text-muted">{paperDate(paper)}</p>
       </div>
+
+      <section className="space-y-2">
+        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+          Authors {authors.length > 0 ? `(${authors.length})` : ""}
+        </h3>
+        <p className="max-h-32 overflow-auto pr-1 text-sm leading-6 text-(--body)">
+          {authors.length > 0 ? authors.join(", ") : "Authors unavailable"}
+        </p>
+      </section>
 
       {paper.feedback_status?.note ? (
         <section className="space-y-2">
@@ -92,11 +100,11 @@ export function DetailPanel({
         </Button>
         <Button
           size="sm"
-          isDisabled={!isUnread || markReadBusy}
+          isDisabled={markReadBusy}
           variant={isUnread ? "secondary" : "outline"}
           onPress={onMarkRead}
         >
-          {markReadBusy ? "Marking..." : isUnread ? "Mark as read" : "Read"}
+          {markReadBusy ? "Updating..." : isUnread ? "Mark as read" : "Mark as unread"}
         </Button>
         <Button size="sm" variant={zoteroSaved ? "tertiary" : "tertiary"} onPress={onSave}>
           {zoteroSaved ? "Saved" : "Save to Zotero"}

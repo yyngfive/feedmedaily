@@ -642,26 +642,49 @@ func (s *Store) DeleteFeedback(id int64) error {
 
 func (s *Store) MarkPaperRead(paperID int64, now time.Time) (time.Time, error) {
 	// 以幂等方式设置 read_at，重复调用保留首次已写入的时间。
+	readAt, err := s.SetPaperRead(paperID, true, now)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if readAt == nil {
+		return time.Time{}, fmt.Errorf("update paper read status: missing read_at")
+	}
+	return *readAt, nil
+}
+
+func (s *Store) SetPaperRead(paperID int64, read bool, now time.Time) (*time.Time, error) {
+	// 单篇阅读状态可切换；read=true 仍保留首次 read_at。
+	var readAtValue any
+	if read {
+		readAtValue = now.UTC().Format(time.RFC3339Nano)
+	}
 	result, err := s.db.Exec(`
 		UPDATE papers
-		SET read_at = COALESCE(read_at, ?)
+		SET read_at = CASE WHEN ? THEN COALESCE(read_at, ?) ELSE NULL END
 		WHERE id = ?
-	`, now.UTC().Format(time.RFC3339Nano), paperID)
+	`, read, readAtValue, paperID)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("update paper read status: %w", err)
+		return nil, fmt.Errorf("update paper read status: %w", err)
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return time.Time{}, fmt.Errorf("update paper read status: %w", err)
+		return nil, fmt.Errorf("update paper read status: %w", err)
 	}
 	if rowsAffected == 0 {
-		return time.Time{}, ErrPaperNotFound
+		return nil, ErrPaperNotFound
 	}
-	var readAt string
+	var readAt sql.NullString
 	if err := s.db.QueryRow(`SELECT read_at FROM papers WHERE id = ?`, paperID).Scan(&readAt); err != nil {
-		return time.Time{}, fmt.Errorf("reload paper read status: %w", err)
+		return nil, fmt.Errorf("reload paper read status: %w", err)
 	}
-	return parseTime(readAt)
+	if !readAt.Valid || strings.TrimSpace(readAt.String) == "" {
+		return nil, nil
+	}
+	parsed, err := parseTime(readAt.String)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
 }
 
 func (s *Store) ApplyProfileProposalState(proposalID int64, version int, appliedProfile map[string]any, changes []profile.ProposalChange, now time.Time) error {

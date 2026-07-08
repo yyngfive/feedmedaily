@@ -715,6 +715,26 @@ func (s *Server) handlePaperByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed.")
 		return
 	}
+	read := true
+	if r.Body != nil {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid request body.")
+			return
+		}
+		if strings.TrimSpace(string(data)) != "" {
+			var payload struct {
+				Read *bool `json:"read"`
+			}
+			if err := json.Unmarshal(data, &payload); err != nil {
+				writeError(w, http.StatusBadRequest, "Invalid JSON body.")
+				return
+			}
+			if payload.Read != nil {
+				read = *payload.Read
+			}
+		}
+	}
 	sqliteStore, err := s.getWriteStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -724,7 +744,7 @@ func (s *Server) handlePaperByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	readAt, err := sqliteStore.MarkPaperRead(paperID, time.Now().UTC())
+	readAt, err := sqliteStore.SetPaperRead(paperID, read, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, store.ErrPaperNotFound) {
 			writeError(w, http.StatusNotFound, "Paper not found.")
@@ -1154,10 +1174,32 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	var payload struct {
+		FeedURLs []string `json:"feed_urls"`
+	}
+	if r.Body != nil {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid request body.")
+			return
+		}
+		if strings.TrimSpace(string(data)) != "" {
+			if err := json.Unmarshal(data, &payload); err != nil {
+				writeError(w, http.StatusBadRequest, "Invalid JSON body.")
+				return
+			}
+		}
+	}
+	selectedFeedURLs, err := validateSelectedFeedURLs(s.settings.FeedsPath, payload.FeedURLs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	job := launchVerificationAwareSyncJob(
 		s.settings,
 		func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error) {
 			summary, err := runSyncFunc(s.settings, jobruntime.RunOptions{
+				SelectedFeedURLs:  selectedFeedURLs,
 				FeedBodyOverrides: overrides,
 				SkippedFeeds:      skippedFeeds,
 				VerifyFeedHost:    verifyHost,
@@ -1175,6 +1217,39 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 		},
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})
+}
+
+func validateSelectedFeedURLs(feedsPath string, requested []string) ([]string, error) {
+	selected := make([]string, 0, len(requested))
+	seen := map[string]struct{}{}
+	for _, rawURL := range requested {
+		feedURL := strings.TrimSpace(rawURL)
+		if feedURL == "" {
+			continue
+		}
+		if _, ok := seen[feedURL]; ok {
+			continue
+		}
+		seen[feedURL] = struct{}{}
+		selected = append(selected, feedURL)
+	}
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	subscriptions, err := feeds.ReadSubscriptions(feedsPath)
+	if err != nil {
+		return nil, err
+	}
+	saved := map[string]struct{}{}
+	for _, subscription := range subscriptions {
+		saved[strings.TrimSpace(subscription.URL)] = struct{}{}
+	}
+	for _, feedURL := range selected {
+		if _, ok := saved[feedURL]; !ok {
+			return nil, fmt.Errorf("feed_urls contains an unknown feed URL: %s", feedURL)
+		}
+	}
+	return selected, nil
 }
 
 func (s *Server) handleFeedVerificationStart(w http.ResponseWriter, r *http.Request) {

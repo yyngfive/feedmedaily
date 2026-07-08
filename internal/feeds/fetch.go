@@ -19,12 +19,13 @@ type FetchProgressFunc func(current int, total int, label string)
 type VerifyHostFunc func(requests []VerificationRequest) VerificationResult
 
 type FetchOptions struct {
-	MaxPapers      int
-	OverrideBodies map[string][]byte
-	BodyCache      map[string][]byte
-	SkippedFeeds   map[string]string
-	Progress       FetchProgressFunc
-	VerifyHost     VerifyHostFunc
+	MaxPapers        int
+	SelectedFeedURLs []string
+	OverrideBodies   map[string][]byte
+	BodyCache        map[string][]byte
+	SkippedFeeds     map[string]string
+	Progress         FetchProgressFunc
+	VerifyHost       VerifyHostFunc
 }
 
 type FetchResult struct {
@@ -269,12 +270,36 @@ func feedHostKey(rawURL string) string {
 	return strings.ToLower(strings.TrimSpace(parsed.Hostname()))
 }
 
+func filterSubscriptionsByURLs(subscriptions []Subscription, selectedURLs []string) []Subscription {
+	if len(selectedURLs) == 0 {
+		return subscriptions
+	}
+	selected := map[string]struct{}{}
+	for _, rawURL := range selectedURLs {
+		feedURL := strings.TrimSpace(rawURL)
+		if feedURL != "" {
+			selected[feedURL] = struct{}{}
+		}
+	}
+	if len(selected) == 0 {
+		return subscriptions
+	}
+	filtered := make([]Subscription, 0, len(subscriptions))
+	for _, subscription := range subscriptions {
+		if _, ok := selected[strings.TrimSpace(subscription.URL)]; ok {
+			filtered = append(filtered, subscription)
+		}
+	}
+	return filtered
+}
+
 // FetchAll reads configured feeds, fetches them, and normalizes entries into paper candidates.
 func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 	subscriptions, err := ReadSubscriptions(feedsPath)
 	if err != nil {
 		return FetchResult{}, err
 	}
+	subscriptions = filterSubscriptionsByURLs(subscriptions, opts.SelectedFeedURLs)
 	subscriptions = sortSubscriptionsByHost(subscriptions)
 	totalFeeds := len(subscriptions)
 	if opts.Progress != nil {

@@ -632,6 +632,7 @@ Linux source mode 只保存设置，不由 Web UI 自动执行；响应会给出
       "key": "COLL-1",
       "name": "Papers",
       "path_label": "Library / Papers",
+      "depth": 1,
       "parent_key": null,
       "is_default": true
     }

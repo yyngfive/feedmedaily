@@ -504,6 +504,13 @@ func TestCreateDeleteFeedbackAndMarkRead(t *testing.T) {
 	if !firstReadAt.Equal(secondReadAt) {
 		t.Fatalf("read_at should be idempotent: %s vs %s", firstReadAt, secondReadAt)
 	}
+	clearedReadAt, err := store.SetPaperRead(1, false, time.Date(2026, 5, 16, 7, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clearedReadAt != nil {
+		t.Fatalf("read_at should be cleared: %s", clearedReadAt)
+	}
 
 	if err := store.DeleteFeedback(record.ID); err != nil {
 		t.Fatal(err)

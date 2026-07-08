@@ -132,7 +132,7 @@ export function App() {
   const [sortOption, setSortOption] = React.useState<SortOption>("date-desc");
   const [markReadRequest, setMarkReadRequest] = React.useState<MarkReadRequest | null>(null);
   const [bulkReadSubmitting, setBulkReadSubmitting] = React.useState(false);
-  const [pendingReadOverrides, setPendingReadOverrides] = React.useState<Record<number, string>>({});
+  const [pendingReadOverrides, setPendingReadOverrides] = React.useState<Record<number, string | null>>({});
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
   const [feedbackRecords, setFeedbackRecords] = React.useState<FeedbackRecord[]>([]);
   const [profileProposals, setProfileProposals] = React.useState<ProfileProposal[]>([]);
@@ -166,7 +166,7 @@ export function App() {
   const markReadRequestRef = React.useRef<MarkReadRequest | null>(null);
   const localMutationRef = React.useRef<LocalMutation | null>(null);
   const profileRef = React.useRef<ClassificationProfile | null>(null);
-  const pendingReadOverridesRef = React.useRef<Record<number, string>>({});
+  const pendingReadOverridesRef = React.useRef<Record<number, string | null>>({});
   const selectedIdRef = React.useRef<number | null>(null);
   const markReadSequenceRef = React.useRef(0);
   const feedbackMutationSequenceRef = React.useRef(0);
@@ -375,7 +375,7 @@ export function App() {
         paperCount: next.papers.length,
         pendingReadStatus,
       });
-      const confirmedOverrides: Array<{paperId: number; refreshedReadAt: string}> = [];
+      const confirmedOverrides: Array<{paperId: number; refreshedReadAt: string | null}> = [];
       flushSync(() => {
         setReportLoadError(null);
         setReport(next);
@@ -389,16 +389,19 @@ export function App() {
           for (const pendingPaperId of pendingPaperIds) {
             const paperId = Number(pendingPaperId);
             const refreshedPaper = nextPapersById.get(paperId) ?? null;
-            if (!refreshedPaper?.read_at) {
+            if (!refreshedPaper) {
               continue;
             }
             if (!(paperId in nextOverrides)) {
               continue;
             }
+            if ((nextOverrides[paperId] ?? null) !== (refreshedPaper.read_at ?? null)) {
+              continue;
+            }
             delete nextOverrides[paperId];
             confirmedOverrides.push({
               paperId,
-              refreshedReadAt: refreshedPaper.read_at,
+              refreshedReadAt: refreshedPaper.read_at ?? null,
             });
             changed = true;
           }
@@ -791,11 +794,12 @@ export function App() {
 
   const effectivePapers = React.useMemo(
     () =>
-      report.papers.map((paper) =>
-        pendingReadOverrides[paper.id]
-          ? {...paper, read_at: pendingReadOverrides[paper.id]}
-          : paper,
-      ),
+      report.papers.map((paper) => {
+        if (!Object.prototype.hasOwnProperty.call(pendingReadOverrides, paper.id)) {
+          return paper;
+        }
+        return {...paper, read_at: pendingReadOverrides[paper.id]};
+      }),
     [pendingReadOverrides, report.papers],
   );
 
@@ -975,6 +979,17 @@ export function App() {
     return effectivePapers.find((paper) => paper.id === selectedPaperId) ?? null;
   }, [effectivePapers, needsFeedSetup, selectedPaperId, visibleList]);
 
+  const selectedRangeUnreadPapers = React.useMemo(() => {
+    if (selectedPaperId == null) {
+      return [];
+    }
+    const selectedIndex = visibleList.findIndex((paper) => paper.id === selectedPaperId);
+    if (selectedIndex < 0) {
+      return [];
+    }
+    return visibleList.slice(0, selectedIndex + 1).filter((paper) => !paper.read_at);
+  }, [selectedPaperId, visibleList]);
+
   React.useEffect(() => {
     logMarkReadDebug("selection.changed", {
       selectedId,
@@ -1023,14 +1038,15 @@ export function App() {
 
   const persistReadStatus = async (paperId: number) => {
     const paper = effectivePapers.find((item) => item.id === paperId);
-    if (!paper || paper.read_at || readMutationSubmitting) {
+    if (!paper || readMutationSubmitting) {
       return;
     }
+    const nextRead = !paper.read_at;
     const requestId = `mark-read-${++markReadSequenceRef.current}`;
     const visibleIds = visibleList.map((item) => item.id);
     const currentIndex = visibleIds.indexOf(paperId);
     let plannedNextSelectedId: number | null = paperId;
-    if (readFilter === "unread" && currentIndex >= 0) {
+    if (nextRead && readFilter === "unread" && currentIndex >= 0) {
       if (currentIndex + 1 < visibleIds.length) {
         plannedNextSelectedId = visibleIds[currentIndex + 1];
       } else if (currentIndex - 1 >= 0) {
@@ -1056,6 +1072,7 @@ export function App() {
       requestId,
       paperId,
       readFilter,
+      nextRead,
       selectedId,
       plannedNextSelectedId,
       visibleIds: visibleIds.slice(0, 12),
@@ -1066,8 +1083,9 @@ export function App() {
       logMarkReadDebug("mark-read.request.started", {
         requestId,
         paperId,
+        nextRead,
       });
-      const status = await markPaperRead(paperId);
+      const status = await markPaperRead(paperId, nextRead);
       logMarkReadDebug("mark-read.request.succeeded", {
         requestId,
         paperId,
@@ -1111,12 +1129,16 @@ export function App() {
     }
   };
 
-  const persistVisibleReadStatus = async () => {
-    const unreadPapers = visibleList.filter((paper) => !paper.read_at);
+  const persistPaperBatchRead = async (
+    unreadPapers: Paper[],
+    requestPrefix: string,
+    successLabel: string,
+    clearSelectedWhenMarked: boolean,
+  ) => {
     if (unreadPapers.length === 0 || readMutationSubmitting) {
       return;
     }
-    const requestId = `bulk-mark-read-${++markReadSequenceRef.current}`;
+    const requestId = `${requestPrefix}-${++markReadSequenceRef.current}`;
     const startedAt = performance.now();
     beginLocalMutation({
       requestId,
@@ -1150,23 +1172,25 @@ export function App() {
           return next;
         });
         setSelectedId((current) =>
-          current != null && results.some((result) => result.paperId === current)
+          clearSelectedWhenMarked &&
+          current != null &&
+          results.some((result) => result.paperId === current)
             ? null
             : current,
         );
       });
       if (failedCount > 0) {
         pushMessage("paper.bulk_read.failed", {
-          text: `Marked ${results.length} paper${results.length === 1 ? "" : "s"} as read; ${failedCount} failed.`,
+          text: `Marked ${results.length} ${successLabel}${results.length === 1 ? "" : "s"} as read; ${failedCount} failed.`,
           tone: results.length > 0 ? "warning" : "danger",
         });
       } else {
         pushMessage("paper.bulk_read.succeeded", {
-          text: `Marked ${results.length} visible paper${results.length === 1 ? "" : "s"} as read.`,
+          text: `Marked ${results.length} ${successLabel}${results.length === 1 ? "" : "s"} as read.`,
           tone: "success",
         });
       }
-      scheduleDeferredReviewRefresh(`bulk-mark-read:${requestId}:reconcile`);
+      scheduleDeferredReviewRefresh(`${requestPrefix}:${requestId}:reconcile`);
       logMarkReadDebug("bulk-mark-read.succeeded", {
         requestId,
         durationMs: Math.round(performance.now() - startedAt),
@@ -1187,6 +1211,24 @@ export function App() {
       setBulkReadSubmitting(false);
       endLocalMutation(requestId);
     }
+  };
+
+  const persistVisibleReadStatus = async () => {
+    await persistPaperBatchRead(
+      visibleList.filter((paper) => !paper.read_at),
+      "bulk-mark-read",
+      "visible paper",
+      true,
+    );
+  };
+
+  const persistSelectedRangeReadStatus = async () => {
+    await persistPaperBatchRead(
+      selectedRangeUnreadPapers,
+      "mark-above-read",
+      "selected-range paper",
+      false,
+    );
   };
 
   const openZoteroModal = (paper: Paper) => {
@@ -1675,9 +1717,9 @@ export function App() {
     }
   }, [errorText, refreshProposals]);
 
-  const handleRunAdminJob = async (path: "/api/admin/run") => {
+  const handleRunAdminJob = async (path: "/api/admin/run", feedURLs?: string[]) => {
     try {
-      registerJob(await launchAdminJob(path));
+      registerJob(await launchAdminJob(path, feedURLs?.length ? {feed_urls: feedURLs} : undefined));
       pushMessage("job.started");
     } catch (error) {
       pushErrorMessage("app.service.unavailable", error, "Could not start the sync job.");
@@ -1878,7 +1920,7 @@ export function App() {
         onSubmitVerificationXML={(job, xml) => handleSubmitVerificationXML(job, xml)}
         onApplyProposal={(id, selection) => void handleApplyProposal(id, selection)}
         onRejectProposal={(id) => void handleRejectProposal(id)}
-        onRunSync={() => void handleRunAdminJob("/api/admin/run")}
+        onRunSync={(feedURLs) => void handleRunAdminJob("/api/admin/run", feedURLs)}
         onReclassifyRecent={() => void handleReclassify("recent")}
         onReclassifyFeedback={() => void handleReclassify("feedback")}
         onReclassifyAll={() => void handleReclassify("all")}
@@ -1939,6 +1981,7 @@ export function App() {
           markAllReadBusy={bulkReadSubmitting}
           needsFeedSetup={needsFeedSetup}
           onMarkAllRead={() => void persistVisibleReadStatus()}
+          onMarkSelectedRangeRead={() => void persistSelectedRangeReadStatus()}
           onOpenAdmin={() => setAdminOpen(true)}
           onResetFilters={resetFilters}
           onRunSync={() => void handleRunAdminJob("/api/admin/run")}
@@ -1957,6 +2000,7 @@ export function App() {
           selectedId={needsFeedSetup ? null : selectedPaperId}
           setQuery={setQuery}
           setRelevance={setRelevance}
+          unreadSelectedRangeCount={selectedRangeUnreadPapers.length}
           unreadVisibleCount={visibleList.filter((paper) => !paper.read_at).length}
           visibleBaseCount={visibleBase.length}
           visibleTotals={visibleTotals}

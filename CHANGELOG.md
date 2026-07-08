@@ -8,8 +8,19 @@ The latest released version is `0.4.0`. The next planned release is `0.4.1`, so 
 
 Changes since `0.4.0`:
 
+### Added
+
+- Added a Dashboard targeted sync control so selected RSS feeds can be refreshed without running a full manual sync.
+- Added a review-list action to mark the selected paper and all visible papers above it as read.
+
 ### Fixed
 
+- Fixed Zotero collection loading for large libraries, added folder-depth display in the save picker, and improved saved item author/date metadata.
+- Fixed PNAS/RSS author parsing so affiliation text is no longer stored as authors, and kept the paper detail actions visible when metadata is unusually long.
+- Moved paper detail authors into their own scrollable block so long author lists do not crowd the abstract.
+- Fixed the detail panel read action so a read paper can be marked unread again.
+- Fixed review-list selection changes so the newly selected paper scrolls into view after read actions update the visible list.
+- Simplified the feed subscriptions section so saved feeds default to a compact read-only list with editing tucked behind an Edit button.
 - Fixed Settings drawer and checkbox interactions so opening Settings or selecting lower list items no longer scrolls the underlying review page or jumps the drawer unexpectedly.
 - Unified form control radius across inputs, selects, select popovers, and checkbox controls for a more consistent UI.
 

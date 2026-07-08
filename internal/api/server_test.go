@@ -633,6 +633,74 @@ func TestAdminSyncJob(t *testing.T) {
 	}
 }
 
+func TestAdminRunPassesSelectedFeedURLs(t *testing.T) {
+	root := t.TempDir()
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	settings := testSettings(root)
+	writeFile(t, settings.FeedsPath, `[
+  {"journal":"One","url":"https://example.com/one.rss"},
+  {"journal":"Two","url":"https://example.com/two.rss"}
+]`)
+	seenOptions := make(chan jobruntime.RunOptions, 1)
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		seenOptions <- opts
+		return jobruntime.RunSummary{Fetched: 1, Inserted: 1, Classified: 1}, nil
+	}
+	handler := newTestHandler(t, settings)
+
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/run",
+		strings.NewReader(`{"feed_urls":["https://example.com/two.rss"]}`),
+	))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run launch = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	var runPayload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(runRecorder.Body.Bytes(), &runPayload); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobCompletion(t, runPayload.Job.ID)
+
+	select {
+	case opts := <-seenOptions:
+		if strings.Join(opts.SelectedFeedURLs, "|") != "https://example.com/two.rss" {
+			t.Fatalf("selected feed urls = %#v", opts.SelectedFeedURLs)
+		}
+	default:
+		t.Fatal("runSyncFunc did not receive options")
+	}
+}
+
+func TestAdminRunRejectsUnknownSelectedFeedURL(t *testing.T) {
+	root := t.TempDir()
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	settings := testSettings(root)
+	writeFile(t, settings.FeedsPath, `[{"journal":"One","url":"https://example.com/one.rss"}]`)
+	runSyncFunc = func(_ config.Settings, _ jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		t.Fatal("runSyncFunc should not be called for invalid feed_urls")
+		return jobruntime.RunSummary{}, nil
+	}
+	handler := newTestHandler(t, settings)
+
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(
+		http.MethodPost,
+		"/api/admin/run",
+		strings.NewReader(`{"feed_urls":["https://example.com/missing.rss"]}`),
+	))
+	if runRecorder.Code != http.StatusBadRequest || !contains(runRecorder.Body.String(), "unknown feed URL") {
+		t.Fatalf("run response = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+}
+
 func TestFeedbackReadAndDeleteMutationAPIs(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)
@@ -655,6 +723,11 @@ func TestFeedbackReadAndDeleteMutationAPIs(t *testing.T) {
 	handler.ServeHTTP(readAgainRecorder, httptest.NewRequest(http.MethodPost, "/api/papers/1/read", nil))
 	if readAgainRecorder.Code != http.StatusOK || readAgainRecorder.Body.String() != firstReadPayload {
 		t.Fatalf("mark read again = %d %s", readAgainRecorder.Code, readAgainRecorder.Body.String())
+	}
+	unreadRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(unreadRecorder, httptest.NewRequest(http.MethodPost, "/api/papers/1/read", strings.NewReader(`{"read":false}`)))
+	if unreadRecorder.Code != http.StatusOK || !contains(unreadRecorder.Body.String(), `"read_at":null`) {
+		t.Fatalf("mark unread = %d %s", unreadRecorder.Code, unreadRecorder.Body.String())
 	}
 
 	deleteRecorder := httptest.NewRecorder()

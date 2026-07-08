@@ -14,7 +14,23 @@ function Read-FeedCatalogJson {
   if (-not [string]::IsNullOrWhiteSpace($SourcePath)) {
     return Get-Content -LiteralPath $SourcePath -Raw
   }
-  return (Invoke-WebRequest -UseBasicParsing -Uri $SourceUrl -TimeoutSec 60).Content
+
+  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+  $lastError = $null
+  foreach ($attempt in 1..3) {
+    try {
+      return (Invoke-WebRequest -UseBasicParsing -Uri $SourceUrl -TimeoutSec 60).Content
+    }
+    catch {
+      $lastError = $_
+      if ($attempt -eq 3) {
+        break
+      }
+      Write-Warning "Feed catalog download failed (attempt $attempt of 3): $($_.Exception.Message)"
+      Start-Sleep -Seconds (2 * $attempt)
+    }
+  }
+  throw $lastError
 }
 
 function ConvertTo-TypeScriptString {

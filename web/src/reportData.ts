@@ -299,10 +299,14 @@ export async function deleteFeedback(feedbackId: number): Promise<void> {
   );
 }
 
-export async function markPaperRead(paperId: number): Promise<PaperReadStatus> {
+export async function markPaperRead(paperId: number, read = true): Promise<PaperReadStatus> {
   return localJSONRequest(
     `/api/papers/${paperId}/read`,
-    {method: "POST"},
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({read}),
+    },
     "update read status",
     "Could not update read status",
   );
@@ -379,10 +383,17 @@ export async function saveToZotero(
 
 export async function launchAdminJob(
   path: "/api/admin/run",
+  input?: {feed_urls?: string[]},
 ): Promise<JobInfo> {
   const payload = await localJSONRequest<{job: JobInfo}>(
     path,
-    {method: "POST"},
+    input?.feed_urls?.length
+      ? {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(input),
+        }
+      : {method: "POST"},
     "start the sync job",
     "Could not start the sync job",
   );

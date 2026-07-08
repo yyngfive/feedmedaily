@@ -114,7 +114,7 @@ export type AbstractImage = {
 
 export type PaperReadStatus = {
   paper_id: number;
-  read_at: string;
+  read_at: string | null;
 };
 
 export type Classification = {
@@ -149,6 +149,7 @@ export type ZoteroCollectionOption = {
   key: string;
   name: string;
   path_label: string;
+  depth: number;
   parent_key?: string | null;
   is_default: boolean;
 };

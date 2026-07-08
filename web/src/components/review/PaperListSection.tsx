@@ -1,5 +1,6 @@
+import React from "react";
 import {Button} from "@heroui/react";
-import {Virtuoso} from "react-virtuoso";
+import {Virtuoso, type VirtuosoHandle} from "react-virtuoso";
 
 import {relevanceTabs, type RelevanceFilter} from "../../app/constants";
 import {EmptyStateCard} from "../common/EmptyStateCard";
@@ -16,6 +17,7 @@ export function PaperListSection({
   markAllReadBusy,
   onOpenAdmin,
   onMarkAllRead,
+  onMarkSelectedRangeRead,
   onResetFilters,
   onRunSync,
   onSelectPaper,
@@ -27,6 +29,7 @@ export function PaperListSection({
   selectedId,
   setQuery,
   setRelevance,
+  unreadSelectedRangeCount,
   unreadVisibleCount,
   visibleBaseCount,
   visibleTotals,
@@ -38,6 +41,7 @@ export function PaperListSection({
   markAllReadBusy: boolean;
   onOpenAdmin: () => void;
   onMarkAllRead: () => void;
+  onMarkSelectedRangeRead: () => void;
   onResetFilters: () => void;
   onRunSync: () => void;
   onSelectPaper: (paper: Paper) => void;
@@ -49,10 +53,28 @@ export function PaperListSection({
   selectedId: number | null;
   setQuery: (value: string) => void;
   setRelevance: (value: RelevanceFilter) => void;
+  unreadSelectedRangeCount: number;
   unreadVisibleCount: number;
   visibleBaseCount: number;
   visibleTotals: Record<Relevance, number>;
 }) {
+  const virtuosoRef = React.useRef<VirtuosoHandle>(null);
+  const lastScrolledSelectionRef = React.useRef<string | null>(null);
+
+  React.useEffect(() => {
+    if (selectedId == null || papers.length === 0) return;
+    const selectedIndex = papers.findIndex((paper) => paper.id === selectedId);
+    if (selectedIndex < 0) return;
+    const selectionSignature = `${selectedId}:${selectedIndex}`;
+    if (lastScrolledSelectionRef.current === selectionSignature) return;
+    lastScrolledSelectionRef.current = selectionSignature;
+    virtuosoRef.current?.scrollToIndex({
+      align: "center",
+      behavior: "smooth",
+      index: selectedIndex,
+    });
+  }, [papers, selectedId]);
+
   return (
     <section className="flex h-full min-w-0 min-h-0 flex-col gap-4">
       <div className="flex-none rounded-lg border border-(--line) bg-(--paper-accent) p-4">
@@ -92,7 +114,17 @@ export function PaperListSection({
             onChange={setQuery}
           />
 
-          <div className="flex justify-end">
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              isDisabled={unreadSelectedRangeCount === 0 || markAllReadBusy}
+              onPress={onMarkSelectedRangeRead}
+            >
+              {markAllReadBusy
+                ? "Marking..."
+                : `Mark above read (${unreadSelectedRangeCount})`}
+            </Button>
             <Button
               size="sm"
               variant="outline"
@@ -170,6 +202,7 @@ export function PaperListSection({
       ) : (
         <div className="min-h-0 flex-1 overflow-hidden px-1 py-1">
           <Virtuoso
+            ref={virtuosoRef}
             className="h-full"
             computeItemKey={(index) => papers[index].id}
             increaseViewportBy={{bottom: 480, top: 240}}

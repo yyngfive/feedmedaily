@@ -20,6 +20,7 @@ var (
 	naturePrefixRE    = regexp.MustCompile(`(?i)^[^.]*?,\s*Published online:\s*.*?;\s*doi:\S+\s*`)
 	doiValueRE        = regexp.MustCompile(`10\.\d{4,9}/[-._;()/:A-Z0-9]+`)
 	elsevierDateRE    = regexp.MustCompile(`(?i)(\d{1,2}\s+[A-Za-z]+\s+\d{4})`)
+	affiliationRE     = regexp.MustCompile(`(?i)\b(author affiliations?|affiliations?|department of|school of|college of|university|institute)\b`)
 )
 
 type elsevierDescription struct {
@@ -235,7 +236,7 @@ func appendUniqueAuthors(authors []string, raw string) []string {
 }
 
 func splitAuthorList(raw string) []string {
-	clean := normalizeText(raw)
+	clean := cleanAuthorAffiliations(normalizeText(raw))
 	if clean == "" {
 		return nil
 	}
@@ -251,7 +252,29 @@ func splitAuthorList(raw string) []string {
 	if segments, ok := splitCommaSeparatedAuthors(clean); ok {
 		return segments
 	}
+	if !plausibleAuthorSegment(clean) {
+		return nil
+	}
 	return []string{clean}
+}
+
+func cleanAuthorAffiliations(value string) string {
+	clean := normalizeText(value)
+	if clean == "" {
+		return ""
+	}
+	if match := affiliationRE.FindStringIndex(clean); len(match) == 2 && match[0] > 0 {
+		clean = strings.TrimSpace(clean[:match[0]])
+	}
+	clean = strings.TrimRight(clean, " ,;")
+	return normalizeText(clean)
+}
+
+func plausibleAuthorSegment(value string) bool {
+	if affiliationRE.MatchString(value) || len(value) > 140 {
+		return false
+	}
+	return len(strings.Fields(value)) <= 14
 }
 
 func splitCommaPairAuthors(value string) ([]string, bool) {

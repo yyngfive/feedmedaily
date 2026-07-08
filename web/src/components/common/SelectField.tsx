@@ -4,6 +4,7 @@ import {Description, Label, ListBox, ListBoxItem, Select} from "@heroui/react";
 export type SelectOption = {
   label: string;
   value: string;
+  depth?: number;
 };
 
 export function SelectField({
@@ -34,6 +35,7 @@ export function SelectField({
         aria-label={label}
         id={id}
         isDisabled={disabled}
+        className="mt-2"
         selectedKey={value}
         onSelectionChange={(key: Key | null) => onChange(String(key ?? ""))}
       >
@@ -44,7 +46,12 @@ export function SelectField({
         <Select.Popover>
           <ListBox aria-label={label}>
             {options.map((option) => (
-              <ListBoxItem key={option.value} id={option.value} textValue={option.label}>
+              <ListBoxItem
+                key={option.value}
+                id={option.value}
+                style={{paddingLeft: `${0.75 + (option.depth ?? 0) * 1}rem`}}
+                textValue={option.label}
+              >
                 {option.label}
               </ListBoxItem>
             ))}

@@ -1,6 +1,7 @@
 package feeds
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	neturl "net/url"
@@ -259,6 +260,56 @@ func TestFetchAllSplitsCombinedRSSAuthorStrings(t *testing.T) {
 		if paper.Authors[i] != want[i] {
 			t.Fatalf("unexpected authors: %#v", paper.Authors)
 		}
+	}
+}
+
+func TestFetchAllStripsPNASAuthorAffiliations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>PNAS</title>
+    <item>
+      <title>Biocatalytic cascades enable manufacture of the macrocyclic peptide enlicitide</title>
+      <link>https://www.pnas.org/doi/10.1073/pnas.example</link>
+      <guid>doi:10.1073/pnas.example</guid>
+      <dc:creator>Alice Smith, Bob Q. Jones, Carol Tan Author affiliations Department of Chemistry, Example University, Example Institute</dc:creator>
+      <description><![CDATA[<p>Abstract text.</p>]]></description>
+    </item>
+  </channel>
+</rss>`))
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[{"journal":"PNAS","url":"`+server.URL+`"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Papers) != 1 {
+		t.Fatalf("papers = %d", len(result.Papers))
+	}
+	want := []string{"Alice Smith", "Bob Q. Jones", "Carol Tan"}
+	if len(result.Papers[0].Authors) != len(want) {
+		t.Fatalf("unexpected authors: %#v", result.Papers[0].Authors)
+	}
+	for i := range want {
+		if result.Papers[0].Authors[i] != want[i] {
+			t.Fatalf("unexpected authors: %#v", result.Papers[0].Authors)
+		}
+	}
+	joined := strings.Join(result.Papers[0].Authors, " ")
+	if strings.Contains(joined, "Department") || strings.Contains(joined, "University") || strings.Contains(joined, "Institute") {
+		t.Fatalf("affiliation leaked into authors: %#v", result.Papers[0].Authors)
 	}
 }
 
@@ -797,6 +848,121 @@ func TestFetchAllVerifiesSameHostOnceAndContinues(t *testing.T) {
 		t.Fatalf("errors = %#v", result.Errors)
 	}
 	if len(result.Papers) != 4 {
+		t.Fatalf("papers = %#v", result.Papers)
+	}
+}
+
+func TestFetchAllFiltersSelectedFeedURLsBeforeFetching(t *testing.T) {
+	requested := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = append(requested, r.URL.Path)
+		switch r.URL.Path {
+		case "/one":
+			writeTestRSS(w, "One Paper", "https://example.com/one")
+		case "/two":
+			writeTestRSS(w, "Two Paper", "https://example.com/two")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[
+  {"journal":"One","url":"`+server.URL+`/one"},
+  {"journal":"Two","url":"`+server.URL+`/two"}
+]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	progress := []string{}
+	result, err := FetchAll(feedsPath, FetchOptions{
+		SelectedFeedURLs: []string{server.URL + "/one"},
+		Progress: func(current int, total int, label string) {
+			progress = append(progress, fmt.Sprintf("%d/%d:%s", current, total, label))
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(requested, "|") != "/one" {
+		t.Fatalf("requests = %#v", requested)
+	}
+	if len(progress) == 0 || progress[0] != "0/1:" || progress[len(progress)-1] != "1/1:One" {
+		t.Fatalf("progress = %#v", progress)
+	}
+	if result.Fetched != 1 || len(result.Papers) != 1 || result.Papers[0].Title != "One Paper" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestFetchAllVerifiesOnlySelectedSameHostFeeds(t *testing.T) {
+	oldBackoffs := fetchRetryBackoffs
+	fetchRetryBackoffs = []time.Duration{0}
+	defer func() { fetchRetryBackoffs = oldBackoffs }()
+
+	requested := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = append(requested, r.Host+r.URL.Path)
+		switch r.Host + r.URL.Path {
+		case "pubs.acs.org/acs1":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<!doctype html><html><head><title>Just a moment...</title></head><body>Enable JavaScript and cookies to continue</body></html>`))
+		case "pubs.acs.org/acs2":
+			t.Fatalf("unselected same-host feed should not be fetched or verified")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	targetURL, err := neturl.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousClient := fetchHTTPClient
+	fetchHTTPClient = &http.Client{
+		Timeout: previousClient.Timeout,
+		Transport: rewriteFeedTestTransport{
+			target: targetURL,
+			base:   http.DefaultTransport,
+		},
+	}
+	defer func() { fetchHTTPClient = previousClient }()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[
+  {"journal":"ACS One","url":"https://pubs.acs.org/acs1"},
+  {"journal":"ACS Two","url":"https://pubs.acs.org/acs2"}
+]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{
+		SelectedFeedURLs: []string{"https://pubs.acs.org/acs1"},
+		VerifyHost: func(requests []VerificationRequest) VerificationResult {
+			if len(requests) != 1 || requests[0].URL != "https://pubs.acs.org/acs1" {
+				t.Fatalf("verification requests = %#v", requests)
+			}
+			return VerificationResult{FeedBodies: map[string][]byte{
+				"https://pubs.acs.org/acs1": []byte(testRSS("ACS One Paper", "https://pubs.acs.org/one")),
+			}}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(requested, "|") != "pubs.acs.org/acs1" {
+		t.Fatalf("requests = %#v", requested)
+	}
+	if len(result.Papers) != 1 || result.Papers[0].Title != "ACS One Paper" {
 		t.Fatalf("papers = %#v", result.Papers)
 	}
 }
