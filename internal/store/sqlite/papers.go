@@ -38,7 +38,6 @@ type Paper struct {
 var doiPattern = regexp.MustCompile(`10\.\d{4,9}/[-._;()/:A-Z0-9]+`)
 
 func (s *Store) PaperByID(paperID int64) (*Paper, error) {
-	// 按 id 读取一篇论文，供 metadata/classifier 编排复用。
 	if len(s.paperColumns) == 0 {
 		return nil, nil
 	}
@@ -63,7 +62,6 @@ func (s *Store) PaperByID(paperID int64) (*Paper, error) {
 }
 
 func (s *Store) UpsertPaper(paper Paper, now time.Time) (int64, bool, error) {
-	// 按 Python upsert_paper 语义去重并合并 paper 内容。
 	key := paperKey(paper)
 	if strings.TrimSpace(key) == "" {
 		return 0, false, fmt.Errorf("paper key cannot be blank")
@@ -156,7 +154,6 @@ func (s *Store) UpsertPaper(paper Paper, now time.Time) (int64, bool, error) {
 }
 
 func (s *Store) SaveClassification(paperID int64, classification Classification, now time.Time) error {
-	// 追加一条新的 classification 记录。
 	topicTagsJSON, err := json.Marshal(classification.TopicTags)
 	if err != nil {
 		return fmt.Errorf("encode classification topic tags: %w", err)
@@ -175,7 +172,6 @@ func (s *Store) SaveClassification(paperID int64, classification Classification,
 }
 
 func (s *Store) PaperIDsNeedingClassification(paperIDs []int64) ([]int64, error) {
-	// 返回当前还没有任何 classification 的 paper ids。
 	pending := make([]int64, 0, len(paperIDs))
 	for _, paperID := range paperIDs {
 		classification, err := s.latestClassification(paperID)
@@ -190,7 +186,6 @@ func (s *Store) PaperIDsNeedingClassification(paperIDs []int64) ([]int64, error)
 }
 
 func (s *Store) RecentPaperIDs(limit int) ([]int64, error) {
-	// 读取最近的 paper ids。
 	rows, err := s.db.Query(`SELECT id FROM papers ORDER BY first_seen_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query recent paper ids: %w", err)
@@ -200,7 +195,6 @@ func (s *Store) RecentPaperIDs(limit int) ([]int64, error) {
 }
 
 func (s *Store) AllPaperIDs() ([]int64, error) {
-	// 读取全部 paper ids。
 	rows, err := s.db.Query(`SELECT id FROM papers ORDER BY first_seen_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("query all paper ids: %w", err)
@@ -210,7 +204,6 @@ func (s *Store) AllPaperIDs() ([]int64, error) {
 }
 
 func (s *Store) FeedbackPaperIDs() ([]int64, error) {
-	// 读取所有 feedback 关联过的 paper ids。
 	rows, err := s.db.Query(`SELECT DISTINCT paper_id FROM feedback ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("query feedback paper ids: %w", err)
