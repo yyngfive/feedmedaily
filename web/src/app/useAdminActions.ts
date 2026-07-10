@@ -1,0 +1,244 @@
+import React from "react";
+
+import {
+  applyProfileProposal,
+  bootstrapProfile,
+  deleteSchedulerSettings,
+  exitApp,
+  launchAdminJob,
+  launchProfileProposalGeneration,
+  launchReclassifyJob,
+  openAppTarget,
+  openFeedVerificationInBrowser,
+  rejectProfileProposal,
+  saveCurrentProfile,
+  saveFeedSubscriptions,
+  saveSchedulerSettings,
+  saveSettingsConfig,
+  startFeedVerification,
+  submitFeedVerificationXML,
+} from "../api/client";
+import type {ClassificationProfile, FeedSubscription, JobInfo, SettingsConfigUpdate} from "../shared/types";
+import type {AppData} from "./useAppData";
+import type {AppState} from "./useAppState";
+
+// 管理操作 hook 负责设置、Profile、后台任务和验证入口。
+export function useAdminActions(state: AppState, data: AppData) {
+  const {
+    errorText, feeds, hydrateEditableFeeds, pushErrorMessage, pushMessage, setAdminOpen,
+    setAppControlBusy, setBusy, setFeeds, setFeedsLoaded, setFeedsSaving, setJobs,
+    setProfile, setProfileSaving, setScheduler, setSchedulerSaving, setSettingsConfig,
+    setSettingsConfigSaving, setVerificationSubmitError, setVerificationSubmitting,
+  } = state;
+  const {
+    refreshAdminData, refreshFeedback, refreshProfileGate, refreshProposals, refreshReviewCore,
+  } = data;
+
+  const registerJob = React.useCallback((job: JobInfo, openAdmin = true) => {
+    setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+    if (openAdmin) setAdminOpen(true);
+  }, [setAdminOpen, setJobs]);
+  const handleFeedChange = (index: number, field: "journal" | "url", value: string) => setFeeds((current) => current.map((item, itemIndex) => itemIndex === index ? {...item, [field]: value} : item));
+  const handleAddFeed = () => setFeeds((current) => [...current, {client_id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, journal: "", url: ""}]);
+  const handleAddFeeds = (items: FeedSubscription[]) => setFeeds((current) => {
+    const seen = new Set(current.map((feed) => feed.url.trim()).filter(Boolean));
+    const nextFeeds = items
+      .map((item) => ({journal: item.journal.trim(), url: item.url.trim()}))
+      .filter((item) => {
+        if (!item.journal || !item.url || seen.has(item.url)) return false;
+        seen.add(item.url);
+        return true;
+      })
+      .map((item) => ({...item, client_id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}));
+    return nextFeeds.length ? [...current, ...nextFeeds] : current;
+  });
+  const handleRemoveFeed = (index: number) => setFeeds((current) => current.filter((_item, itemIndex) => itemIndex !== index));
+  const handleSaveFeeds = async () => {
+    const cleaned = feeds.map((item) => ({journal: item.journal.trim(), url: item.url.trim()})).filter((item) => item.journal || item.url);
+    if (cleaned.some((item) => !item.journal || !item.url)) return pushMessage("feeds.validation.failed");
+    try {
+      setFeedsSaving(true);
+      setFeeds(hydrateEditableFeeds(await saveFeedSubscriptions(cleaned)));
+      setFeedsLoaded(true);
+      pushMessage("feeds.save.succeeded");
+    } catch (error) {
+      pushErrorMessage("feeds.save.failed", error, "Could not save RSS feed settings.");
+    } finally { setFeedsSaving(false); }
+  };
+
+  const handleSaveConfig = React.useCallback(async (fields: Record<string, SettingsConfigUpdate>) => {
+    try {
+      setSettingsConfigSaving(true);
+      setSettingsConfig((await saveSettingsConfig(fields)).fields);
+      const currentProfile = await refreshProfileGate();
+      await Promise.all([refreshAdminData(), currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve()]);
+      pushMessage("settings.config.save.succeeded");
+    } catch (error) {
+      pushErrorMessage("settings.config.save.failed", error, "Could not save local settings.");
+    } finally { setSettingsConfigSaving(false); }
+  }, [pushErrorMessage, pushMessage, refreshAdminData, refreshProfileGate, refreshReviewCore, setSettingsConfig, setSettingsConfigSaving]);
+  const handleSaveScheduler = React.useCallback(async (dailyTime: string) => {
+    try {
+      setSchedulerSaving(true);
+      const saved = await saveSchedulerSettings(dailyTime);
+      setScheduler(saved);
+      pushMessage("scheduler.save.succeeded", saved.automatic_supported === false ? {text: "Daily sync time saved locally. Automatic runs are unavailable on this platform; use cron instead.", tone: "warning"} : undefined);
+    } catch (error) {
+      pushErrorMessage("app.service.unavailable", error, "Could not save local scheduler settings.");
+    } finally { setSchedulerSaving(false); }
+  }, [pushErrorMessage, pushMessage, setScheduler, setSchedulerSaving]);
+  const handleSaveProfile = React.useCallback(async (nextProfile: ClassificationProfile) => {
+    try {
+      setProfileSaving(true);
+      const saved = await saveCurrentProfile(nextProfile);
+      setProfile(saved.profile);
+      pushMessage("profile.current.save.succeeded");
+      try {
+        registerJob(await launchReclassifyJob({scope: "feedback", limit: 0}));
+        pushMessage("job.reclassify.started");
+      } catch (error) {
+        pushErrorMessage("app.service.unavailable", error, "Could not start the feedback reclassification job.");
+      }
+    } catch (error) {
+      pushErrorMessage("app.service.unavailable", error, "Could not save the local profile.");
+      throw error;
+    } finally { setProfileSaving(false); }
+  }, [pushErrorMessage, pushMessage, registerJob, setProfile, setProfileSaving]);
+  const handleDeleteScheduler = React.useCallback(async () => {
+    try {
+      setSchedulerSaving(true);
+      setScheduler(await deleteSchedulerSettings());
+      pushMessage("scheduler.delete.succeeded");
+    } catch (error) {
+      pushErrorMessage("app.service.unavailable", error, "Could not disable local scheduler settings.");
+    } finally { setSchedulerSaving(false); }
+  }, [pushErrorMessage, pushMessage, setScheduler, setSchedulerSaving]);
+  const handleOpenAppTarget = React.useCallback(async (target: "data_dir" | "logs_dir" | "install_dir") => {
+    try {
+      setAppControlBusy(true);
+      await openAppTarget(target);
+      pushMessage("app.control.open.succeeded");
+    } catch (error) {
+      pushErrorMessage("app.service.unavailable", error, "Could not open the selected local target.");
+    } finally { setAppControlBusy(false); }
+  }, [pushErrorMessage, pushMessage, setAppControlBusy]);
+  const handleExitApp = React.useCallback(async () => {
+    try {
+      setAppControlBusy(true);
+      await exitApp();
+      pushMessage("app.control.exit.succeeded");
+      window.setTimeout(() => { window.location.href = "about:blank"; }, 350);
+    } catch (error) {
+      setAppControlBusy(false);
+      pushErrorMessage("app.service.unavailable", error, "Could not exit the local FeedMeDaily service.");
+    }
+  }, [pushErrorMessage, pushMessage, setAppControlBusy]);
+
+  const handleOnboardingSaveAndBootstrap = React.useCallback(async (fields: Record<string, SettingsConfigUpdate>, interestDescription: string) => {
+    try {
+      setSettingsConfigSaving(true);
+      setSettingsConfig((await saveSettingsConfig(fields)).fields);
+      const currentProfile = await refreshProfileGate();
+      await Promise.all([refreshAdminData(), currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve()]);
+    } catch (error) {
+      return {ok: false, tone: "danger" as const, message: errorText(error, "Could not save local settings.")};
+    } finally { setSettingsConfigSaving(false); }
+    try {
+      setBusy(true);
+      registerJob(await bootstrapProfile({interest_description: interestDescription}), false);
+      return {ok: true, tone: "info" as const, message: "Local settings saved. Initial profile generation started."};
+    } catch (error) {
+      return {ok: false, tone: "warning" as const, message: `Local settings were saved, but the initial profile generation did not start: ${errorText(error, "Unknown error.")}`};
+    } finally { setBusy(false); }
+  }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore, registerJob, setBusy, setSettingsConfig, setSettingsConfigSaving]);
+  const handleOnboardingSaveSettings = React.useCallback(async (fields: Record<string, SettingsConfigUpdate>) => {
+    try {
+      setSettingsConfigSaving(true);
+      setSettingsConfig((await saveSettingsConfig(fields)).fields);
+      const currentProfile = await refreshProfileGate();
+      await Promise.all([refreshAdminData(), currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve()]);
+      return {ok: true, tone: "success" as const, message: "Local settings saved."};
+    } catch (error) {
+      return {ok: false, tone: "danger" as const, message: errorText(error, "Could not save local settings.")};
+    } finally { setSettingsConfigSaving(false); }
+  }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore, setSettingsConfig, setSettingsConfigSaving]);
+
+  const handleGenerateProposal = async () => {
+    try { registerJob(await launchProfileProposalGeneration()); pushMessage("profile.proposal.started"); }
+    catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not start profile proposal generation."); }
+  };
+  const handleApplyProposal = async (id: number, selection?: {accepted_change_ids: string[]; rejected_change_ids: string[]}) => {
+    try {
+      setBusy(true);
+      await applyProfileProposal(id, selection);
+      const currentProfile = await refreshProfileGate();
+      await Promise.all([refreshFeedback(), refreshProposals(), currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve()]);
+      pushMessage("profile.proposal.applied");
+    } catch (error) {
+      pushErrorMessage("app.service.unavailable", error, "Could not apply the profile proposal.");
+    } finally { setBusy(false); }
+  };
+  const handleRejectProposal = async (id: number) => {
+    try { await rejectProfileProposal(id); await refreshProposals(); pushMessage("profile.proposal.rejected"); }
+    catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not reject the profile proposal."); }
+  };
+  const handleOnboardingAcceptDraft = React.useCallback(async (id: number, draftProfile: ClassificationProfile) => {
+    try { setBusy(true); await applyProfileProposal(id); }
+    catch (error) { return {ok: false, tone: "danger" as const, message: errorText(error, "Could not apply the profile proposal.")}; }
+    try {
+      const saved = await saveCurrentProfile(draftProfile);
+      setProfile(saved.profile);
+      await Promise.all([refreshFeedback(), refreshProposals(), refreshReviewCore(saved.profile)]);
+      pushMessage("profile.proposal.applied", {text: "Initial profile applied and saved.", tone: "success"});
+      return {ok: true};
+    } catch (error) {
+      const currentProfile = await refreshProfileGate();
+      await Promise.all([refreshFeedback(), refreshProposals(), currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve()]);
+      pushMessage("profile.proposal.applied", {text: `Profile proposal applied, but the edited draft was not fully saved: ${errorText(error, "Unknown error.")}`, tone: "warning"});
+      return {ok: true};
+    } finally { setBusy(false); }
+  }, [errorText, pushMessage, refreshFeedback, refreshProfileGate, refreshProposals, refreshReviewCore, setBusy, setProfile]);
+  const handleOnboardingRejectProposal = React.useCallback(async (id: number) => {
+    try { await rejectProfileProposal(id); await refreshProposals(); return {ok: true, tone: "success" as const, message: "Rejected the pending proposal."}; }
+    catch (error) { return {ok: false, tone: "danger" as const, message: errorText(error, "Could not reject the profile proposal.")}; }
+  }, [errorText, refreshProposals]);
+  const handleRunAdminJob = async (path: "/api/admin/run", feedURLs?: string[]) => {
+    try { registerJob(await launchAdminJob(path, feedURLs?.length ? {feed_urls: feedURLs} : undefined)); pushMessage("job.started"); }
+    catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not start the sync job."); }
+  };
+  const handleStartVerification = React.useCallback(async (job: JobInfo) => {
+    if (!job.verification_feed_url) return pushMessage("app.service.unavailable", {text: "Verification feed URL is missing.", tone: "danger"});
+    setVerificationSubmitError(null);
+    try { await startFeedVerification({job_id: job.id, feed_url: job.verification_feed_url}); pushMessage("job.verification.started", {text: "Opened the feed verification window.", tone: "info"}); }
+    catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not start feed verification."); }
+  }, [pushErrorMessage, pushMessage, setVerificationSubmitError]);
+  const handleOpenVerificationInBrowser = React.useCallback(async (job: JobInfo) => {
+    if (!job.verification_feed_url) return pushMessage("app.service.unavailable", {text: "Verification feed URL is missing.", tone: "danger"});
+    setVerificationSubmitError(null);
+    try { await openFeedVerificationInBrowser({job_id: job.id, feed_url: job.verification_feed_url}); pushMessage("job.verification.browser.started", {text: "Opened the protected feed in your browser. Finish the check there, then paste the final RSS/XML here.", tone: "info"}); }
+    catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not open the protected feed in your browser."); }
+  }, [pushErrorMessage, pushMessage, setVerificationSubmitError]);
+  const handleSubmitVerificationXML = React.useCallback(async (job: JobInfo, xml: string) => {
+    if (!job.verification_feed_url) return setVerificationSubmitError("Verification feed URL is missing.");
+    try {
+      setVerificationSubmitting(true); setVerificationSubmitError(null);
+      await submitFeedVerificationXML({job_id: job.id, feed_url: job.verification_feed_url, feed_xml: xml});
+      pushMessage("job.verification.manual.accepted", {text: "Accepted the pasted RSS/XML. The sync is resuming now.", tone: "info"});
+    } catch (error) { setVerificationSubmitError(errorText(error, "Could not submit protected feed XML.")); }
+    finally { setVerificationSubmitting(false); }
+  }, [errorText, pushMessage, setVerificationSubmitError, setVerificationSubmitting]);
+  const handleReclassify = async (scope: "recent" | "feedback" | "all") => {
+    try { registerJob(await launchReclassifyJob({scope, limit: scope === "all" ? 500 : 50})); pushMessage("job.reclassify.started"); }
+    catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not start the reclassification job."); }
+  };
+
+  return {
+    registerJob, handleFeedChange, handleAddFeed, handleAddFeeds, handleRemoveFeed, handleSaveFeeds,
+    handleSaveConfig, handleSaveScheduler, handleSaveProfile, handleDeleteScheduler,
+    handleOpenAppTarget, handleExitApp, handleOnboardingSaveAndBootstrap,
+    handleOnboardingSaveSettings, handleGenerateProposal, handleApplyProposal,
+    handleRejectProposal, handleOnboardingAcceptDraft, handleOnboardingRejectProposal,
+    handleRunAdminJob, handleStartVerification, handleOpenVerificationInBrowser,
+    handleSubmitVerificationXML, handleReclassify,
+  };
+}

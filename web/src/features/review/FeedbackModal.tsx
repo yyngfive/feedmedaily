@@ -1,9 +1,9 @@
 import {Button} from "@heroui/react";
 
-import {TextAreaField} from "../common/FormFields";
-import {ModalShell} from "../common/ModalShell";
-import {SelectField} from "../common/SelectField";
-import type {Paper, Relevance} from "../../types";
+import {TextAreaField} from "../../shared/components/FormFields";
+import {ModalShell} from "../../shared/components/ModalShell";
+import {SelectField} from "../../shared/components/SelectField";
+import type {Paper, Relevance} from "../../shared/types";
 
 const feedbackOptions = [
   {value: "direct", label: "Direct"},

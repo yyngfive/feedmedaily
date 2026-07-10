@@ -3,7 +3,7 @@ import React from "react";
 
 import {relevanceLabel, relevanceTone} from "../../app/constants";
 import {authorsLine, feedbackLabel, paperDate} from "../../app/utils";
-import type {Paper} from "../../types";
+import type {Paper} from "../../shared/types";
 
 export function PaperCard({
   isSelected,

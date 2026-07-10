@@ -121,4 +121,4 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 - The right detail panel owns the paper action buttons (`DOI link`, `Mark as read`, `Save to Zotero`, `Mark wrong`).
 - Zotero saving is implemented through the Zotero Web API with an in-app collection picker, not through the browser connector.
 - `/api/report/latest` is a performance-critical path. Keep report reads batched and avoid reintroducing request-level SQLite reopen/close behavior or first-screen blocking dependencies from non-critical admin requests.
-- In `web/src/App.tsx` and `web/src/main.tsx`, top-level helpers and components should keep short Chinese comments that explain each function or component's responsibility.
+- In `web/src/app/App.tsx` and `web/src/main.tsx`, top-level helpers and components should keep short Chinese comments that explain each function or component's responsibility.

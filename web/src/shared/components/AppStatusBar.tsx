@@ -1,6 +1,6 @@
 import {Button, Chip, Spinner} from "@heroui/react";
 
-import type {AppMeta, AppUpdate} from "../../types";
+import type {AppMeta, AppUpdate} from "../types";
 
 function updateLabel(appUpdate: AppUpdate | null): string {
   if (!appUpdate) {

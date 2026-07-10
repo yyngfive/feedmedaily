@@ -1,6 +1,6 @@
 import {relevanceLabel} from "./constants";
 import type {DateFilter} from "./constants";
-import type {JobInfo, Paper, Relevance} from "../types";
+import type {JobInfo, Paper, Relevance} from "../shared/types";
 
 export function sentence(value?: string | null): string {
   if (!value) {

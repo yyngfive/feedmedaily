@@ -1,7 +1,7 @@
 import {Button} from "@heroui/react";
 
 import {doiHref, feedbackLabel, paperDate} from "../../app/utils";
-import type {Paper} from "../../types";
+import type {Paper} from "../../shared/types";
 
 function abstractHtmlForDisplay(paper: Paper): string {
   const images = new Set((paper.abstract_images ?? []).map((image) => image.src));

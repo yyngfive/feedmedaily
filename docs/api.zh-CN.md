@@ -1,6 +1,6 @@
 # FeedMeDaily 本地 API 文档
 
-本文记录 FeedMeDaily 当前本地 HTTP API。服务由 `cmd/feedmedailyd` 提供，路由注册在 `internal/api/server.go`，前端调用集中在 `web/src/reportData.ts`。
+本文记录 FeedMeDaily 当前本地 HTTP API。服务由 `cmd/feedmedailyd` 提供，路由注册在 `internal/api/server.go`，前端调用集中在 `web/src/api/client.ts`。
 
 ## 1. 通用约定
 
@@ -64,7 +64,7 @@
 
 常见错误：非 GET 返回 405。
 
-前端入口：当前主要由托盘或外部探活使用，`web/src/reportData.ts` 未封装此接口。
+前端入口：当前主要由托盘或外部探活使用，`web/src/api/client.ts` 未封装此接口。
 
 ### `GET /api/app/meta`
 
@@ -923,8 +923,8 @@ job result 典型字段：
 新增或修改 API 时必须同步检查：
 
 1. `internal/api/server.go` 是否注册了正确路由和方法。
-2. `web/src/reportData.ts` 是否封装了前端调用。
-3. `web/src/types.ts` 是否更新请求或响应类型。
+2. `web/src/api/client.ts` 是否封装了前端调用。
+3. `web/src/shared/types.ts` 是否更新请求或响应类型。
 4. `internal/api/*_test.go` 是否覆盖成功和错误路径。
 5. `docs/api.zh-CN.md` 是否记录方法、请求体、响应体、错误和前端入口。
 6. 如果影响首屏论文列表，确认没有阻塞 `/api/report/latest`。

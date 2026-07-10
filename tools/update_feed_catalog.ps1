@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-  $OutputPath = Join-Path $root "web\src\feedCatalog.ts"
+  $OutputPath = Join-Path $root "web\src\data\feedCatalog.ts"
 }
 
 function Read-FeedCatalogJson {

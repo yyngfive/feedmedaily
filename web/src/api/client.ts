@@ -17,7 +17,7 @@ import type {
   SettingsConfigUpdate,
   ZoteroCollectionsResponse,
   ZoteroStatus,
-} from "./types";
+} from "../shared/types";
 
 declare global {
   interface Window {

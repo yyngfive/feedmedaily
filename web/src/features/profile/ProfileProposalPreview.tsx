@@ -1,6 +1,6 @@
 import {Card} from "@heroui/react";
 
-import type {ProfileProposal} from "../../types";
+import type {ProfileProposal} from "../../shared/types";
 
 function RuleSection({items, title}: {items: string[]; title: string}) {
   return (

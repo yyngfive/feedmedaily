@@ -8,10 +8,10 @@ import type {
   ProfileProposal,
   SettingsConfigField,
   SettingsConfigUpdate,
-} from "../../types";
-import {TextAreaField, TextInputField} from "../common/FormFields";
-import {SelectField} from "../common/SelectField";
-import {StatusBanner, type StatusTone} from "../common/StatusBanner";
+} from "../../shared/types";
+import {TextAreaField, TextInputField} from "../../shared/components/FormFields";
+import {SelectField} from "../../shared/components/SelectField";
+import {StatusBanner, type StatusTone} from "../../shared/components/StatusBanner";
 
 const aiAdvancedKeys = [
   "SCIRSS_CLASSIFIER_API_KEY",

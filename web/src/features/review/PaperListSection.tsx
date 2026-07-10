@@ -3,11 +3,11 @@ import {Button} from "@heroui/react";
 import {Virtuoso, type VirtuosoHandle} from "react-virtuoso";
 
 import {relevanceTabs, type RelevanceFilter} from "../../app/constants";
-import {EmptyStateCard} from "../common/EmptyStateCard";
-import {TextInputField} from "../common/FormFields";
-import {StatusBanner} from "../common/StatusBanner";
+import {EmptyStateCard} from "../../shared/components/EmptyStateCard";
+import {TextInputField} from "../../shared/components/FormFields";
+import {StatusBanner} from "../../shared/components/StatusBanner";
 import {PaperCard} from "./PaperCard";
-import type {Paper, Relevance} from "../../types";
+import type {Paper, Relevance} from "../../shared/types";
 
 export function PaperListSection({
   loadError,

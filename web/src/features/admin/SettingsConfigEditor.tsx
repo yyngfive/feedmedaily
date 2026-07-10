@@ -1,9 +1,9 @@
 import {Button} from "@heroui/react";
 import React from "react";
 
-import {TextInputField} from "../common/FormFields";
-import {SelectField} from "../common/SelectField";
-import type {SettingsConfigField, SettingsConfigUpdate} from "../../types";
+import {TextInputField} from "../../shared/components/FormFields";
+import {SelectField} from "../../shared/components/SelectField";
+import type {SettingsConfigField, SettingsConfigUpdate} from "../../shared/types";
 
 function fieldSourceSummary(field: SettingsConfigField): string {
   const storageLabel = field.storage_label ?? "local configuration";

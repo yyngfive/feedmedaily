@@ -1,9 +1,9 @@
 import React, {type Key} from "react";
 import {Button, Input, Label, ListBox, ListBoxItem, TextField} from "@heroui/react";
 
-import {ModalShell} from "../common/ModalShell";
-import {StatusBanner} from "../common/StatusBanner";
-import type {Paper, ZoteroCollectionOption} from "../../types";
+import {ModalShell} from "../../shared/components/ModalShell";
+import {StatusBanner} from "../../shared/components/StatusBanner";
+import type {Paper, ZoteroCollectionOption} from "../../shared/types";
 
 const libraryCollectionKey = "__library__";
 

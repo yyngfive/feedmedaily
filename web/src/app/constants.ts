@@ -1,4 +1,4 @@
-import type {Relevance} from "../types";
+import type {Relevance} from "../shared/types";
 
 export type RelevanceFilter = "all" | Relevance;
 export type DateFilter = "all" | "today" | "7d" | "30d" | "180d";

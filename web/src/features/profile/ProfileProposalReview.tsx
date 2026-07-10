@@ -9,7 +9,7 @@ import type {
   ProposalChangeSection,
   ProposalChangeStatus,
   TopicDefinition,
-} from "../../types";
+} from "../../shared/types";
 
 const sectionLabels: Record<ProposalChangeSection, string> = {
   scope: "Scope",

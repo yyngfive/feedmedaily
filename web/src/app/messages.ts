@@ -1,5 +1,5 @@
-import type {StatusTone} from "../components/common/StatusBanner";
-import type {JobInfo} from "../types";
+import type {StatusTone} from "../shared/components/StatusBanner";
+import type {JobInfo} from "../shared/types";
 
 export type UiMessage = {
   name: string;

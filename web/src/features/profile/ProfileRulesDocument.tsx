@@ -1,8 +1,8 @@
 import {Button, Card} from "@heroui/react";
 import React from "react";
 
-import {TextAreaField, TextInputField} from "../common/FormFields";
-import type {ClassificationProfile} from "../../types";
+import {TextAreaField, TextInputField} from "../../shared/components/FormFields";
+import type {ClassificationProfile} from "../../shared/types";
 
 type ProfileDraft = {
   name: string;

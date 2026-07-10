@@ -9,9 +9,9 @@ import {
   sortOptions,
 } from "../../app/constants";
 import type {DateFilter, FeedbackFilter, ReadFilter, SortOption} from "../../app/constants";
-import {CheckboxRow} from "../common/FormFields";
-import {SelectField, type SelectOption} from "../common/SelectField";
-import type {Relevance} from "../../types";
+import {CheckboxRow} from "../../shared/components/FormFields";
+import {SelectField, type SelectOption} from "../../shared/components/SelectField";
+import type {Relevance} from "../../shared/types";
 
 export function FiltersSidebar({
   dateFilter,
