@@ -20,9 +20,7 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 - `internal/store/sqlite/`: SQLite persistence for papers, classifications, feedback, proposals, and Zotero status
 - `internal/trayapp/`: tray lifecycle, scheduling, backend supervision, and autostart
 - `internal/zotero/`: Zotero Web API integration
-- `web/`: Vite + React + TypeScript frontend
-
-Legacy reference files still remain in the repository for comparison and regression work, but they are not part of the current product workflow.
+- `web/`: Vite + React + TypeScript frontend organized into app orchestration, feature modules, API/data adapters, and shared UI/types
 
 ## Production Flow
 
@@ -131,6 +129,13 @@ Editable local configuration is exposed through the UI:
 - the active profile file path is fixed at `data/classification_profile.json` under the current runtime data directory and is not user-configurable
 
 ## UI Architecture
+
+Frontend source ownership is feature-oriented:
+
+- `web/src/app/`: application composition, loading gates, shared messages, and data-refresh orchestration
+- `web/src/features/`: admin, onboarding, profile, and paper-review behavior and UI
+- `web/src/api/` and `web/src/data/`: local HTTP client and generated feed catalog
+- `web/src/shared/`: shared UI components and cross-feature types
 
 The main app uses a three-column layout:
 

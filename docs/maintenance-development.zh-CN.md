@@ -136,17 +136,17 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 - `internal/runtime/`：应用版本、运行模式、路径、进程、打开外部目标、平台差异。
 - `internal/trayapp/`：托盘生命周期、本地调度、后端监督、开机自启。
 - `internal/zotero/`：Zotero Web API collection 查询和保存论文。
-- `web/`：React 前端。API 包装集中在 `web/src/reportData.ts`，类型集中在 `web/src/types.ts`。
+- `web/`：React 前端。应用编排在 `web/src/app/`，功能模块在 `web/src/features/`，API 和生成数据在 `web/src/api/`、`web/src/data/`，共享 UI 和类型在 `web/src/shared/`。
 - `tools/`：打包、品牌资产、Linux helper、发布 DNS 更新等脚本。
 - `installer/`：Windows 安装包脚本。
-- `docs/`：测试清单、发布草稿、路线图和维护文档。
+- `docs/`：当前手工测试清单、API 文档和维护文档。
 
 ## 5. 配置与本地状态
 
 `.env.example` 是推荐配置模板，配置变更时应与 README 和设置 UI 同步。主要配置组：
 
 - 分类器模型：`SCIRSS_CLASSIFIER_API_KEY`、`SCIRSS_CLASSIFIER_BASE_URL`、`SCIRSS_CLASSIFIER_MODEL`、`SCIRSS_CLASSIFIER_THINKING`、`SCIRSS_CLASSIFIER_BATCH_SIZE`
-- Profile 模型：`SCIRSS_PROFILE_API_KEY`、`SCIRSS_PROFILE_BASE_URL`、`SCIRSS_PROFILE_MODEL`、`SCIRSS_PROFILE_THINKING`、`SCIRSS_PROFILE_PATH`
+- Profile 模型：`SCIRSS_PROFILE_API_KEY`、`SCIRSS_PROFILE_BASE_URL`、`SCIRSS_PROFILE_MODEL`、`SCIRSS_PROFILE_THINKING`
 - Zotero：`SCIRSS_ZOTERO_API_KEY`、`SCIRSS_ZOTERO_LIBRARY_TYPE`、`SCIRSS_ZOTERO_LIBRARY_ID`、`SCIRSS_ZOTERO_COLLECTION_KEY`
 - 本地服务：`SCIRSS_SERVER_HOST`、`SCIRSS_SERVER_PORT`
 
@@ -167,9 +167,9 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 
 ### 改后端 API
 
-1. 在 `internal/api/server.go` 中确认路由、方法、请求体和响应体。
+1. 在 `internal/api/` 中确认路由、对应领域 handler、方法、请求体和响应体。
 2. 如涉及后台任务，检查 `internal/api/jobs.go` 和 `internal/jobs/`。
-3. 更新前端 `web/src/reportData.ts` 和 `web/src/types.ts`。
+3. 更新前端 `web/src/api/client.ts` 和 `web/src/shared/types.ts`。
 4. 更新 `docs/api.zh-CN.md`。
 5. 添加或调整 `internal/api/*_test.go`。
 6. 运行 `go test ./...`，如果前端类型受影响，运行 `corepack pnpm --dir web build`。
@@ -189,7 +189,7 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 2. `internal/profile/` 负责 Profile schema、生成、校验和 proposal 差异。
 3. Profile 文件是用户本地状态，不应提交真实 `data/classification_profile.json`。
 4. 如果变更影响用户理解分类结果，更新 README 或维护文档。
-5. 如果变更影响 proposal 审阅流程，更新 `docs/architecture.zh-CN.md`。
+5. 如果变更影响 proposal 审阅流程，更新 `ARCHITECTURE.md`。
 
 ### 改 UI
 
@@ -198,7 +198,7 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 3. 右侧详情面板负责 `DOI link`、`Mark as read`、`Save to Zotero`、`Mark wrong`。
 4. Admin 面板负责订阅、设置、后台任务、反馈和 Profile proposal。
 5. 不要让设置、scheduler、proposal、feedback hydration 阻塞论文列表首屏。
-6. 在 `web/src/App.tsx` 和 `web/src/main.tsx` 中，顶层 helper 和组件保留简短中文职责注释。
+6. 在 `web/src/app/App.tsx` 和 `web/src/main.tsx` 中，顶层 helper 和组件保留简短中文职责注释。
 
 ### 改 Zotero
 
@@ -220,7 +220,7 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 1. 检查 `tools/build_release.ps1`、`installer/feedmedaily.iss`、品牌资产和版本号。
 2. 构建前运行前端 build 和 Go tests。
 3. 用户可见行为更新写入 `CHANGELOG.md` 当前 unreleased section。
-4. release draft 文件保持短 bullet 风格。
+4. release draft 只在发布准备期临时存在，保持短 bullet 风格，发布后删除。
 5. 发布 GitHub Release 时上传安装包和 `dist/update.json`，再用 `tools/update_release_dns.ps1` 更新 DNS TXT 记录。
 
 ## 7. 排障手册
@@ -245,7 +245,7 @@ corepack pnpm --dir web build
 ```
 
 2. 确认后端 `static_dir` 指向 `web/dist`。
-3. 如果 API 正常但页面空白，优先看浏览器控制台和 `web/src/reportData.ts` 对应调用。
+3. 如果 API 正常但页面空白，优先看浏览器控制台和 `web/src/api/client.ts` 对应调用。
 
 ### 论文列表加载慢
 
@@ -303,7 +303,7 @@ corepack pnpm --dir web config get block-exotic-subdeps
 ## 9. 新维护者接手清单
 
 1. 阅读 `README.md`，确认产品定位和 source mode 启动方式。
-2. 阅读 `docs/architecture.zh-CN.md`，理解模块边界和数据流。
+2. 阅读 `ARCHITECTURE.md`，理解模块边界和数据流。
 3. 阅读 `docs/api.zh-CN.md`，理解前后端 API 合约。
 4. 复制 `.env.example` 到 `.env`，填写测试用 API key。
 5. 运行 `corepack pnpm --dir web install` 和 `corepack pnpm --dir web build`。
