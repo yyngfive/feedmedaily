@@ -89,7 +89,7 @@ export function DetailPanel({
       </section>
 
       {paper.zotero_status?.last_error ? (
-        <div className="rounded-md border border-[var(--danger-line)] bg-[var(--danger-bg)] p-3 text-sm text-[var(--danger-ink)]">
+        <div className="rounded-md border border-(--danger-line) bg-(--danger-bg) p-3 text-sm text-(--danger-ink)">
           {paper.zotero_status.last_error}
         </div>
       ) : null}
