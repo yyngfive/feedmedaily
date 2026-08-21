@@ -57,7 +57,7 @@ const (
 	verificationMethodBrowserManual = "browser_manual"
 )
 
-func launchVerificationAwareSyncJob(settings config.Settings, run func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error)) jobInfo {
+func launchVerificationAwareSyncJob(settings config.Settings, run func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error)) (jobInfo, bool) {
 	job := jobInfo{
 		ID:         nextJobID(),
 		JobType:    "sync",
@@ -65,6 +65,11 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 		MessageKey: "job.started",
 		Message:    "Job queued.",
 		CreatedAt:  nowFunc().UTC(),
+	}
+	var reused bool
+	job, reused = reserveJobUnlessActive(job)
+	if reused {
+		return job, true
 	}
 	if path, err := logging.Write(settings.LogsDir, logging.Event{
 		Level:      "info",
@@ -75,8 +80,8 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 		Message:    job.Message,
 	}); err == nil {
 		job.LogPath = path
+		storeJob(job)
 	}
-	storeJob(job)
 
 	go func() {
 		started := nowFunc().UTC()
@@ -253,7 +258,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 		return
 	}()
 
-	return job
+	return job, false
 }
 
 func storePendingVerification(jobID string, request feeds.VerificationRequest) *pendingVerification {

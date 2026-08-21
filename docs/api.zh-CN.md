@@ -303,6 +303,8 @@ Query：
 
 secret 字段不以明文返回。
 
+当前分类器默认值为 `SCIRSS_CLASSIFIER_THINKING=disabled`、`SCIRSS_CLASSIFIER_BATCH_SIZE=5`。模型响应不要求 `decision_trace` 或 `recommended_action`；报告 API 中保留的 `recommended_action` 由后端按 relevance 确定。
+
 前端入口：`fetchSettingsConfig()`。
 
 ### `PUT /api/settings/config`
@@ -387,6 +389,8 @@ secret 字段不以明文返回。
 - `command`
 
 Linux source mode 只保存设置，不由 Web UI 自动执行；响应会给出 helper 命令。
+
+没有本地 scheduler 设置时，`scheduled_time` 默认返回本地时间 `12:30`；该时间在中国标准时间下位于 DeepSeek 午间空闲窗口。已经保存的时间不会因默认值升级而改变。
 
 前端入口：`fetchSchedulerSettings()`。
 
@@ -688,8 +692,10 @@ Linux source mode 只保存设置，不由 Web UI 自动执行；响应会给出
 成功响应：
 
 ```json
-{"job": {"id":"...","job_type":"sync","status":"queued"}}
+{"job": {"id":"...","job_type":"sync","status":"queued"}, "reused": false}
 ```
+
+sync 启动采用 single-flight 语义。已有 sync 处于 `queued`、`running` 或 `waiting_for_user` 时，重复请求返回 `200`、同一个 `job`，并设置 `reused: true`；不会启动第二次完整或定向同步。任务进入 `completed` 或 `failed` 后可以再次启动。
 
 job result 典型字段：
 

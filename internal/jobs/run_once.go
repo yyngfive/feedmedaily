@@ -212,7 +212,7 @@ func reclassifyExistingPapers(sqliteStore *store.Store, settings config.Settings
 	))
 	batchSize := settings.ClassifierBatchSize
 	if batchSize < 1 {
-		batchSize = 10
+		batchSize = config.DefaultClassifierBatchSize
 	}
 	classified := 0
 	classificationWarnings := []string{}

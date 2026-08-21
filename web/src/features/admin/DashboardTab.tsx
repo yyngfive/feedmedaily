@@ -184,6 +184,7 @@ export function DashboardTab({
   const [syncFeedQuery, setSyncFeedQuery] = React.useState("");
   const [selectedSyncFeedURLs, setSelectedSyncFeedURLs] = React.useState<string[]>([]);
   const latestJob = jobs[0] ?? null;
+  const activeSyncJob = jobs.find((job) => job.job_type === "sync" && ["queued", "running", "waiting_for_user"].includes(job.status)) ?? null;
   const verificationJob = jobs.find((job) => job.status === "waiting_for_user" && job.verification_required) ?? null;
   const lastCheckedLabel = appUpdate && !Number.isNaN(Date.parse(appUpdate.checked_at))
     ? new Date(appUpdate.checked_at).toLocaleString()
@@ -213,7 +214,7 @@ export function DashboardTab({
           <section className="border-b border-(--line) py-5">
             {!hasFeeds ? <p className="mb-3 text-sm leading-6 text-muted">Add and save at least one RSS feed before running a manual sync.</p> : null}
             <div className="flex flex-wrap gap-2">
-              <Button isDisabled={!hasFeeds} size="sm" onPress={runSync}>Sync</Button>
+              <Button isDisabled={!hasFeeds || Boolean(activeSyncJob)} size="sm" onPress={runSync}>{activeSyncJob ? "Sync running" : "Sync"}</Button>
               <Button size="sm" variant="outline" onPress={onReclassifyRecent}>Reclassify recent 50</Button>
               <Button size="sm" variant="outline" onPress={onReclassifyFeedback}>Reclassify feedback papers</Button>
               <Button size="sm" variant="ghost" onPress={onReclassifyAll}>Reclassify all</Button>

@@ -6,6 +6,13 @@ import (
 	"testing"
 )
 
+func TestDefaultTraySchedulerSettingsUsesOffPeakDailyTime(t *testing.T) {
+	settings := DefaultTraySchedulerSettings()
+	if settings.DailyTime != "12:30" {
+		t.Fatalf("daily time = %q, want 12:30", settings.DailyTime)
+	}
+}
+
 func TestOpenExternalTargetRejectsMissingLocalPath(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
 	err := OpenExternalTarget(missing)

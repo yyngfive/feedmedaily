@@ -88,14 +88,53 @@ func TestClassifyPapersWithTranslationFallback(t *testing.T) {
 		"If not excluded, choose direct only",
 		"If not direct, choose indirect only",
 		"If uncertain between indirect and unrelated, choose unrelated",
-		"decision_trace",
-		"exclusion_check",
-		"direct_check",
-		"indirect_check",
-		"priority_resolution",
 	} {
 		if !strings.Contains(userPrompts[0], fragment) {
 			t.Fatalf("classification prompt missing %q: %s", fragment, userPrompts[0])
+		}
+	}
+	for _, fragment := range []string{"decision_trace", "recommended_action"} {
+		if strings.Contains(userPrompts[0], fragment) {
+			t.Fatalf("classification prompt should omit %q: %s", fragment, userPrompts[0])
+		}
+	}
+}
+
+func TestClassifyPapersUsesCompactOutputAndDerivesRecommendedActions(t *testing.T) {
+	userPrompt := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		messages := payload["messages"].([]any)
+		userPrompt = messages[1].(map[string]any)["content"].(string)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Direct match.\",\"translated_title_zh\":\"直接相关\"},{\"id\":\"2\",\"relevance\":\"indirect\",\"confidence\":0.7,\"reason\":\"Useful context.\",\"translated_title_zh\":\"间接相关\"},{\"id\":\"3\",\"relevance\":\"unrelated\",\"confidence\":0.8,\"reason\":\"Outside scope.\",\"translated_title_zh\":\"不相关\"}]}"}}]}`))
+	}))
+	defer server.Close()
+
+	results, err := ClassifyPapers([]store.Paper{
+		{ID: 1, Title: "Direct"},
+		{ID: 2, Title: "Indirect"},
+		{ID: 3, Title: "Unrelated"},
+	}, testProfile(), LLMConfig{APIKey: "key", Model: "model", BaseURL: server.URL, Thinking: "disabled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(userPrompt, "decision_trace") {
+		t.Fatalf("classification prompt should omit decision_trace: %s", userPrompt)
+	}
+	if strings.Contains(userPrompt, "recommended_action") {
+		t.Fatalf("classification prompt should omit recommended_action: %s", userPrompt)
+	}
+	wantActions := []string{"read", "scan", "skip"}
+	for index, want := range wantActions {
+		if results[index].RecommendedAction != want {
+			t.Fatalf("result %d recommended action = %q, want %q", index, results[index].RecommendedAction, want)
+		}
+		if results[index].Reason == "" {
+			t.Fatalf("result %d should retain reason", index)
 		}
 	}
 }

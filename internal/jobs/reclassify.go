@@ -89,7 +89,7 @@ func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress Pro
 	))
 	batchSize := settings.ClassifierBatchSize
 	if batchSize < 1 {
-		batchSize = 10
+		batchSize = config.DefaultClassifierBatchSize
 	}
 	classified := 0
 	classificationWarnings := []string{}

@@ -24,7 +24,7 @@ const (
 	AppPublicName     = "FeedMeDaily"
 	AppInternalName   = "scirssagent"
 	SchedulerTaskName = AppPublicName + " Daily Sync"
-	DefaultDailyTime  = "10:00"
+	DefaultDailyTime  = "12:30"
 
 	ModeSource  = "source"
 	ModeRelease = "release"

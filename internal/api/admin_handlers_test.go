@@ -8,7 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestAdminSyncJob(t *testing.T) {
@@ -57,6 +60,79 @@ func TestAdminSyncJob(t *testing.T) {
 	if listRecorder.Code != http.StatusOK || !contains(listRecorder.Body.String(), `"job_type":"sync"`) {
 		t.Fatalf("job list = %d %s", listRecorder.Code, listRecorder.Body.String())
 	}
+}
+
+func TestAdminRunReusesActiveSyncJob(t *testing.T) {
+	root := t.TempDir()
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseSync := func() { releaseOnce.Do(func() { close(release) }) }
+	var firstJobID string
+	defer func() {
+		releaseSync()
+		deadline := time.Now().Add(2 * time.Second)
+		for firstJobID != "" && time.Now().Before(deadline) {
+			job, ok := jobByID(firstJobID)
+			if ok && (job.Status == "completed" || job.Status == "failed") {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	var calls atomic.Int32
+	runSyncFunc = func(_ config.Settings, _ jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		calls.Add(1)
+		started <- struct{}{}
+		<-release
+		return jobruntime.RunSummary{Fetched: 1}, nil
+	}
+	handler := newTestHandler(t, testSettings(root))
+
+	firstRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(firstRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if firstRecorder.Code != http.StatusOK {
+		t.Fatalf("first run launch = %d %s", firstRecorder.Code, firstRecorder.Body.String())
+	}
+	var firstPayload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(firstRecorder.Body.Bytes(), &firstPayload); err != nil {
+		t.Fatal(err)
+	}
+	firstJobID = firstPayload.Job.ID
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first sync did not start")
+	}
+
+	secondRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(secondRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if secondRecorder.Code != http.StatusOK {
+		t.Fatalf("second run launch = %d %s", secondRecorder.Code, secondRecorder.Body.String())
+	}
+	var secondPayload struct {
+		Job    jobInfo `json:"job"`
+		Reused bool    `json:"reused"`
+	}
+	if err := json.Unmarshal(secondRecorder.Body.Bytes(), &secondPayload); err != nil {
+		t.Fatal(err)
+	}
+	if !secondPayload.Reused {
+		t.Fatal("second run should report the active sync as reused")
+	}
+	if secondPayload.Job.ID != firstPayload.Job.ID {
+		t.Fatalf("second run job id = %q, want active job %q", secondPayload.Job.ID, firstPayload.Job.ID)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("runSyncFunc calls = %d, want 1", got)
+	}
+	releaseSync()
+	waitForJobCompletion(t, firstPayload.Job.ID)
 }
 
 func TestAdminRunPassesSelectedFeedURLs(t *testing.T) {

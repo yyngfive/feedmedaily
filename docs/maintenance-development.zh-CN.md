@@ -145,10 +145,12 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 
 `.env.example` 是推荐配置模板，配置变更时应与 README 和设置 UI 同步。主要配置组：
 
-- 分类器模型：`SCIRSS_CLASSIFIER_API_KEY`、`SCIRSS_CLASSIFIER_BASE_URL`、`SCIRSS_CLASSIFIER_MODEL`、`SCIRSS_CLASSIFIER_THINKING`、`SCIRSS_CLASSIFIER_BATCH_SIZE`
+- 分类器模型：`SCIRSS_CLASSIFIER_API_KEY`、`SCIRSS_CLASSIFIER_BASE_URL`、`SCIRSS_CLASSIFIER_MODEL`、`SCIRSS_CLASSIFIER_THINKING`、`SCIRSS_CLASSIFIER_BATCH_SIZE`；默认关闭 thinking、batch size 为 `5`
 - Profile 模型：`SCIRSS_PROFILE_API_KEY`、`SCIRSS_PROFILE_BASE_URL`、`SCIRSS_PROFILE_MODEL`、`SCIRSS_PROFILE_THINKING`
 - Zotero：`SCIRSS_ZOTERO_API_KEY`、`SCIRSS_ZOTERO_LIBRARY_TYPE`、`SCIRSS_ZOTERO_LIBRARY_ID`、`SCIRSS_ZOTERO_COLLECTION_KEY`
 - 本地服务：`SCIRSS_SERVER_HOST`、`SCIRSS_SERVER_PORT`
+
+分类器模型只返回 relevance、confidence、简短 reason 和中文标题。`recommended_action` 由 Go 运行时按 relevance 映射，`decision_trace` 不进入模型输出契约。Windows 托盘的新调度设置默认使用本地时间 `12:30`，该时间在中国标准时间下属于 DeepSeek 午间空闲窗口；已有 `tray-settings.json` 中的时间保持不变。
 
 不要提交这些用户本地状态：
 
@@ -182,6 +184,7 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 4. 报告输出性能优先检查 `internal/store/sqlite/` 的 batched query。
 5. 不要让 `/api/report/latest` 重新走逐篇查询或重新打开 SQLite。
 6. 更新架构文档和必要的 changelog。
+7. `/api/admin/run` 对 sync 采用 single-flight：`queued`、`running`、`waiting_for_user` 都是活跃状态，重复触发必须复用已有 job；修改启动流程时应保留注册表内“检查并登记”的原子性。
 
 ### 改分类或 Profile
 

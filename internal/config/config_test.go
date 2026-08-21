@@ -34,6 +34,33 @@ func TestLoadSourceSettingsFromDotEnv(t *testing.T) {
 	}
 }
 
+func TestLoadUsesCostOptimizedClassifierDefaults(t *testing.T) {
+	root := t.TempDir()
+	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
+	t.Setenv("SCIRSS_CLASSIFIER_BATCH_SIZE", "")
+	t.Setenv("SCIRSS_CLASSIFIER_THINKING", "")
+
+	settings, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.ClassifierBatchSize != 5 {
+		t.Fatalf("classifier batch size = %d, want 5", settings.ClassifierBatchSize)
+	}
+	if settings.ClassifierThinking != "disabled" {
+		t.Fatalf("classifier thinking = %q, want disabled", settings.ClassifierThinking)
+	}
+
+	response, err := SettingsConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batchField := fieldByKey(t, response.Fields, "SCIRSS_CLASSIFIER_BATCH_SIZE")
+	if batchField.DefaultValue == nil || *batchField.DefaultValue != "5" {
+		t.Fatalf("classifier batch size default = %#v, want 5", batchField.DefaultValue)
+	}
+}
+
 func TestLoadEnvironmentOverridesDotEnv(t *testing.T) {
 	root := t.TempDir()
 	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")

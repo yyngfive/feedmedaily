@@ -22,10 +22,10 @@ export function AppTab({
   scheduler: SchedulerSettings | null;
   schedulerSaving: boolean;
 }) {
-  const [schedulerTime, setSchedulerTime] = React.useState("10:00");
+  const [schedulerTime, setSchedulerTime] = React.useState("12:30");
   const schedulerAdvisory = scheduler?.advisory?.trim() ?? "";
 
-  React.useEffect(() => setSchedulerTime(scheduler?.scheduled_time ?? "10:00"), [scheduler?.scheduled_time]);
+  React.useEffect(() => setSchedulerTime(scheduler?.scheduled_time ?? "12:30"), [scheduler?.scheduled_time]);
 
   return (
     <div className="mt-5 space-y-5">

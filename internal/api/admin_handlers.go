@@ -35,7 +35,7 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	job := launchVerificationAwareSyncJob(
+	job, reused := launchVerificationAwareSyncJob(
 		s.settings,
 		func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error) {
 			summary, err := runSyncFunc(s.settings, jobruntime.RunOptions{
@@ -56,7 +56,7 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 			}, nil
 		},
 	)
-	writeJSON(w, http.StatusOK, map[string]any{"job": job})
+	writeJSON(w, http.StatusOK, map[string]any{"job": job, "reused": reused})
 }
 
 func validateSelectedFeedURLs(feedsPath string, requested []string) ([]string, error) {

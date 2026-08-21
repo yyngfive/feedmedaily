@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	defaultHost = "127.0.0.1"
-	defaultPort = 8000
+	DefaultClassifierBatchSize = 5
+	defaultHost                = "127.0.0.1"
+	defaultPort                = 8000
 )
 
 type Settings struct {
@@ -149,7 +150,7 @@ var Options = []Option{
 		Description: "How many papers are sent to the classifier per batch.",
 		Section:     "Classifier model",
 		InputType:   "number",
-		Default:     "10",
+		Default:     strconv.Itoa(DefaultClassifierBatchSize),
 	},
 	{
 		Key:         "SCIRSS_PROFILE_API_KEY",
@@ -288,7 +289,7 @@ func Load(root string) (Settings, error) {
 	settings.ClassifierBaseURL = valueOrDefault(valueMap["SCIRSS_CLASSIFIER_BASE_URL"], "https://api.deepseek.com")
 	settings.ClassifierModel = valueOrDefault(valueMap["SCIRSS_CLASSIFIER_MODEL"], "deepseek-v4-flash")
 	settings.ClassifierThinking = valueOrDefault(strings.ToLower(strings.TrimSpace(valueMap["SCIRSS_CLASSIFIER_THINKING"])), "disabled")
-	settings.ClassifierBatchSize = positiveInt(valueMap["SCIRSS_CLASSIFIER_BATCH_SIZE"], 10)
+	settings.ClassifierBatchSize = positiveInt(valueMap["SCIRSS_CLASSIFIER_BATCH_SIZE"], DefaultClassifierBatchSize)
 	settings.ProfileAPIKey = optionalValue(valueMap["SCIRSS_PROFILE_API_KEY"])
 	settings.ProfileBaseURL = valueOrDefault(valueMap["SCIRSS_PROFILE_BASE_URL"], "https://api.deepseek.com")
 	settings.ProfileModel = valueOrDefault(valueMap["SCIRSS_PROFILE_MODEL"], "deepseek-v4-pro")

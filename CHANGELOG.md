@@ -8,6 +8,13 @@ The latest released version is `0.5.0`. The next planned release is `0.5.1`, so 
 
 Changes since `0.5.0`:
 
+### Changed
+
+- Changed new daily sync schedules from `10:00` to local time `12:30`, which is in DeepSeek's current midday off-peak window on China Standard Time, while preserving existing saved schedules.
+- Reduced the default classifier batch size from 10 to 5 and kept classifier thinking disabled by default.
+- Removed `decision_trace` and `recommended_action` from the classifier model output contract while retaining concise reasons; recommended actions are now derived deterministically from relevance labels for API and database compatibility.
+- Prevented duplicate manual sync launches: repeated Dashboard, tray, or API requests now reuse the queued, running, or verification-blocked sync job, and Dashboard disables Sync until it finishes.
+
 ## 0.5.0 (2026-07-09)
 
 Changes since `0.4.0`:

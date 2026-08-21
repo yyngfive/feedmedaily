@@ -166,6 +166,37 @@ func storeJob(job jobInfo) {
 	apiJobs.jobs[job.ID] = job
 }
 
+func reserveJobUnlessActive(job jobInfo) (jobInfo, bool) {
+	// 同一类型的活跃作业只保留一个，避免并发请求穿过先查后写的竞态窗口。
+	apiJobs.mu.Lock()
+	defer apiJobs.mu.Unlock()
+	var active jobInfo
+	found := false
+	for _, current := range apiJobs.jobs {
+		if current.JobType != job.JobType || !isActiveJobStatus(current.Status) {
+			continue
+		}
+		if !found || current.CreatedAt.After(active.CreatedAt) {
+			active = current
+			found = true
+		}
+	}
+	if found {
+		return active, true
+	}
+	apiJobs.jobs[job.ID] = job
+	return job, false
+}
+
+func isActiveJobStatus(status string) bool {
+	switch status {
+	case "queued", "running", "waiting_for_user":
+		return true
+	default:
+		return false
+	}
+}
+
 func updateJob(id string, apply func(*jobInfo)) {
 	// 对已有作业做原子更新，避免状态竞争。
 	apiJobs.mu.Lock()

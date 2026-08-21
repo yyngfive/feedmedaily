@@ -29,6 +29,8 @@ FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载
 1. 在 [DeepSeek Platform](https://platform.deepseek.com/) 注册并登录
 2. 在 [API Keys](https://platform.deepseek.com/api_keys) 页面创建 API Key
 
+默认分类配置使用 `deepseek-v4-flash`、`thinking=disabled` 和 batch size `5`。分类请求保留简短 `reason`，不要求模型生成内部决策轨迹或阅读动作；阅读动作由应用根据相关性标签确定。
+
 ### Zotero 设置
 
 - 个人库：`ZOTERO_LIBRARY_TYPE=user`，`ZOTERO_LIBRARY_ID` 填写 Zotero `userID`
@@ -76,6 +78,10 @@ go run ./cmd/feedmedailyd --root . --host 127.0.0.1 --port 8000
 ### 定时任务
 
 当前应用内定时更新功能依赖托盘程序，目前只支持Windows。Linux 上推荐使用 `cron` 调用辅助脚本：
+
+Windows 托盘首次启用定时同步时默认使用本地时间 `12:30`；在中国标准时间下，它位于 DeepSeek 当前的午间空闲计费窗口。已保存的用户自定义时间不会被覆盖，其他时区用户应按北京时间峰谷窗口自行调整。
+
+手动同步采用单任务保护：已有 sync 处于排队、执行或等待订阅源验证状态时，再次点击 Dashboard 的 Sync 或从托盘/API 触发同步只会复用现有任务，不会重复抓取和分类。
 
 ```cron
 0 8 * * * cd /path/to/feedmedaily && bash /path/to/feedmedaily/tools/feedmedaily.sh sync >> /path/to/feedmedaily/logs/cron.log 2>&1

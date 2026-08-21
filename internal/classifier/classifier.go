@@ -33,8 +33,7 @@ Labels are fixed:
 - indirect
 - unrelated
 
-Return concise, evidence-based reasoning grounded in the title and abstract.
-Use decision_trace to show that you applied the priority order; it is an internal audit aid and must be consistent with the final relevance.`
+Return concise, evidence-based reasoning grounded in the title and abstract.`
 
 type LLMConfig struct {
 	APIKey   string
@@ -468,14 +467,7 @@ Return valid JSON only, with this exact shape:
       "relevance": "direct | indirect | unrelated",
       "confidence": 0.0,
       "reason": "one concise sentence",
-      "recommended_action": "read | scan | skip",
-      "translated_title_zh": "concise Chinese title translation",
-      "decision_trace": {
-        "exclusion_check": "whether unrelated exclusions apply first",
-        "direct_check": "whether direct rules apply after exclusions",
-        "indirect_check": "whether indirect rules apply after direct",
-        "priority_resolution": "how the priority order determined the final label"
-      }
+      "translated_title_zh": "concise Chinese title translation"
     }
   ]
 }
@@ -532,16 +524,12 @@ func decodeClassification(item map[string]any, model string) (store.Classificati
 	if relevance != "direct" && relevance != "indirect" && relevance != "unrelated" {
 		return store.Classification{}, fmt.Errorf("classifier returned unsupported relevance: %s", relevance)
 	}
-	recommendedAction := normalizedString(item["recommended_action"])
-	if recommendedAction == "" {
-		recommendedAction = "scan"
-	}
 	classification := store.Classification{
 		Relevance:         relevance,
 		Confidence:        floatValue(item["confidence"]),
 		TopicTags:         []string{},
 		Reason:            normalizedString(item["reason"]),
-		RecommendedAction: recommendedAction,
+		RecommendedAction: recommendedActionForRelevance(relevance),
 		Model:             model,
 	}
 	translated := normalizedString(item["translated_title_zh"])
@@ -549,6 +537,17 @@ func decodeClassification(item map[string]any, model string) (store.Classificati
 		classification.TranslatedTitleZH = &translated
 	}
 	return classification, nil
+}
+
+func recommendedActionForRelevance(relevance string) string {
+	switch relevance {
+	case "direct":
+		return "read"
+	case "unrelated":
+		return "skip"
+	default:
+		return "scan"
+	}
 }
 
 func normalizeStringSlice(raw any) []string {
