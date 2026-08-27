@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"github.com/yyngfive/scirssagent/internal/config"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	_ "modernc.org/sqlite"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +20,11 @@ func TestAdminSyncJob(t *testing.T) {
 	restore := stubAPIGlobals(t)
 	defer restore()
 
-	runSyncFunc = func(_ config.Settings, _ jobruntime.RunOptions, progress jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, progress jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		opts.Usage.Record(llmusage.Event{
+			BaseURL: "https://api.deepseek.com", Model: "deepseek-chat", Operation: "classification", OccurredAt: time.Date(2026, 8, 22, 4, 30, 0, 0, time.UTC),
+			Usage: llmusage.ResponseUsage{PromptTokens: 12, PromptCacheHitTokens: 2, PromptCacheMissTokens: 10, CompletionTokens: 3, CacheBreakdownPresent: true},
+		})
 		if progress != nil {
 			progress(jobruntime.ItemProgress("pipeline.feeds.fetching", "fetch", 1, 1, "Test Journal", "Fetching feed 1/1: Test Journal."))
 			progress(jobruntime.PercentProgress("pipeline.metadata.enriching", "metadata", 1, 1, "Getting metadata 1/1 (100%)."))
@@ -51,7 +56,7 @@ func TestAdminSyncJob(t *testing.T) {
 
 	jobRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(jobRecorder, httptest.NewRequest(http.MethodGet, "/api/admin/jobs/"+runPayload.Job.ID, nil))
-	if jobRecorder.Code != http.StatusOK || !contains(jobRecorder.Body.String(), `"status":"completed"`) || !contains(jobRecorder.Body.String(), `"fetched":2`) {
+	if jobRecorder.Code != http.StatusOK || !contains(jobRecorder.Body.String(), `"status":"completed"`) || !contains(jobRecorder.Body.String(), `"fetched":2`) || !contains(jobRecorder.Body.String(), `"estimated_cost_cny":"0.000029"`) {
 		t.Fatalf("job detail = %d %s", jobRecorder.Code, jobRecorder.Body.String())
 	}
 
@@ -59,6 +64,12 @@ func TestAdminSyncJob(t *testing.T) {
 	handler.ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/admin/jobs", nil))
 	if listRecorder.Code != http.StatusOK || !contains(listRecorder.Body.String(), `"job_type":"sync"`) {
 		t.Fatalf("job list = %d %s", listRecorder.Code, listRecorder.Body.String())
+	}
+
+	usageRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(usageRecorder, httptest.NewRequest(http.MethodGet, "/api/admin/llm-usage?since=2020-01-01T00:00:00Z", nil))
+	if usageRecorder.Code != http.StatusOK || !contains(usageRecorder.Body.String(), `"job_id":"`+runPayload.Job.ID+`"`) || !contains(usageRecorder.Body.String(), `"request_count":1`) {
+		t.Fatalf("LLM usage = %d %s", usageRecorder.Code, usageRecorder.Body.String())
 	}
 }
 

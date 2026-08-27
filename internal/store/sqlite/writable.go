@@ -81,6 +81,23 @@ CREATE TABLE IF NOT EXISTS zotero_saves (
   FOREIGN KEY (paper_id) REFERENCES papers(id)
 );
 
+CREATE TABLE IF NOT EXISTS llm_usage_jobs (
+  job_id TEXT PRIMARY KEY,
+  job_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  model TEXT NOT NULL,
+  request_count INTEGER NOT NULL,
+  prompt_tokens INTEGER NOT NULL,
+  prompt_cache_hit_tokens INTEGER NOT NULL,
+  prompt_cache_miss_tokens INTEGER NOT NULL,
+  completion_tokens INTEGER NOT NULL,
+  pricing_status TEXT NOT NULL,
+  pricing_json TEXT NOT NULL,
+  estimated_cost_nano_cny INTEGER,
+  estimated_cost_cny TEXT,
+  completed_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_papers_first_seen_at ON papers(first_seen_at);
 CREATE INDEX IF NOT EXISTS idx_classifications_paper_id ON classifications(paper_id);
 CREATE INDEX IF NOT EXISTS idx_classifications_paper_id_classified_at ON classifications(paper_id, classified_at DESC, id DESC);
@@ -88,6 +105,7 @@ CREATE INDEX IF NOT EXISTS idx_feedback_paper_id ON feedback(paper_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedback(created_at);
 CREATE INDEX IF NOT EXISTS idx_feedback_paper_id_state_created_at ON feedback(paper_id, state, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_profile_proposals_created_at ON profile_proposals(created_at);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_jobs_completed_at ON llm_usage_jobs(completed_at DESC);
 `
 
 func OpenOrCreate(path string) (*Store, error) {
@@ -110,6 +128,10 @@ func OpenOrCreate(path string) (*Store, error) {
 		return nil, fmt.Errorf("initialize sqlite schema: %w", err)
 	}
 	if err := ensureMutableSchema(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := repairLegacyDeepSeekPricing(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

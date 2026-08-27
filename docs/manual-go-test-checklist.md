@@ -164,6 +164,9 @@ go run .\cmd\feedmedaily-tray --root .
 - `Sync` 在没有 feeds 时禁用。
 - 定向同步只提交当前选中的已保存 feed URL。
 - 最新 job 显示阶段、结果数字、warnings 和错误详情。
+- LLM job 完成或失败后显示估算费用、缓存命中/未命中和输出 token；非官方 endpoint 或未知模型显示费用不可用。
+- `LLM usage · last 3 days` 按完成时间倒序显示 job、模型、请求数、token 和费用，重启后历史记录仍存在。
+- 北京时间周一至周五 9:00–12:00、14:00–18:00 使用高峰价，其余时间和周末使用空闲价；跨时段 job 的 pricing snapshot 同时保留两种 tier。
 
 ### 7.2 Feeds
 
@@ -186,6 +189,8 @@ go run .\cmd\feedmedaily-tray --root .
 - secret 值不回显明文。
 - environment override 状态清楚显示。
 - 保存后同一进程内启动的新 job 使用新设置。
+- DeepSeek pricing 表默认显示当前 Flash/Pro 峰谷价格，允许分别编辑缓存命中、缓存未命中和输出单价。
+- 保存定价后，新启动的 job 使用新价格；保存前已完成或正在运行的 job 继续显示原价格快照，不被回算。
 
 ### 7.5 App
 

@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"github.com/yyngfive/scirssagent/internal/feeds"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"io"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 )
 
 func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
@@ -37,12 +40,13 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 	}
 	job, reused := launchVerificationAwareSyncJob(
 		s.settings,
-		func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error) {
+		func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc, usage *llmusage.Collector) (map[string]any, error) {
 			summary, err := runSyncFunc(s.settings, jobruntime.RunOptions{
 				SelectedFeedURLs:  selectedFeedURLs,
 				FeedBodyOverrides: overrides,
 				SkippedFeeds:      skippedFeeds,
 				VerifyFeedHost:    verifyHost,
+				Usage:             usage,
 			}, progress)
 			if err != nil {
 				return nil, err
@@ -119,18 +123,18 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	job := launchLocalJob(
-		s.settings.LogsDir,
+		s.settings,
 		"reclassify",
 		"job.started",
 		"Job queued.",
 		"pipeline.metadata.enriching",
 		"Getting metadata for papers to reclassify.",
-		func(progress jobruntime.ProgressFunc) (map[string]any, error) {
+		func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
 			paperIDs, err := selectReclassifyPaperIDsFunc(s.settings, payload.Scope, payload.Limit)
 			if err != nil {
 				return nil, err
 			}
-			reclassified, err := reclassifyPaperIDsFunc(s.settings, paperIDs, progress)
+			reclassified, err := reclassifyPaperIDsFunc(s.settings, paperIDs, progress, usage)
 			if err != nil {
 				return nil, err
 			}
@@ -171,4 +175,35 @@ func (s *Server) handleAdminJobByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, job)
+}
+
+func (s *Server) handleAdminLLMUsage(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	sinceValue := strings.TrimSpace(r.URL.Query().Get("since"))
+	if sinceValue == "" {
+		writeError(w, http.StatusBadRequest, "since is required and must be RFC3339.")
+		return
+	}
+	since, err := time.Parse(time.RFC3339, sinceValue)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "since must be RFC3339.")
+		return
+	}
+	sqliteStore, err := s.getReadStore()
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusOK, []any{})
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	items, err := sqliteStore.ListLLMUsage(since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }

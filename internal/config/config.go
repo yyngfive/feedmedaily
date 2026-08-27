@@ -3,12 +3,14 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 )
 
@@ -43,6 +45,7 @@ type Settings struct {
 	ProfileBaseURL      string
 	ProfileModel        string
 	ProfileThinking     string
+	DeepSeekPricing     llmusage.DeepSeekPricing
 	ZoteroAPIKey        string
 	ZoteroLibraryType   string
 	ZoteroLibraryID     string
@@ -189,6 +192,54 @@ var Options = []Option{
 		},
 	},
 	{
+		Key: "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_HIT_CNY_PER_MILLION", Label: "Flash off-peak cache hit", Description: "CNY per million cached input tokens.",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "0.05",
+	},
+	{
+		Key: "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_MISS_CNY_PER_MILLION", Label: "Flash off-peak cache miss", Description: "CNY per million uncached input tokens.",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "1.5",
+	},
+	{
+		Key: "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_OUTPUT_CNY_PER_MILLION", Label: "Flash off-peak output", Description: "CNY per million output tokens.",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "4.5",
+	},
+	{
+		Key: "SCIRSS_DEEPSEEK_FLASH_PEAK_CACHE_HIT_CNY_PER_MILLION", Label: "Flash peak cache hit", Description: "CNY per million cached input tokens.",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "0.1",
+	},
+	{
+		Key: "SCIRSS_DEEPSEEK_FLASH_PEAK_CACHE_MISS_CNY_PER_MILLION", Label: "Flash peak cache miss", Description: "CNY per million uncached input tokens.",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "3",
+	},
+	{
+		Key: "SCIRSS_DEEPSEEK_FLASH_PEAK_OUTPUT_CNY_PER_MILLION", Label: "Flash peak output", Description: "CNY per million output tokens.",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "9",
+	},
+	{
+		Key: "SCIRSS_DEEPSEEK_PRO_OFF_PEAK_CACHE_HIT_CNY_PER_MILLION", Label: "Pro off-peak cache hit", Description: "CNY per million cached input tokens.",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "0.15",
+	},
+	{
+		Key: "SCIRSS_DEEPSEEK_PRO_OFF_PEAK_CACHE_MISS_CNY_PER_MILLION", Label: "Pro off-peak cache miss", Description: "CNY per million uncached input tokens.",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "4.5",
+	},
+	{
+		Key: "SCIRSS_DEEPSEEK_PRO_OFF_PEAK_OUTPUT_CNY_PER_MILLION", Label: "Pro off-peak output", Description: "CNY per million output tokens.",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "13.5",
+	},
+	{
+		Key: "SCIRSS_DEEPSEEK_PRO_PEAK_CACHE_HIT_CNY_PER_MILLION", Label: "Pro peak cache hit", Description: "CNY per million cached input tokens.",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "0.3",
+	},
+	{
+		Key: "SCIRSS_DEEPSEEK_PRO_PEAK_CACHE_MISS_CNY_PER_MILLION", Label: "Pro peak cache miss", Description: "CNY per million uncached input tokens.",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "9",
+	},
+	{
+		Key: "SCIRSS_DEEPSEEK_PRO_PEAK_OUTPUT_CNY_PER_MILLION", Label: "Pro peak output", Description: "CNY per million output tokens.",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "27",
+	},
+	{
 		Key:         "SCIRSS_ZOTERO_API_KEY",
 		Label:       "Zotero API key",
 		Description: "Used for Zotero collection lookup and paper save operations.",
@@ -294,6 +345,7 @@ func Load(root string) (Settings, error) {
 	settings.ProfileBaseURL = valueOrDefault(valueMap["SCIRSS_PROFILE_BASE_URL"], "https://api.deepseek.com")
 	settings.ProfileModel = valueOrDefault(valueMap["SCIRSS_PROFILE_MODEL"], "deepseek-v4-pro")
 	settings.ProfileThinking = valueOrDefault(strings.ToLower(strings.TrimSpace(valueMap["SCIRSS_PROFILE_THINKING"])), "enabled")
+	settings.DeepSeekPricing = deepSeekPricingFromValues(values, valueMap)
 	settings.ZoteroAPIKey = optionalValue(valueMap["SCIRSS_ZOTERO_API_KEY"])
 	settings.ZoteroLibraryType = valueOrDefault(strings.ToLower(strings.TrimSpace(valueMap["SCIRSS_ZOTERO_LIBRARY_TYPE"])), "user")
 	settings.ZoteroLibraryID = optionalValue(valueMap["SCIRSS_ZOTERO_LIBRARY_ID"])
@@ -662,6 +714,13 @@ func normalizeSettingValue(option Option, value *string) (string, bool, error) {
 			return "", false, fmt.Errorf("%s must start with http:// or https://", option.Label)
 		}
 		return clean, true, nil
+	case "decimal":
+		numeric, err := strconv.ParseFloat(clean, 64)
+		scaled := numeric * 1_000
+		if err != nil || math.IsNaN(numeric) || math.IsInf(numeric, 0) || numeric < 0 || math.Abs(scaled-math.Round(scaled)) > 1e-9 {
+			return "", false, fmt.Errorf("%s must be a non-negative number with at most 3 decimal places", option.Label)
+		}
+		return strconv.FormatFloat(numeric, 'f', -1, 64), true, nil
 	case "select":
 		normalized := strings.ToLower(clean)
 		for _, allowed := range option.Options {
@@ -673,6 +732,38 @@ func normalizeSettingValue(option Option, value *string) (string, bool, error) {
 	default:
 		return clean, true, nil
 	}
+}
+
+func deepSeekPricingFromValues(values []ResolvedValue, valueMap map[string]string) llmusage.DeepSeekPricing {
+	pricing := llmusage.DefaultDeepSeekPricing()
+	for _, value := range values {
+		if value.Option.Section == "DeepSeek pricing" && value.Source != "default" {
+			pricing.Snapshot = llmusage.PricingSnapshotDeepSeekManual
+			break
+		}
+	}
+	pricing.Flash.OffPeak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK", pricing.Flash.OffPeak)
+	pricing.Flash.Peak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_FLASH_PEAK", pricing.Flash.Peak)
+	pricing.Pro.OffPeak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_PRO_OFF_PEAK", pricing.Pro.OffPeak)
+	pricing.Pro.Peak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_PRO_PEAK", pricing.Pro.Peak)
+	return pricing
+}
+
+func tokenRatesFromValues(values map[string]string, prefix string, fallback llmusage.TokenRates) llmusage.TokenRates {
+	return llmusage.TokenRates{
+		CacheHitNanoCNYPerToken:   priceNanoPerToken(values[prefix+"_CACHE_HIT_CNY_PER_MILLION"], fallback.CacheHitNanoCNYPerToken),
+		CacheMissNanoCNYPerToken:  priceNanoPerToken(values[prefix+"_CACHE_MISS_CNY_PER_MILLION"], fallback.CacheMissNanoCNYPerToken),
+		CompletionNanoCNYPerToken: priceNanoPerToken(values[prefix+"_OUTPUT_CNY_PER_MILLION"], fallback.CompletionNanoCNYPerToken),
+	}
+}
+
+func priceNanoPerToken(value string, fallback int64) int64 {
+	parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	scaled := parsed * 1_000
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 || math.Abs(scaled-math.Round(scaled)) > 1e-9 {
+		return fallback
+	}
+	return int64(math.Round(scaled))
 }
 
 func optionalValue(value string) string {

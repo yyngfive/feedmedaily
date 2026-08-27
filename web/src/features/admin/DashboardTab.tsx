@@ -1,8 +1,9 @@
 import {Button, Card, Spinner} from "@heroui/react";
 import React from "react";
 
+import {fetchLLMUsage} from "../../api/client";
 import {CheckboxRow, TextAreaField, TextInputField} from "../../shared/components/FormFields";
-import type {AppMeta, AppUpdate, FeedSubscription, JobInfo} from "../../shared/types";
+import type {AppMeta, AppUpdate, FeedSubscription, JobInfo, LLMUsageRecord, LLMUsageSummary} from "../../shared/types";
 
 function formatJobTime(value?: string | null) {
   if (!value || Number.isNaN(Date.parse(value))) {
@@ -21,6 +22,16 @@ function jobResultErrors(job: JobInfo) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     : [];
+}
+
+function formatTokenCount(value: number) {
+  return new Intl.NumberFormat().format(value);
+}
+
+function usageCostLabel(usage: Pick<LLMUsageSummary, "estimated_cost_cny" | "pricing_status">) {
+  return usage.pricing_status === "estimated" && usage.estimated_cost_cny
+    ? `Estimated ¥${usage.estimated_cost_cny}`
+    : "Cost unavailable";
 }
 
 function LatestJobPanel({feeds, job}: {feeds: FeedSubscription[]; job: JobInfo}) {
@@ -47,6 +58,11 @@ function LatestJobPanel({feeds, job}: {feeds: FeedSubscription[]; job: JobInfo})
           <p>Finished: {formatJobTime(job.finished_at)}</p>
         </div>
       </div>
+      {job.llm_usage ? (
+        <p className="mt-3 text-sm text-muted">
+          {usageCostLabel(job.llm_usage)} · hit {formatTokenCount(job.llm_usage.prompt_cache_hit_tokens)} · miss {formatTokenCount(job.llm_usage.prompt_cache_miss_tokens)} · output {formatTokenCount(job.llm_usage.completion_tokens)}
+        </p>
+      ) : null}
       {job.job_type === "sync" ? (
         <dl className="mt-3 grid gap-2 text-muted sm:grid-cols-5">
           {(["fetched", "inserted", "updated", "classified"] as const).map((key) => (
@@ -183,6 +199,8 @@ export function DashboardTab({
   const [verificationXML, setVerificationXML] = React.useState("");
   const [syncFeedQuery, setSyncFeedQuery] = React.useState("");
   const [selectedSyncFeedURLs, setSelectedSyncFeedURLs] = React.useState<string[]>([]);
+  const [llmUsage, setLLMUsage] = React.useState<LLMUsageRecord[]>([]);
+  const [llmUsageError, setLLMUsageError] = React.useState<string | null>(null);
   const latestJob = jobs[0] ?? null;
   const activeSyncJob = jobs.find((job) => job.job_type === "sync" && ["queued", "running", "waiting_for_user"].includes(job.status)) ?? null;
   const verificationJob = jobs.find((job) => job.status === "waiting_for_user" && job.verification_required) ?? null;
@@ -196,6 +214,16 @@ export function DashboardTab({
   }, [feeds, syncFeedQuery]);
 
   React.useEffect(() => setVerificationXML(""), [verificationJob?.id]);
+  React.useEffect(() => {
+    let cancelled = false;
+    const since = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    void fetchLLMUsage(since).then((items) => {
+      if (!cancelled) { setLLMUsage(items); setLLMUsageError(null); }
+    }).catch(() => {
+      if (!cancelled) setLLMUsageError("Could not load LLM usage.");
+    });
+    return () => { cancelled = true; };
+  }, [latestJob?.finished_at]);
   React.useEffect(() => {
     const savedURLs = new Set(savedSyncFeedURLs);
     setSelectedSyncFeedURLs((current) => current.filter((url) => savedURLs.has(url)));
@@ -246,6 +274,28 @@ export function DashboardTab({
               {appMeta?.server_url ? <span className="ml-2">{appMeta.server_url}</span> : null}
             </p>
             {latestJob ? <LatestJobPanel feeds={feeds} job={latestJob} /> : <p className="mt-3 text-sm text-muted">No tracked jobs yet.</p>}
+          </section>
+          <section className="border-b border-(--line) pb-5">
+            <h3 className="text-sm font-semibold text-(--ink)">LLM usage · last 3 days</h3>
+            {llmUsageError ? <p className="mt-2 text-sm text-rose-700">{llmUsageError}</p> : llmUsage.length === 0 ? (
+              <p className="mt-2 text-sm text-muted">No completed LLM jobs in this window.</p>
+            ) : (
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[45rem] text-left text-xs">
+                  <thead className="border-b border-(--line) text-muted"><tr><th className="py-2 pr-3 font-medium">Time</th><th className="py-2 pr-3 font-medium">Job</th><th className="py-2 pr-3 font-medium">Model</th><th className="py-2 pr-3 font-medium">Requests</th><th className="py-2 pr-3 font-medium">Tokens · hit / miss / output</th><th className="py-2 font-medium">Cost</th></tr></thead>
+                  <tbody>{llmUsage.map((item) => (
+                    <tr key={item.job_id} className="border-b border-(--line)/70 last:border-0">
+                      <td className="py-2 pr-3 whitespace-nowrap text-muted">{formatJobTime(item.completed_at)}</td>
+                      <td className="py-2 pr-3 text-(--ink)">{item.job_type} · {item.status}</td>
+                      <td className="py-2 pr-3 text-muted">{item.model || "Unknown"}</td>
+                      <td className="py-2 pr-3 text-muted">{formatTokenCount(item.request_count)}</td>
+                      <td className="py-2 pr-3 whitespace-nowrap text-muted">{formatTokenCount(item.prompt_cache_hit_tokens)} / {formatTokenCount(item.prompt_cache_miss_tokens)} / {formatTokenCount(item.completion_tokens)}</td>
+                      <td className="py-2 whitespace-nowrap text-(--ink)">{usageCostLabel(item)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
           </section>
           <section>
             <div className="flex flex-wrap items-center justify-between gap-3">

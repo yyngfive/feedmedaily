@@ -8,6 +8,7 @@ import (
 	"github.com/yyngfive/scirssagent/internal/classifier"
 	"github.com/yyngfive/scirssagent/internal/config"
 	"github.com/yyngfive/scirssagent/internal/feeds"
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"github.com/yyngfive/scirssagent/internal/logging"
 	"github.com/yyngfive/scirssagent/internal/metadata"
 	"github.com/yyngfive/scirssagent/internal/profile"
@@ -21,6 +22,7 @@ type RunOptions struct {
 	FeedBodyOverrides map[string][]byte
 	SkippedFeeds      map[string]string
 	VerifyFeedHost    feeds.VerifyHostFunc
+	Usage             *llmusage.Collector
 }
 
 type RunSummary struct {
@@ -87,7 +89,7 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 	if currentProfile == nil {
 		return RunSummary{}, fmt.Errorf("No classification profile exists yet.")
 	}
-	cfg, err := classifierConfig(settings)
+	cfg, err := classifierConfig(settings, opts.Usage)
 	if err != nil {
 		return RunSummary{}, err
 	}

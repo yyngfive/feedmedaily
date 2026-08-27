@@ -14,10 +14,11 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 - `internal/config/`: settings schema, local config editing, and path resolution
 - `internal/feeds/`: feed fetch client, generic RSS/Atom/RDF parser, and publisher-specific extractors
 - `internal/jobs/`: sync pipeline, reclassify flows, and background job orchestration
+- `internal/llmusage/`: thread-safe per-job LLM usage collection and immutable DeepSeek pricing snapshots
 - `internal/metadata/`: conditional metadata enrichment via DOI/OpenAlex/Crossref lookups
 - `internal/profile/`: profile validation, generation, and persistence helpers
 - `internal/runtime/`: shared runtime paths, version, mode, process, and app metadata helpers
-- `internal/store/sqlite/`: SQLite persistence for papers, classifications, feedback, proposals, and Zotero status
+- `internal/store/sqlite/`: SQLite persistence for papers, classifications, feedback, proposals, Zotero status, and per-job LLM usage
 - `internal/trayapp/`: tray lifecycle, scheduling, backend supervision, and autostart
 - `internal/zotero/`: Zotero Web API integration
 - `web/`: Vite + React + TypeScript frontend organized into app orchestration, feature modules, API/data adapters, and shared UI/types
@@ -29,7 +30,7 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 3. Papers are deduplicated and upserted into `data/literature.sqlite`.
 4. Metadata enrichment runs only when core fields such as DOI, authors, journal, or usable abstract content are missing.
 5. The classifier evaluates papers against the active `data/classification_profile.json`.
-6. Classifications, feedback, profile proposals, and Zotero save status are persisted in SQLite.
+6. Classifications, feedback, profile proposals, Zotero save status, and completed-job LLM usage are persisted in SQLite.
 7. `feedmedailyd` serves `web/dist` and exposes the local JSON API surface.
 8. The API service keeps a long-lived SQLite handle open for request reuse, and the UI reads the latest report through `/api/report/latest`, rebuilt from SQLite-backed state rather than replayed from disk report snapshots.
 
@@ -52,6 +53,8 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 `Run Sync Now` is fully owned by Go end-to-end: feed fetch, ingest, conditional metadata enrichment, classification, report refresh, and background job state all run through `feedmedailyd`. The same `/api/admin/run` endpoint also accepts an optional saved-feed URL list so Dashboard can run a targeted manual sync without changing the stored subscriptions. Sync launch is single-flight across full and targeted runs: while a sync is queued, running, or waiting for verification, another launch request returns the existing job instead of starting a second pipeline. The Dashboard disables its Sync button while that active job is visible, while the backend registry remains the concurrency authority for UI, tray, and concurrent API callers.
 
 The job polling endpoints expose both human-readable messages and structured progress fields so the UI can show stage-aware status such as current feed `i/N`, metadata/classification completion percentages, step-based profile generation progress, and structured latest-job summaries. Sync warning details are read from the existing job result errors and matched back to the current feed list by URL.
+
+Every LLM-backed job owns one explicit thread-safe usage collector and captures the current manual pricing settings when the job starts. Classifier batches, retries, single-paper degradation, title translation, profile generation, validation, JSON repair, and thinking fallbacks record each successful provider response exactly once, including its response timestamp. When the job reaches `completed` or `failed`, its token totals and pricing snapshot are copied into `JobInfo.llm_usage` and persisted as one `llm_usage_jobs` row. Ledger persistence failures are warnings and never change the business job outcome. Official `api.deepseek.com` requests for known models are priced in integer nano-CNY; Beijing-time peak rates apply only Monday through Friday at 9:00–12:00 and 14:00–18:00, and all other periods including weekends use off-peak rates. Jobs crossing a pricing boundary can retain multiple pricing breakdowns. Settings → Model exposes a compact Flash/Pro peak/off-peak price table; saved changes affect only later jobs because completed ledger rows keep their concrete rate snapshots. Other endpoints/models remain `unavailable` rather than receiving a fabricated amount. Existing-database migrations and narrowly scoped historical pricing repairs run when the backend starts, before Dashboard opens its read-only store. Dashboard reads the last three days through `/api/admin/llm-usage`, while SQLite retains the full history.
 
 The API service reuses long-lived SQLite stores across requests instead of reopening the database per handler. Read-heavy endpoints and mutation endpoints are split across separate store roles so the UI can keep `/api/report/latest` responsive while feedback or read-status writes are in flight. The SQLite runtime now enables WAL plus a busy-timeout-oriented connection string, and the `/api/report/latest` read path batch-selects each paper's latest classification, latest open feedback, and latest Zotero save state with SQL windowing rather than issuing per-paper follow-up lookups. `/api/app/update` keeps a short-lived in-memory status cache for routine polling and page initialization, but also accepts a force-refresh path so manual checks can bypass that cache immediately.
 
@@ -153,7 +156,7 @@ Behavioral baseline:
 - the default review view is `Unread + Last 30 days`
 - paper cards stay summary-only
 - paper actions live in the detail panel
-- the settings drawer is split into `Dashboard`, `Feeds`, `Profile`, `Model`, and `App`: Dashboard owns sync/reclassify/protected-feed interruption controls plus update/runtime status and latest-job summaries, Feeds owns RSS subscription editing with stable editable rows, Profile owns profile/proposal/feedback review with multiline rule editing, Model owns classifier/profile model settings, and App owns Zotero, local app fields, and scheduling
+- the settings drawer is split into `Dashboard`, `Feeds`, `Profile`, `Model`, and `App`: Dashboard owns sync/reclassify/protected-feed interruption controls plus update/runtime status, latest-job summaries, and the three-day LLM usage table; Feeds owns RSS subscription editing with stable editable rows, Profile owns profile/proposal/feedback review with multiline rule editing, Model owns classifier/profile model settings plus manual DeepSeek pricing, and App owns Zotero, local app fields, and scheduling
 - manual update checks are exposed both in `Settings -> Dashboard -> Update check` and in the footer status bar, and both routes trigger the same force-refresh update request
 - app-update, scheduler, settings, proposal, and feedback hydration are non-critical background loads and must not block the card list from appearing
 - `Mark as read` and feedback mutations commit their local UI result first and use a non-blocking report reconcile pass afterward, so the card list stays visible during background refreshes

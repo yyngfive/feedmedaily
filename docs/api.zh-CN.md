@@ -305,11 +305,13 @@ secret 字段不以明文返回。
 
 当前分类器默认值为 `SCIRSS_CLASSIFIER_THINKING=disabled`、`SCIRSS_CLASSIFIER_BATCH_SIZE=5`。模型响应不要求 `decision_trace` 或 `recommended_action`；报告 API 中保留的 `recommended_action` 由后端按 relevance 确定。
 
+`DeepSeek pricing` section 提供 Flash/Pro 各自的 off-peak/peak 缓存命中、缓存未命中和输出价格，单位均为 CNY / 1M tokens，字段名采用 `SCIRSS_DEEPSEEK_<FLASH|PRO>_<OFF_PEAK|PEAK>_<CACHE_HIT|CACHE_MISS|OUTPUT>_CNY_PER_MILLION`。价格允许 0 或最多三位小数，默认值是当前内置官方价格。
+
 前端入口：`fetchSettingsConfig()`。
 
 ### `PUT /api/settings/config`
 
-用途：更新本地配置，并立即重载后端 settings。
+用途：更新本地配置，并立即重载后端 settings。定价修改只会被之后启动的 job 捕获；正在运行和已经完成的 job 保留启动时或完成时的价格快照。
 
 请求体：
 
@@ -751,6 +753,8 @@ job result 典型字段：
 
 成功响应：`JobInfo[]`。
 
+LLM job 在完成或失败后包含可选 `llm_usage`：请求数、三类 token、模型、pricing 状态、价格快照和格式化人民币估算。没有精确 usage、未知模型或非官方 DeepSeek endpoint 时 `pricing_status` 为 `unavailable`，不会返回伪造金额。
+
 前端入口：`fetchJobs()`。
 
 ### `GET /api/admin/jobs/{id}`
@@ -766,6 +770,29 @@ job result 典型字段：
 常见错误：404 job 不存在。
 
 前端入口：`fetchJob(id)`。
+
+### `GET /api/admin/llm-usage?since=<RFC3339>`
+
+用途：读取 SQLite 中按 job 汇总的 LLM usage ledger，按完成时间倒序返回。Dashboard 使用当前时间往前 3 天作为 `since`；数据库本身不自动清理历史。
+
+每条记录包含：
+
+- `job_id`、`job_type`、`status`、`model`、`completed_at`
+- `request_count`
+- `prompt_tokens`、`prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`、`completion_tokens`
+- `pricing_status`、`pricing` 单价快照
+- 可用时返回 `estimated_cost_nano_cny` 和 `estimated_cost_cny`
+
+费用仅对官方 `api.deepseek.com` 的已知模型计算，并按每个成功响应发生时的北京时间选择峰谷价格。高峰时段为周一至周五 9:00–12:00、14:00–18:00，其余时间（包括周末）为空闲时段。V4 Flash（以及兼容映射的 `deepseek-chat`、`deepseek-reasoner`）空闲价默认为命中 ¥0.05/M、未命中 ¥1.5/M、输出 ¥4.5/M，高峰价默认为 ¥0.10/M、¥3/M、¥9/M；V4 Pro 空闲价默认为 ¥0.15/M、¥4.5/M、¥13.5/M，高峰价默认为 ¥0.30/M、¥9/M、¥27/M。用户可以在 Settings → Model 手动调整这些默认值。每个 job 启动时锁定当时设置，ledger 保存实际采用的 `tier` 和费率快照，后续调价不回算历史。默认价格依据 DeepSeek 的[响应 usage 定义](https://api-docs.deepseek.com/api/create-chat-completion/)和[官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)。
+
+数据库启动修复会幂等纠正 2026-08-22 起误用 `deepseek-cny-2026-07-24` 的记录，以及曾使用 `deepseek-cny-2026-08-21` 高峰价计算的周末记录；其他历史快照不自动改写。用户之后手动调整价格也不会触发历史回算。
+
+常见错误：
+
+- 400：缺少 `since` 或不是 RFC3339。
+- 500：SQLite 查询失败。
+
+前端入口：`fetchLLMUsage(since)`。
 
 ## 9. Feed Verification
 

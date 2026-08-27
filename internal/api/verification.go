@@ -10,6 +10,7 @@ import (
 	"github.com/yyngfive/scirssagent/internal/config"
 	"github.com/yyngfive/scirssagent/internal/feeds"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"github.com/yyngfive/scirssagent/internal/logging"
 )
 
@@ -57,7 +58,7 @@ const (
 	verificationMethodBrowserManual = "browser_manual"
 )
 
-func launchVerificationAwareSyncJob(settings config.Settings, run func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error)) (jobInfo, bool) {
+func launchVerificationAwareSyncJob(settings config.Settings, run func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc, usage *llmusage.Collector) (map[string]any, error)) (jobInfo, bool) {
 	job := jobInfo{
 		ID:         nextJobID(),
 		JobType:    "sync",
@@ -84,6 +85,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 	}
 
 	go func() {
+		usage := llmusage.NewCollector(settings.DeepSeekPricing)
 		started := nowFunc().UTC()
 		logJobEvent(settings.LogsDir, &job, "info", "started", "pipeline.feeds.fetching", "Fetching RSS feeds.", "", nil)
 		updateJob(job.ID, func(current *jobInfo) {
@@ -107,7 +109,10 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 			})
 		}
 
-		result, err := runVerificationAwareSync(settings, job.ID, "", progress, run, verificationAwareSyncCallbacks{
+		runWithUsage := func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error) {
+			return run(progress, overrides, skippedFeeds, verifyHost, usage)
+		}
+		result, err := runVerificationAwareSync(settings, job.ID, "", progress, runWithUsage, verificationAwareSyncCallbacks{
 			OnWaiting: func(pending *pendingVerification) {
 				logJobEvent(settings.LogsDir, &job, "warning", "waiting_for_user", "pipeline.feeds.verification_required", "A protected feed requires manual verification.", "", map[string]any{
 					"verification_target":   pending.Target,
@@ -220,12 +225,14 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 		if err == nil {
 			warningCount := countWarnings(result)
 			finished := nowFunc().UTC()
+			summary := finalizeLLMUsage(settings, job.ID, "sync", "completed", usage, finished)
 			logJobEvent(settings.LogsDir, &job, "info", "completed", "sync.completed", "Completed.", "", result)
 			updateJob(job.ID, func(current *jobInfo) {
 				current.Status = "completed"
 				current.MessageKey = "sync.completed"
-				current.Message = summarizeResult("sync", result)
+				current.Message = summarizeResult("sync", result) + usageMessage(summary)
 				current.Result = result
+				current.LLMUsage = &summary
 				current.WarningCount = warningCount
 				clearJobProgress(current)
 				current.FinishedAt = &finished
@@ -240,11 +247,13 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 			return
 		}
 		finished := nowFunc().UTC()
+		summary := finalizeLLMUsage(settings, job.ID, "sync", "failed", usage, finished)
 		logJobEvent(settings.LogsDir, &job, "error", "failed", "sync.failed", "", err.Error(), nil)
 		updateJob(job.ID, func(current *jobInfo) {
 			current.Status = "failed"
 			current.MessageKey = "sync.failed"
 			current.Error = err.Error()
+			current.LLMUsage = &summary
 			clearJobProgress(current)
 			current.FinishedAt = &finished
 			current.VerificationRequired = false

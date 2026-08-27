@@ -61,6 +61,39 @@ func TestLoadUsesCostOptimizedClassifierDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadUsesOfficialDeepSeekPricingDefaultsAndAcceptsManualOverrides(t *testing.T) {
+	root := t.TempDir()
+	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
+	t.Setenv("FEEDMEDAILY_RUNTIME_MODE", "")
+
+	settings, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.DeepSeekPricing.Flash.OffPeak.CacheMissNanoCNYPerToken != 1_500 || settings.DeepSeekPricing.Pro.Peak.CompletionNanoCNYPerToken != 27_000 {
+		t.Fatalf("default DeepSeek pricing = %#v", settings.DeepSeekPricing)
+	}
+
+	manual := "2.25"
+	updated, err := UpdateLocalSettings(root, map[string]SettingsConfigFieldUpdate{
+		"SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_MISS_CNY_PER_MILLION": {Value: &manual},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	field := fieldByKey(t, updated.Fields, "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_MISS_CNY_PER_MILLION")
+	if field.Value == nil || *field.Value != "2.25" {
+		t.Fatalf("manual pricing field = %#v", field)
+	}
+	settings, err = Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.DeepSeekPricing.Flash.OffPeak.CacheMissNanoCNYPerToken != 2_250 || settings.DeepSeekPricing.Snapshot != "deepseek-cny-manual" {
+		t.Fatalf("manual DeepSeek pricing = %#v", settings.DeepSeekPricing)
+	}
+}
+
 func TestLoadEnvironmentOverridesDotEnv(t *testing.T) {
 	root := t.TempDir()
 	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")

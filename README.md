@@ -83,6 +83,8 @@ Windows 托盘首次启用定时同步时默认使用本地时间 `12:30`；在�
 
 手动同步采用单任务保护：已有 sync 处于排队、执行或等待订阅源验证状态时，再次点击 Dashboard 的 Sync 或从托盘/API 触发同步只会复用现有任务，不会重复抓取和分类。
 
+Settings → Dashboard 会显示每个 sync、reclassify、首次 Profile 生成和 Profile proposal job 的 DeepSeek token 用量与估算人民币费用，并保留最近 3 天的明细视图。费用使用 API 返回的缓存命中、缓存未命中和输出 token 乘以调用时价格快照计算；北京时间周一至周五 9:00–12:00、14:00–18:00 使用高峰价，其余时间（包括周末）使用空闲价。Settings → Model 可以手动调整 Flash/Pro 的峰谷单价；保存后的价格只用于之后启动的 job，不回算历史记录。未知模型、非官方 endpoint 或缺少精确 usage 时只显示 token，不推测金额。
+
 ```cron
 0 8 * * * cd /path/to/feedmedaily && bash /path/to/feedmedaily/tools/feedmedaily.sh sync >> /path/to/feedmedaily/logs/cron.log 2>&1
 ```

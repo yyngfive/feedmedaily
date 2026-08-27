@@ -101,7 +101,7 @@ export function messageFromJob(job: JobInfo): UiMessage {
   const progressText = formatProgressMessage(job);
   if (job.status === "failed") {
     const message = createUiMessage(job.message_key ?? "job.failed", {
-      text: job.error ?? job.message ?? "Job failed.",
+      text: `${job.error ?? job.message ?? "Job failed."}${jobUsageCostSuffix(job)}`,
       tone: "danger",
     });
     return {...message, ttlMs: JOB_FINAL_TTL_MS};
@@ -126,6 +126,12 @@ export function messageFromJob(job: JobInfo): UiMessage {
     tone: "info",
   });
   return {...message, ttlMs: STICKY_TTL_MS};
+}
+
+function jobUsageCostSuffix(job: JobInfo): string {
+  if (!job.llm_usage) return "";
+  const cost = job.llm_usage.estimated_cost_cny;
+  return cost ? ` Estimated LLM cost ¥${cost}.` : " LLM cost unavailable.";
 }
 
 function formatProgressMessage(job: JobInfo): string | null {

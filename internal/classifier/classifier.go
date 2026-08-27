@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"github.com/yyngfive/scirssagent/internal/logging"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
@@ -40,6 +41,7 @@ type LLMConfig struct {
 	Model    string
 	BaseURL  string
 	Thinking string
+	Usage    *llmusage.Collector
 }
 
 type promptPaper struct {
@@ -56,6 +58,12 @@ type chatCompletionResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens          int64  `json:"prompt_tokens"`
+		PromptCacheHitTokens  *int64 `json:"prompt_cache_hit_tokens"`
+		PromptCacheMissTokens *int64 `json:"prompt_cache_miss_tokens"`
+		CompletionTokens      int64  `json:"completion_tokens"`
+	} `json:"usage"`
 }
 
 var classifierHTTPClient = &http.Client{Timeout: 60 * time.Second}
@@ -341,6 +349,20 @@ func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string,
 	if err := json.Unmarshal(responseBody, &decoded); err != nil {
 		logClassifierRetry(operation+"_envelope_parse_failed", "Classifier response envelope was not valid JSON.", err, cfg.Model, operation, attempt, len(responseBody))
 		return "", fmt.Errorf("parse classifier response envelope: %w", err)
+	}
+	if decoded.Usage != nil && cfg.Usage != nil {
+		usage := llmusage.ResponseUsage{
+			PromptTokens:          decoded.Usage.PromptTokens,
+			CompletionTokens:      decoded.Usage.CompletionTokens,
+			CacheBreakdownPresent: decoded.Usage.PromptCacheHitTokens != nil && decoded.Usage.PromptCacheMissTokens != nil,
+		}
+		if decoded.Usage.PromptCacheHitTokens != nil {
+			usage.PromptCacheHitTokens = *decoded.Usage.PromptCacheHitTokens
+		}
+		if decoded.Usage.PromptCacheMissTokens != nil {
+			usage.PromptCacheMissTokens = *decoded.Usage.PromptCacheMissTokens
+		}
+		cfg.Usage.Record(llmusage.Event{Role: "classifier", Operation: operation, BaseURL: cfg.BaseURL, Model: cfg.Model, OccurredAt: time.Now().UTC(), Usage: usage})
 	}
 	if len(decoded.Choices) == 0 {
 		return "", fmt.Errorf("classifier response did not contain any choices")

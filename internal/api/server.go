@@ -57,10 +57,35 @@ var (
 
 func NewServer(settings config.Settings, shutdown func()) *Server {
 	logging.SetDefaultDir(settings.LogsDir)
+	migrateExistingDatabase(settings)
 	return &Server{
 		settings: settings,
 		version:  appruntime.PackageVersion(settings.RootDir),
 		shutdown: shutdown,
+	}
+}
+
+// migrateExistingDatabase applies schema and data repairs before read-only API stores are opened.
+func migrateExistingDatabase(settings config.Settings) {
+	if _, err := os.Stat(settings.DatabasePath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			_, _ = logging.WriteDefault(logging.Event{
+				Level: "warning", Component: "api.server", Action: "database_migration_stat_failed", Error: err.Error(),
+			})
+		}
+		return
+	}
+	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
+	if err != nil {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level: "warning", Component: "api.server", Action: "database_migration_failed", Error: err.Error(),
+		})
+		return
+	}
+	if err := sqliteStore.Close(); err != nil {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level: "warning", Component: "api.server", Action: "database_migration_close_failed", Error: err.Error(),
+		})
 	}
 }
 
@@ -170,6 +195,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/reclassify", s.handleAdminReclassify)
 	mux.HandleFunc("/api/admin/jobs/", s.handleAdminJobByID)
 	mux.HandleFunc("/api/admin/jobs", s.handleAdminJobs)
+	mux.HandleFunc("/api/admin/llm-usage", s.handleAdminLLMUsage)
 	mux.HandleFunc("/api/feeds/verification/start", s.handleFeedVerificationStart)
 	mux.HandleFunc("/api/feeds/verification/browser", s.handleFeedVerificationBrowser)
 	mux.HandleFunc("/api/feeds/verification/callback", s.handleFeedVerificationCallback)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"github.com/yyngfive/scirssagent/internal/profile"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 	"io"
@@ -82,14 +83,14 @@ func (s *Server) handleProfileBootstrap(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	job := launchLocalJob(
-		s.settings.LogsDir,
+		s.settings,
 		"profile-bootstrap",
 		"profile.bootstrap.queued",
 		"Queued initial profile generation.",
 		"profile.bootstrap.generating",
 		"Generating the initial classification profile proposal.",
-		func(progress jobruntime.ProgressFunc) (map[string]any, error) {
-			return bootstrapProfileFunc(s.settings, payload.InterestDescription, payload.Name, progress)
+		func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
+			return bootstrapProfileFunc(s.settings, payload.InterestDescription, payload.Name, progress, usage)
 		},
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})
@@ -186,14 +187,14 @@ func (s *Server) handleProfileProposalGenerate(w http.ResponseWriter, r *http.Re
 		return
 	}
 	job := launchLocalJob(
-		s.settings.LogsDir,
+		s.settings,
 		"profile-proposal",
 		"",
 		"",
 		"profile.proposal.collecting_feedback",
 		"Collecting feedback for profile review.",
-		func(progress jobruntime.ProgressFunc) (map[string]any, error) {
-			return generateProfileProposalFunc(s.settings, progress)
+		func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
+			return generateProfileProposalFunc(s.settings, progress, usage)
 		},
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/yyngfive/scirssagent/internal/config"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 	zoterosvc "github.com/yyngfive/scirssagent/internal/zotero"
 	"io"
@@ -215,7 +216,7 @@ func TestBootstrapProposalGenerateAndZoteroBridgeAPIs(t *testing.T) {
 	defer restore()
 	seedReadOnlyFixture(t, settings.DatabasePath)
 
-	bootstrapProfileFunc = func(_ config.Settings, interestDescription string, name *string, progress jobruntime.ProgressFunc) (map[string]any, error) {
+	bootstrapProfileFunc = func(_ config.Settings, interestDescription string, name *string, progress jobruntime.ProgressFunc, _ ...*llmusage.Collector) (map[string]any, error) {
 		if progress != nil {
 			progress(jobruntime.StepProgress("profile.bootstrap.generating", "profile-bootstrap", 2, 4, "Step 2/4 (50%): Generating initial profile proposal."))
 		}
@@ -226,7 +227,7 @@ func TestBootstrapProposalGenerateAndZoteroBridgeAPIs(t *testing.T) {
 		_ = interestDescription
 		return result, nil
 	}
-	generateProfileProposalFunc = func(_ config.Settings, progress jobruntime.ProgressFunc) (map[string]any, error) {
+	generateProfileProposalFunc = func(_ config.Settings, progress jobruntime.ProgressFunc, _ ...*llmusage.Collector) (map[string]any, error) {
 		if progress != nil {
 			progress(jobruntime.StepProgress("profile.proposal.collecting_feedback", "profile-proposal", 1, 4, "Step 1/4 (25%): Collecting feedback and current profile context."))
 			progress(jobruntime.StepProgress("profile.proposal.generating", "profile-proposal", 2, 4, "Step 2/4 (50%): Generating profile proposal."))
@@ -309,7 +310,7 @@ func TestProfileProposalApplyRejectAndReclassifyAPI(t *testing.T) {
 	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`)
 	seedReadOnlyFixture(t, settings.DatabasePath)
 
-	reclassifyPaperIDsFunc = func(_ config.Settings, paperIDs []int64, progress jobruntime.ProgressFunc) (int, error) {
+	reclassifyPaperIDsFunc = func(_ config.Settings, paperIDs []int64, progress jobruntime.ProgressFunc, _ ...*llmusage.Collector) (int, error) {
 		if progress != nil {
 			progress(jobruntime.PercentProgress("pipeline.classifier.classifying", "classification", 1, 1, "Classifying papers 1/1 (100%)."))
 		}
@@ -386,7 +387,7 @@ func TestCompactProfileProposalApplyUsesAcceptedChanges(t *testing.T) {
 	seedCompactProposalFixture(t, settings.DatabasePath)
 
 	reclassifiedPaperIDs := []int64(nil)
-	reclassifyPaperIDsFunc = func(_ config.Settings, paperIDs []int64, _ jobruntime.ProgressFunc) (int, error) {
+	reclassifyPaperIDsFunc = func(_ config.Settings, paperIDs []int64, _ jobruntime.ProgressFunc, _ ...*llmusage.Collector) (int, error) {
 		reclassifiedPaperIDs = append([]int64(nil), paperIDs...)
 		return len(paperIDs), nil
 	}

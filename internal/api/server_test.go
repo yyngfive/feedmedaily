@@ -149,6 +149,49 @@ func TestServerUsesSeparateReadAndWriteStores(t *testing.T) {
 	}
 }
 
+func TestNewServerRepairsLegacyLLMUsageBeforeDashboardRead(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	if err := os.MkdirAll(filepath.Dir(settings.DatabasePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execSQLite(t, db, `
+CREATE TABLE llm_usage_jobs (
+  job_id TEXT PRIMARY KEY, job_type TEXT NOT NULL, status TEXT NOT NULL, model TEXT NOT NULL,
+  request_count INTEGER NOT NULL, prompt_tokens INTEGER NOT NULL,
+  prompt_cache_hit_tokens INTEGER NOT NULL, prompt_cache_miss_tokens INTEGER NOT NULL,
+  completion_tokens INTEGER NOT NULL, pricing_status TEXT NOT NULL, pricing_json TEXT NOT NULL,
+  estimated_cost_nano_cny INTEGER, estimated_cost_cny TEXT, completed_at TEXT NOT NULL
+);
+INSERT INTO llm_usage_jobs VALUES (
+  'legacy-sync', 'sync', 'completed', 'deepseek-v4-flash', 28, 95249,
+  52608, 42641, 12547, 'estimated',
+  '[{"model":"deepseek-v4-flash","snapshot":"deepseek-cny-2026-07-24","cache_hit_nano_cny_per_token":20,"cache_miss_nano_cny_per_token":1000,"completion_nano_cny_per_token":2000}]',
+  68787160, '0.068787', '2026-08-22T04:36:23Z'
+);`)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(settings, nil)
+	defer server.Close()
+	readStore, err := server.getReadStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := readStore.ListLLMUsage(time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].EstimatedCostCNY == nil || *items[0].EstimatedCostCNY != "0.123053" {
+		t.Fatalf("legacy usage was not repaired on server startup: %#v", items)
+	}
+}
+
 func newTestHandler(t *testing.T, settings config.Settings) http.Handler {
 	t.Helper()
 	server := NewServer(settings, nil)

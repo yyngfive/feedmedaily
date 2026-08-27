@@ -26,7 +26,7 @@ export type SettingsConfigField = {
   label: string;
   description: string;
   section: string;
-  input_type: "text" | "password" | "url" | "number" | "select";
+  input_type: "text" | "password" | "url" | "number" | "decimal" | "select";
   secret: boolean;
   configured: boolean;
   source: SettingsConfigSource;
@@ -315,6 +315,38 @@ export type JobInfo = {
   created_at: string;
   started_at?: string | null;
   finished_at?: string | null;
+  llm_usage?: LLMUsageSummary | null;
+};
+
+export type LLMPricingBreakdown = {
+  model: string;
+  snapshot: string;
+  tier: "off_peak" | "peak";
+  cache_hit_nano_cny_per_token: number;
+  cache_miss_nano_cny_per_token: number;
+  completion_nano_cny_per_token: number;
+};
+
+export type LLMUsageSummary = {
+  request_count: number;
+  prompt_tokens: number;
+  prompt_cache_hit_tokens: number;
+  prompt_cache_miss_tokens: number;
+  completion_tokens: number;
+  models: string[];
+  operations: string[];
+  pricing_status: "estimated" | "unavailable";
+  pricing: LLMPricingBreakdown[];
+  estimated_cost_nano_cny?: number | null;
+  estimated_cost_cny?: string | null;
+};
+
+export type LLMUsageRecord = Omit<LLMUsageSummary, "models" | "operations"> & {
+  job_id: string;
+  job_type: string;
+  status: string;
+  model: string;
+  completed_at: string;
 };
 
 export type SettingsConfigUpdate = {

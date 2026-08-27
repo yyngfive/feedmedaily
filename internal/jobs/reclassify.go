@@ -6,6 +6,7 @@ import (
 
 	"github.com/yyngfive/scirssagent/internal/classifier"
 	"github.com/yyngfive/scirssagent/internal/config"
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"github.com/yyngfive/scirssagent/internal/logging"
 	"github.com/yyngfive/scirssagent/internal/metadata"
 	"github.com/yyngfive/scirssagent/internal/profile"
@@ -32,7 +33,7 @@ func SelectPaperIDsForScope(settings config.Settings, scope string, limit int) (
 	}
 }
 
-func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress ProgressFunc) (int, error) {
+func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress ProgressFunc, collectors ...*llmusage.Collector) (int, error) {
 	// 用 Go 原生 metadata + classifier 重分类现有 papers。
 	logging.SetDefaultDir(settings.LogsDir)
 	EmitProgress(progress, PercentProgress("pipeline.metadata.enriching", "metadata", 0, len(paperIDs), metadataProgressMessage(0, len(paperIDs))))
@@ -43,7 +44,11 @@ func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress Pro
 	if currentProfile == nil {
 		return 0, fmt.Errorf("No classification profile exists yet.")
 	}
-	cfg, err := classifierConfig(settings)
+	var usage *llmusage.Collector
+	if len(collectors) > 0 {
+		usage = collectors[0]
+	}
+	cfg, err := classifierConfig(settings, usage)
 	if err != nil {
 		return 0, err
 	}
@@ -137,7 +142,7 @@ func RebuildLatestReport(settings config.Settings, progress ProgressFunc) (int, 
 	return rebuildLatestReportSummary(settings, progress)
 }
 
-func classifierConfig(settings config.Settings) (classifier.LLMConfig, error) {
+func classifierConfig(settings config.Settings, usage *llmusage.Collector) (classifier.LLMConfig, error) {
 	if settings.ClassifierAPIKey == "" {
 		return classifier.LLMConfig{}, fmt.Errorf("SCIRSS_CLASSIFIER_API_KEY is required for classification.")
 	}
@@ -146,5 +151,6 @@ func classifierConfig(settings config.Settings) (classifier.LLMConfig, error) {
 		Model:    settings.ClassifierModel,
 		BaseURL:  settings.ClassifierBaseURL,
 		Thinking: settings.ClassifierThinking,
+		Usage:    usage,
 	}, nil
 }

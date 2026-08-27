@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/yyngfive/scirssagent/internal/config"
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"github.com/yyngfive/scirssagent/internal/logging"
 	"io"
 	"net/http"
@@ -12,7 +13,7 @@ import (
 	"time"
 )
 
-func requestProfileModelJSONBody(settings config.Settings, endpoint string, body []byte) (string, error) {
+func requestProfileModelJSONBody(settings config.Settings, endpoint string, body []byte, usage *llmusage.Collector, operation string) (string, error) {
 	request, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("build profile generation request: %w", err)
@@ -64,9 +65,29 @@ func requestProfileModelJSONBody(settings config.Settings, endpoint string, body
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage *struct {
+			PromptTokens          int64  `json:"prompt_tokens"`
+			PromptCacheHitTokens  *int64 `json:"prompt_cache_hit_tokens"`
+			PromptCacheMissTokens *int64 `json:"prompt_cache_miss_tokens"`
+			CompletionTokens      int64  `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(responseBody, &payloadResponse); err != nil {
 		return "", fmt.Errorf("parse profile generation response: %w", err)
+	}
+	if payloadResponse.Usage != nil && usage != nil {
+		responseUsage := llmusage.ResponseUsage{
+			PromptTokens:          payloadResponse.Usage.PromptTokens,
+			CompletionTokens:      payloadResponse.Usage.CompletionTokens,
+			CacheBreakdownPresent: payloadResponse.Usage.PromptCacheHitTokens != nil && payloadResponse.Usage.PromptCacheMissTokens != nil,
+		}
+		if payloadResponse.Usage.PromptCacheHitTokens != nil {
+			responseUsage.PromptCacheHitTokens = *payloadResponse.Usage.PromptCacheHitTokens
+		}
+		if payloadResponse.Usage.PromptCacheMissTokens != nil {
+			responseUsage.PromptCacheMissTokens = *payloadResponse.Usage.PromptCacheMissTokens
+		}
+		usage.Record(llmusage.Event{Role: "profile", Operation: operation, BaseURL: settings.ProfileBaseURL, Model: settings.ProfileModel, OccurredAt: time.Now().UTC(), Usage: responseUsage})
 	}
 	if len(payloadResponse.Choices) == 0 {
 		return "", fmt.Errorf("profile model response did not contain any choices")
@@ -75,6 +96,10 @@ func requestProfileModelJSONBody(settings config.Settings, endpoint string, body
 }
 
 func requestProfileModelJSON(settings config.Settings, systemPrompt string, userPrompt string, maxTokens int) (string, error) {
+	return requestProfileModelJSONWithUsage(settings, systemPrompt, userPrompt, maxTokens, nil, "profile_request")
+}
+
+func requestProfileModelJSONWithUsage(settings config.Settings, systemPrompt string, userPrompt string, maxTokens int, usage *llmusage.Collector, operation string) (string, error) {
 	// 通过 OpenAI-compatible chat completions 调用 profile model 并返回 message content。
 	if strings.TrimSpace(settings.ProfileAPIKey) == "" {
 		return "", fmt.Errorf("SCIRSS_PROFILE_API_KEY is required for profile generation and prompt revision")
@@ -97,7 +122,7 @@ func requestProfileModelJSON(settings config.Settings, systemPrompt string, user
 	if err != nil {
 		return "", fmt.Errorf("encode profile generation request: %w", err)
 	}
-	content, err := requestProfileModelJSONBody(settings, endpoint, body)
+	content, err := requestProfileModelJSONBody(settings, endpoint, body, usage, operation)
 	if err == nil || strings.TrimSpace(settings.ProfileThinking) == "" || strings.EqualFold(strings.TrimSpace(settings.ProfileThinking), "disabled") || !shouldRetryProfileWithoutThinking(err) {
 		return content, err
 	}
@@ -114,7 +139,7 @@ func requestProfileModelJSON(settings config.Settings, systemPrompt string, user
 	if marshalErr != nil {
 		return "", fmt.Errorf("encode fallback profile generation request: %w", marshalErr)
 	}
-	content, fallbackErr := requestProfileModelJSONBody(settings, endpoint, fallbackBody)
+	content, fallbackErr := requestProfileModelJSONBody(settings, endpoint, fallbackBody, usage, operation+"_thinking_fallback")
 	if fallbackErr != nil {
 		_, _ = logging.WriteDefault(logging.Event{
 			Level:     "error",
@@ -134,6 +159,13 @@ func requestProfileModelJSON(settings config.Settings, systemPrompt string, user
 		Data:      map[string]any{"model": settings.ProfileModel},
 	})
 	return content, nil
+}
+
+func callProfileModelJSON(settings config.Settings, systemPrompt string, userPrompt string, maxTokens int, usage *llmusage.Collector, operation string) (string, error) {
+	if usage == nil {
+		return requestProfileModelJSONFunc(settings, systemPrompt, userPrompt, maxTokens)
+	}
+	return requestProfileModelJSONWithUsage(settings, systemPrompt, userPrompt, maxTokens, usage, operation)
 }
 
 func shouldRetryProfileWithoutThinking(err error) bool {
@@ -160,31 +192,31 @@ func shouldRetryProfileParseWithThinkingDisabled(settings config.Settings, err e
 		strings.Contains(message, "unexpected end of json input")
 }
 
-func coerceProfileDocument(settings config.Settings, content string) (profileDocument, error) {
+func coerceProfileDocument(settings config.Settings, content string, usage *llmusage.Collector) (profileDocument, error) {
 	payload, err := ValidateModelProfileText(content)
 	if err == nil {
 		return parseDocumentMap(payload)
 	}
-	repaired, repairErr := repairProfileJSON(settings, content)
+	repaired, repairErr := repairProfileJSON(settings, content, usage)
 	if repairErr != nil {
 		return profileDocument{}, fmt.Errorf("model returned invalid classification profile JSON. First parse failed: %v Repair attempt failed: %v", err, repairErr)
 	}
 	return parseDocumentMap(repaired)
 }
 
-func coerceProposalDelta(settings config.Settings, content string) (proposalDelta, error) {
+func coerceProposalDelta(settings config.Settings, content string, usage *llmusage.Collector) (proposalDelta, error) {
 	payload, err := ValidateModelProposalDeltaText(content, "Generated profile proposal.")
 	if err == nil {
 		return parseProposalDeltaMap(payload)
 	}
-	repaired, repairErr := repairProposalDeltaJSON(settings, content)
+	repaired, repairErr := repairProposalDeltaJSON(settings, content, usage)
 	if repairErr != nil {
 		return proposalDelta{}, fmt.Errorf("model returned invalid profile delta JSON. First parse failed: %v Repair attempt failed: %v", err, repairErr)
 	}
 	return parseProposalDeltaMap(repaired)
 }
 
-func repairProfileJSON(settings config.Settings, malformedContent string) (map[string]any, error) {
+func repairProfileJSON(settings config.Settings, malformedContent string, usage *llmusage.Collector) (map[string]any, error) {
 	prompt := strings.TrimSpace(fmt.Sprintf(`
 Repair the malformed scientific-literature classification profile below.
 
@@ -201,11 +233,13 @@ Required JSON shape:
 Malformed draft:
 %s
 `, compactProfileContract(), malformedContent))
-	content, err := requestProfileModelJSONFunc(
+	content, err := callProfileModelJSON(
 		settings,
 		"You repair malformed JSON classification profiles.",
 		prompt,
 		4200,
+		usage,
+		"profile_json_repair",
 	)
 	if err != nil {
 		return nil, err
@@ -213,7 +247,7 @@ Malformed draft:
 	return ValidateModelProfileText(content)
 }
 
-func repairProposalDeltaJSON(settings config.Settings, malformedContent string) (map[string]any, error) {
+func repairProposalDeltaJSON(settings config.Settings, malformedContent string, usage *llmusage.Collector) (map[string]any, error) {
 	prompt := strings.TrimSpace(fmt.Sprintf(`
 Repair the malformed profile-update delta below.
 
@@ -230,11 +264,13 @@ Required JSON shape:
 Malformed draft:
 %s
 `, profileDeltaContract(), malformedContent))
-	content, err := requestProfileModelJSONFunc(
+	content, err := callProfileModelJSON(
 		settings,
 		"You repair malformed JSON profile update deltas.",
 		prompt,
 		2200,
+		usage,
+		"profile_delta_json_repair",
 	)
 	if err != nil {
 		return nil, err

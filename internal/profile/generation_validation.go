@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/yyngfive/scirssagent/internal/config"
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"github.com/yyngfive/scirssagent/internal/logging"
 	"strings"
 )
@@ -36,17 +37,19 @@ func buildCompactProposalAttempt(current map[string]any, currentDocument profile
 	}, nil
 }
 
-func validateGeneratedProfileProposal(settings config.Settings, currentDocument profileDocument, feedbackItems []FeedbackProposalContext, attempt compactProposalAttempt) (ProposalValidationResult, error) {
+func validateGeneratedProfileProposal(settings config.Settings, currentDocument profileDocument, feedbackItems []FeedbackProposalContext, attempt compactProposalAttempt, usage *llmusage.Collector) (ProposalValidationResult, error) {
 	// 用第二次模型调用审查 proposal，避免压缩时放大已有错分边界。
 	prompt, err := proposalValidationPrompt(currentDocument, feedbackItems, attempt)
 	if err != nil {
 		return ProposalValidationResult{}, err
 	}
-	content, err := requestProfileModelJSONFunc(
+	content, err := callProfileModelJSON(
 		settings,
 		"You audit scientific-literature classification profile proposals for regression risk.",
 		prompt,
 		2200,
+		usage,
+		"profile_proposal_validation",
 	)
 	if err != nil {
 		return ProposalValidationResult{}, err
@@ -66,11 +69,13 @@ func validateGeneratedProfileProposal(settings config.Settings, currentDocument 
 		})
 		fallbackSettings := settings
 		fallbackSettings.ProfileThinking = "disabled"
-		content, err = requestProfileModelJSONFunc(
+		content, err = callProfileModelJSON(
 			fallbackSettings,
 			"You audit scientific-literature classification profile proposals for regression risk.",
 			prompt,
 			2200,
+			usage,
+			"profile_validation_parse_fallback",
 		)
 		if err != nil {
 			return ProposalValidationResult{}, err
@@ -96,17 +101,19 @@ func validateGeneratedProfileProposal(settings config.Settings, currentDocument 
 	return result, nil
 }
 
-func repairProfileProposalFromValidation(settings config.Settings, currentDocument profileDocument, feedbackItems []FeedbackProposalContext, attempt compactProposalAttempt, validation ProposalValidationResult) (compactProposalAttempt, error) {
+func repairProfileProposalFromValidation(settings config.Settings, currentDocument profileDocument, feedbackItems []FeedbackProposalContext, attempt compactProposalAttempt, validation ProposalValidationResult, usage *llmusage.Collector) (compactProposalAttempt, error) {
 	// 按 validator 指出的阻断问题只重试一次，防止坏 proposal 入库。
 	prompt, err := proposalRepairPrompt(currentDocument, feedbackItems, attempt, validation)
 	if err != nil {
 		return compactProposalAttempt{}, err
 	}
-	content, err := requestProfileModelJSONFunc(
+	content, err := callProfileModelJSON(
 		settings,
 		"You repair rejected scientific-literature profile proposals by applying validator fixes.",
 		prompt,
 		4200,
+		usage,
+		"profile_proposal_repair",
 	)
 	if err != nil {
 		return compactProposalAttempt{}, err
@@ -130,11 +137,13 @@ func repairProfileProposalFromValidation(settings config.Settings, currentDocume
 		})
 		fallbackSettings := settings
 		fallbackSettings.ProfileThinking = "disabled"
-		content, err = requestProfileModelJSONFunc(
+		content, err = callProfileModelJSON(
 			fallbackSettings,
 			"You repair rejected scientific-literature profile proposals by applying validator fixes.",
 			prompt,
 			4200,
+			usage,
+			"profile_repair_parse_fallback",
 		)
 		if err != nil {
 			return compactProposalAttempt{}, err

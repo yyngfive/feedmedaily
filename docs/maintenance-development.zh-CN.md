@@ -130,8 +130,9 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 - `internal/jobs/`：同步 pipeline、重分类、Profile proposal 后台作业。
 - `internal/feeds/`：RSS/Atom/RDF 抓取、解析、订阅文件读写、特殊出版社抽取逻辑。
 - `internal/classifier/`：LLM 分类请求、prompt 约束、thinking fallback。
+- `internal/llmusage/`：每个 job 的线程安全 usage 累计、DeepSeek 单价快照和整数 nano-CNY 计算。
 - `internal/profile/`：Profile 校验、生成、proposal 差异和写入。
-- `internal/store/sqlite/`：SQLite schema、读写、报告组装、反馈、proposal、Zotero 状态。
+- `internal/store/sqlite/`：SQLite schema、读写、报告组装、反馈、proposal、Zotero 状态和 LLM usage ledger。
 - `internal/config/`：`.env`、本地 settings、secret store、运行路径和配置字段。
 - `internal/runtime/`：应用版本、运行模式、路径、进程、打开外部目标、平台差异。
 - `internal/trayapp/`：托盘生命周期、本地调度、后端监督、开机自启。
@@ -147,6 +148,7 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 
 - 分类器模型：`SCIRSS_CLASSIFIER_API_KEY`、`SCIRSS_CLASSIFIER_BASE_URL`、`SCIRSS_CLASSIFIER_MODEL`、`SCIRSS_CLASSIFIER_THINKING`、`SCIRSS_CLASSIFIER_BATCH_SIZE`；默认关闭 thinking、batch size 为 `5`
 - Profile 模型：`SCIRSS_PROFILE_API_KEY`、`SCIRSS_PROFILE_BASE_URL`、`SCIRSS_PROFILE_MODEL`、`SCIRSS_PROFILE_THINKING`
+- DeepSeek 计价：Settings → Model 维护 Flash/Pro 的缓存命中、缓存未命中和输出峰谷单价，对应 `SCIRSS_DEEPSEEK_*_CNY_PER_MILLION` 配置；默认值与当前官方人民币价格一致
 - Zotero：`SCIRSS_ZOTERO_API_KEY`、`SCIRSS_ZOTERO_LIBRARY_TYPE`、`SCIRSS_ZOTERO_LIBRARY_ID`、`SCIRSS_ZOTERO_COLLECTION_KEY`
 - 本地服务：`SCIRSS_SERVER_HOST`、`SCIRSS_SERVER_PORT`
 
@@ -193,6 +195,7 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 3. Profile 文件是用户本地状态，不应提交真实 `data/classification_profile.json`。
 4. 如果变更影响用户理解分类结果，更新 README 或维护文档。
 5. 如果变更影响 proposal 审阅流程，更新 `ARCHITECTURE.md`。
+6. 新增 LLM 调用时显式传递 job collector，并确保成功响应只记录一次且带响应时间；collector 在 job 启动时锁定当前手动价格设置。DeepSeek 高峰价只适用于北京时间周一至周五 9:00–12:00、14:00–18:00，周末和其余时段使用空闲价；已完成 ledger 保存具体费率，后续调价不得回算历史。usage ledger 写入失败只能记录 warning，不能反向让业务 job 失败。
 
 ### 改 UI
 

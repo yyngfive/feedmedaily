@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/yyngfive/scirssagent/internal/config"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 	_ "modernc.org/sqlite"
 	"net/http"
@@ -321,7 +322,7 @@ func TestSettingsConfigUpdateRefreshesSettingsForBootstrap(t *testing.T) {
 	defer restore()
 
 	seenProfileKey := make(chan string, 1)
-	bootstrapProfileFunc = func(settings config.Settings, _ string, _ *string, _ jobruntime.ProgressFunc) (map[string]any, error) {
+	bootstrapProfileFunc = func(settings config.Settings, _ string, _ *string, _ jobruntime.ProgressFunc, _ ...*llmusage.Collector) (map[string]any, error) {
 		seenProfileKey <- settings.ProfileAPIKey
 		return map[string]any{"proposal_id": 1}, nil
 	}
@@ -354,6 +355,49 @@ func TestSettingsConfigUpdateRefreshesSettingsForBootstrap(t *testing.T) {
 		}
 	default:
 		t.Fatal("bootstrap did not receive settings")
+	}
+}
+
+func TestSettingsConfigUpdateAppliesManualPricingToNextJob(t *testing.T) {
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "user-data")
+	t.Setenv("FEEDMEDAILY_RUNTIME_MODE", "release")
+	t.Setenv("FEEDMEDAILY_DATA_ROOT", dataRoot)
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		opts.Usage.Record(llmusage.Event{
+			BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Operation: "classification",
+			OccurredAt: time.Date(2026, 8, 24, 7, 0, 0, 0, time.UTC),
+			Usage:      llmusage.ResponseUsage{CompletionTokens: 1_000_000, CacheBreakdownPresent: true},
+		})
+		return jobruntime.RunSummary{Classified: 1}, nil
+	}
+	handler := newTestHandler(t, testSettings(root))
+
+	configRecorder := httptest.NewRecorder()
+	configBody := `{"fields":{"SCIRSS_DEEPSEEK_FLASH_PEAK_OUTPUT_CNY_PER_MILLION":{"value":"10"}}}`
+	handler.ServeHTTP(configRecorder, httptest.NewRequest(http.MethodPut, "/api/settings/config", strings.NewReader(configBody)))
+	if configRecorder.Code != http.StatusOK {
+		t.Fatalf("settings update response = %d %s", configRecorder.Code, configRecorder.Body.String())
+	}
+
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run response = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	var payload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(runRecorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	waitForJobCompletion(t, payload.Job.ID)
+	job, ok := jobByID(payload.Job.ID)
+	if !ok || job.LLMUsage == nil || job.LLMUsage.EstimatedCostCNY == nil || *job.LLMUsage.EstimatedCostCNY != "10.000000" {
+		t.Fatalf("job pricing = %#v", job.LLMUsage)
 	}
 }
 

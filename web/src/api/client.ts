@@ -8,6 +8,7 @@ import type {
   FeedSubscription,
   FeedbackRecord,
   JobInfo,
+  LLMUsageRecord,
   PaperReadStatus,
   ProfileProposal,
   Report,
@@ -432,6 +433,15 @@ export async function fetchJobs(): Promise<JobInfo[]> {
     undefined,
     "load job status",
     "Could not load job status",
+  );
+}
+
+export async function fetchLLMUsage(since: string): Promise<LLMUsageRecord[]> {
+  return localJSONRequest(
+    `/api/admin/llm-usage?since=${encodeURIComponent(since)}`,
+    undefined,
+    "load LLM usage",
+    "Could not load LLM usage",
   );
 }
 

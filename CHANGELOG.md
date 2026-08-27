@@ -8,12 +8,21 @@ The latest released version is `0.5.0`. The next planned release is `0.5.1`, so 
 
 Changes since `0.5.0`:
 
+### Added
+
+- Added per-job DeepSeek usage and estimated CNY cost tracking for sync, reclassify, initial Profile generation, and Profile proposals. Dashboard shows the latest job cost plus a persisted three-day usage table; unknown models, non-official endpoints, and missing usage remain explicitly unavailable.
+- Added manual DeepSeek Flash/Pro peak and off-peak pricing controls to Settings → Model. Saved prices apply only to subsequently started jobs, while completed usage records retain their original price snapshots.
+
 ### Changed
 
 - Changed new daily sync schedules from `10:00` to local time `12:30`, which is in DeepSeek's current midday off-peak window on China Standard Time, while preserving existing saved schedules.
 - Reduced the default classifier batch size from 10 to 5 and kept classifier thinking disabled by default.
 - Removed `decision_trace` and `recommended_action` from the classifier model output contract while retaining concise reasons; recommended actions are now derived deterministically from relevance labels for API and database compatibility.
 - Prevented duplicate manual sync launches: repeated Dashboard, tray, or API requests now reuse the queued, running, or verification-blocked sync job, and Dashboard disables Sync until it finishes.
+
+### Fixed
+
+- Fixed DeepSeek job cost estimates after the August pricing change by applying the current Flash/Pro rates per successful response with Beijing-time weekday peak/off-peak tiers. Weekends now always use off-peak prices. Existing databases run narrowly scoped repairs for the old-price snapshot and weekend rows previously mispriced as peak, without rewriting other history.
 
 ## 0.5.0 (2026-07-09)
 

@@ -11,36 +11,39 @@ import (
 
 	"github.com/yyngfive/scirssagent/internal/config"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"github.com/yyngfive/scirssagent/internal/logging"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
+	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
 type jobInfo struct {
-	ID                       string         `json:"id"`
-	JobType                  string         `json:"job_type"`
-	Status                   string         `json:"status"`
-	MessageKey               string         `json:"message_key,omitempty"`
-	Message                  string         `json:"message,omitempty"`
-	Error                    string         `json:"error,omitempty"`
-	VerificationRequired     bool           `json:"verification_required,omitempty"`
-	VerificationTarget       string         `json:"verification_target,omitempty"`
-	VerificationFeedURL      string         `json:"verification_feed_url,omitempty"`
-	VerificationJournal      string         `json:"verification_journal,omitempty"`
-	VerificationHost         string         `json:"verification_host,omitempty"`
-	VerificationMethod       string         `json:"verification_method,omitempty"`
-	VerificationSessionState string         `json:"verification_session_state,omitempty"`
-	Result                   map[string]any `json:"result,omitempty"`
-	LogPath                  string         `json:"log_path,omitempty"`
-	WarningCount             int            `json:"warning_count,omitempty"`
-	ProgressStage            string         `json:"progress_stage,omitempty"`
-	ProgressCurrent          *int           `json:"progress_current,omitempty"`
-	ProgressTotal            *int           `json:"progress_total,omitempty"`
-	ProgressPercent          *int           `json:"progress_percent,omitempty"`
-	ProgressLabel            string         `json:"progress_label,omitempty"`
-	ProgressMode             string         `json:"progress_mode,omitempty"`
-	CreatedAt                time.Time      `json:"created_at"`
-	StartedAt                *time.Time     `json:"started_at,omitempty"`
-	FinishedAt               *time.Time     `json:"finished_at,omitempty"`
+	ID                       string            `json:"id"`
+	JobType                  string            `json:"job_type"`
+	Status                   string            `json:"status"`
+	MessageKey               string            `json:"message_key,omitempty"`
+	Message                  string            `json:"message,omitempty"`
+	Error                    string            `json:"error,omitempty"`
+	VerificationRequired     bool              `json:"verification_required,omitempty"`
+	VerificationTarget       string            `json:"verification_target,omitempty"`
+	VerificationFeedURL      string            `json:"verification_feed_url,omitempty"`
+	VerificationJournal      string            `json:"verification_journal,omitempty"`
+	VerificationHost         string            `json:"verification_host,omitempty"`
+	VerificationMethod       string            `json:"verification_method,omitempty"`
+	VerificationSessionState string            `json:"verification_session_state,omitempty"`
+	Result                   map[string]any    `json:"result,omitempty"`
+	LogPath                  string            `json:"log_path,omitempty"`
+	WarningCount             int               `json:"warning_count,omitempty"`
+	ProgressStage            string            `json:"progress_stage,omitempty"`
+	ProgressCurrent          *int              `json:"progress_current,omitempty"`
+	ProgressTotal            *int              `json:"progress_total,omitempty"`
+	ProgressPercent          *int              `json:"progress_percent,omitempty"`
+	ProgressLabel            string            `json:"progress_label,omitempty"`
+	ProgressMode             string            `json:"progress_mode,omitempty"`
+	CreatedAt                time.Time         `json:"created_at"`
+	StartedAt                *time.Time        `json:"started_at,omitempty"`
+	FinishedAt               *time.Time        `json:"finished_at,omitempty"`
+	LLMUsage                 *llmusage.Summary `json:"llm_usage,omitempty"`
 }
 
 type jobRegistry struct {
@@ -55,7 +58,7 @@ var (
 	jobCounter            atomic.Uint64
 )
 
-type localJobFunc func(progress jobruntime.ProgressFunc) (map[string]any, error)
+type localJobFunc func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error)
 
 func listJobs() []jobInfo {
 	// 返回当前内存中的全部作业，并按创建时间倒序排列。
@@ -78,7 +81,7 @@ func jobByID(id string) (jobInfo, bool) {
 	return job, ok
 }
 
-func launchLocalJob(logsDir string, jobType string, queuedMessageKey string, queuedMessage string, runningMessageKey string, runningMessage string, run localJobFunc) jobInfo {
+func launchLocalJob(settings config.Settings, jobType string, queuedMessageKey string, queuedMessage string, runningMessageKey string, runningMessage string, run localJobFunc) jobInfo {
 	// 启动一个纯 Go 本地作业，保持和 legacy bridge 相同的轮询结构。
 	job := jobInfo{
 		ID:         nextJobID(),
@@ -88,7 +91,7 @@ func launchLocalJob(logsDir string, jobType string, queuedMessageKey string, que
 		Message:    queuedMessage,
 		CreatedAt:  nowFunc().UTC(),
 	}
-	if path, err := logging.Write(logsDir, logging.Event{
+	if path, err := logging.Write(settings.LogsDir, logging.Event{
 		Level:      "info",
 		Component:  "api.jobs",
 		Action:     "queued",
@@ -101,8 +104,9 @@ func launchLocalJob(logsDir string, jobType string, queuedMessageKey string, que
 	storeJob(job)
 
 	go func() {
+		usage := llmusage.NewCollector(settings.DeepSeekPricing)
 		started := nowFunc().UTC()
-		logJobEvent(logsDir, &job, "info", "started", runningMessageKey, runningMessage, "", nil)
+		logJobEvent(settings.LogsDir, &job, "info", "started", runningMessageKey, runningMessage, "", nil)
 		updateJob(job.ID, func(current *jobInfo) {
 			current.Status = "running"
 			current.MessageKey = runningMessageKey
@@ -111,7 +115,7 @@ func launchLocalJob(logsDir string, jobType string, queuedMessageKey string, que
 		})
 
 		progress := func(update jobruntime.ProgressUpdate) {
-			logJobEvent(logsDir, &job, "info", "progress", update.MessageKey, update.Message, "", progressLogData(update))
+			logJobEvent(settings.LogsDir, &job, "info", "progress", update.MessageKey, update.Message, "", progressLogData(update))
 			updateJob(job.ID, func(current *jobInfo) {
 				current.MessageKey = update.MessageKey
 				current.Message = update.Message
@@ -123,15 +127,17 @@ func launchLocalJob(logsDir string, jobType string, queuedMessageKey string, que
 				current.ProgressMode = string(update.Mode)
 			})
 		}
-		result, err := run(progress)
+		result, err := run(progress, usage)
 		finished := nowFunc().UTC()
 		if err != nil {
-			logJobEvent(logsDir, &job, "error", "failed", jobType+".failed", "", err.Error(), nil)
+			summary := finalizeLLMUsage(settings, job.ID, jobType, "failed", usage, finished)
+			logJobEvent(settings.LogsDir, &job, "error", "failed", jobType+".failed", "", err.Error(), nil)
 			updateJob(job.ID, func(current *jobInfo) {
 				current.Status = "failed"
 				current.MessageKey = jobType + ".failed"
 				current.Message = ""
 				current.Error = err.Error()
+				current.LLMUsage = &summary
 				clearJobProgress(current)
 				current.FinishedAt = &finished
 			})
@@ -139,12 +145,14 @@ func launchLocalJob(logsDir string, jobType string, queuedMessageKey string, que
 		}
 
 		warningCount := countWarnings(result)
-		logJobEvent(logsDir, &job, "info", "completed", jobType+".completed", "Completed.", "", result)
+		summary := finalizeLLMUsage(settings, job.ID, jobType, "completed", usage, finished)
+		logJobEvent(settings.LogsDir, &job, "info", "completed", jobType+".completed", "Completed.", "", result)
 		updateJob(job.ID, func(current *jobInfo) {
 			current.Status = "completed"
 			current.MessageKey = jobType + ".completed"
-			current.Message = summarizeResult(jobType, result)
+			current.Message = summarizeResult(jobType, result) + usageMessage(summary)
 			current.Result = result
+			current.LLMUsage = &summary
 			current.WarningCount = warningCount
 			clearJobProgress(current)
 			current.FinishedAt = &finished
@@ -152,6 +160,37 @@ func launchLocalJob(logsDir string, jobType string, queuedMessageKey string, que
 	}()
 
 	return job
+}
+
+func finalizeLLMUsage(settings config.Settings, jobID string, jobType string, status string, collector *llmusage.Collector, finished time.Time) llmusage.Summary {
+	summary := collector.Summary()
+	if len(summary.Models) == 0 {
+		switch jobType {
+		case "sync", "reclassify":
+			summary.Models = []string{settings.ClassifierModel}
+		case "profile-bootstrap", "profile-proposal":
+			summary.Models = []string{settings.ProfileModel}
+		}
+	}
+	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
+	if err == nil {
+		err = sqliteStore.SaveLLMUsage(jobID, jobType, status, summary, finished)
+		_ = sqliteStore.Close()
+	}
+	if err != nil {
+		_, _ = logging.WriteDefault(logging.Event{
+			Level: "warning", Component: "api.jobs", Action: "llm_usage_persist_failed", JobID: jobID,
+			Message: "Could not persist LLM usage; the job result is unchanged.", Error: err.Error(),
+		})
+	}
+	return summary
+}
+
+func usageMessage(summary llmusage.Summary) string {
+	if summary.EstimatedCostCNY == nil {
+		return " LLM cost unavailable."
+	}
+	return fmt.Sprintf(" Estimated LLM cost ¥%s.", *summary.EstimatedCostCNY)
 }
 
 func nextJobID() string {

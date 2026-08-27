@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/yyngfive/scirssagent/internal/config"
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"github.com/yyngfive/scirssagent/internal/logging"
 	"strings"
 	"time"
@@ -48,8 +49,9 @@ type compactProposalAttempt struct {
 
 var requestProfileModelJSONFunc = requestProfileModelJSON
 
-func GenerateInitialProfileProposal(settings config.Settings, interestDescription string, name *string) (ProposalDraft, error) {
+func GenerateInitialProfileProposal(settings config.Settings, interestDescription string, name *string, collectors ...*llmusage.Collector) (ProposalDraft, error) {
 	// 生成初始 classification profile proposal，并返回待落库的数据草稿。
+	usage := firstUsageCollector(collectors)
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "info",
 		Component: "profile",
@@ -83,16 +85,18 @@ Required JSON shape:
 %s
 `, profileNameHint(name), strings.TrimSpace(interestDescription), compactProfileContract()))
 
-	content, err := requestProfileModelJSONFunc(
+	content, err := callProfileModelJSON(
 		settings,
 		"You design structured classification profiles.",
 		prompt,
 		4200,
+		usage,
+		"profile_bootstrap",
 	)
 	if err != nil {
 		return ProposalDraft{}, err
 	}
-	proposedDocument, err := coerceProfileDocument(settings, content)
+	proposedDocument, err := coerceProfileDocument(settings, content, usage)
 	if err != nil {
 		return ProposalDraft{}, err
 	}
@@ -118,8 +122,9 @@ Required JSON shape:
 	}, logInitialProposalCompleted(summary, proposedDocument, settings.ProfileModel)
 }
 
-func GenerateProfileProposal(settings config.Settings, current map[string]any, feedbackItems []FeedbackProposalContext) (ProposalDraft, error) {
+func GenerateProfileProposal(settings config.Settings, current map[string]any, feedbackItems []FeedbackProposalContext, collectors ...*llmusage.Collector) (ProposalDraft, error) {
 	// 根据当前 profile 和 open feedback 生成一个会自动压缩同类规则的 proposal 草稿。
+	usage := firstUsageCollector(collectors)
 	maintenanceMode := len(feedbackItems) == 0
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "info",
@@ -144,11 +149,13 @@ func GenerateProfileProposal(settings config.Settings, current map[string]any, f
 		return ProposalDraft{}, fmt.Errorf("encode feedback proposal context: %w", err)
 	}
 	prompt := profileProposalPrompt(feedbackItems, compactProfileJSON, feedbackPayload, maintenanceMode)
-	content, err := requestProfileModelJSONFunc(
+	content, err := callProfileModelJSON(
 		settings,
 		"You compact scientific-literature profiles into maintainable change sets.",
 		prompt,
 		4200,
+		usage,
+		"profile_proposal",
 	)
 	if err != nil {
 		return ProposalDraft{}, err
@@ -168,11 +175,13 @@ func GenerateProfileProposal(settings config.Settings, current map[string]any, f
 		})
 		fallbackSettings := settings
 		fallbackSettings.ProfileThinking = "disabled"
-		content, err = requestProfileModelJSONFunc(
+		content, err = callProfileModelJSON(
 			fallbackSettings,
 			"You compact scientific-literature profiles into maintainable change sets.",
 			prompt,
 			4200,
+			usage,
+			"profile_proposal_parse_fallback",
 		)
 		if err != nil {
 			return ProposalDraft{}, err
@@ -186,7 +195,7 @@ func GenerateProfileProposal(settings config.Settings, current map[string]any, f
 	if audit := deterministicProposalAudit(currentDocument, feedbackItems, attempt); !audit.Accepted {
 		return rejectedProposalDraft(currentDocument, settings.ProfileModel, sourceFeedbackIDs, audit), nil
 	}
-	validation, err := validateGeneratedProfileProposal(settings, currentDocument, feedbackItems, attempt)
+	validation, err := validateGeneratedProfileProposal(settings, currentDocument, feedbackItems, attempt, usage)
 	if err != nil {
 		return ProposalDraft{}, err
 	}
@@ -194,14 +203,14 @@ func GenerateProfileProposal(settings config.Settings, current map[string]any, f
 		if isHardValidationRejection(validation) {
 			return rejectedProposalDraft(currentDocument, settings.ProfileModel, sourceFeedbackIDs, validation), nil
 		}
-		attempt, err = repairProfileProposalFromValidation(settings, currentDocument, feedbackItems, attempt, validation)
+		attempt, err = repairProfileProposalFromValidation(settings, currentDocument, feedbackItems, attempt, validation, usage)
 		if err != nil {
 			return ProposalDraft{}, err
 		}
 		if audit := deterministicProposalAudit(currentDocument, feedbackItems, attempt); !audit.Accepted {
 			return rejectedProposalDraft(currentDocument, settings.ProfileModel, sourceFeedbackIDs, audit), nil
 		}
-		validation, err = validateGeneratedProfileProposal(settings, currentDocument, feedbackItems, attempt)
+		validation, err = validateGeneratedProfileProposal(settings, currentDocument, feedbackItems, attempt, usage)
 		if err != nil {
 			return ProposalDraft{}, err
 		}
@@ -237,6 +246,13 @@ func GenerateProfileProposal(settings config.Settings, current map[string]any, f
 		},
 	})
 	return draft, nil
+}
+
+func firstUsageCollector(items []*llmusage.Collector) *llmusage.Collector {
+	if len(items) == 0 {
+		return nil
+	}
+	return items[0]
 }
 
 func proposalSourceFeedbackIDs(feedbackItems []FeedbackProposalContext) []int64 {

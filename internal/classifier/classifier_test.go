@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
@@ -237,17 +238,19 @@ func TestClassifyPapersRetriesMalformedContentJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		if requests == 1 {
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":["}}]}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":["}}],"usage":{"prompt_tokens":11,"prompt_cache_hit_tokens":3,"prompt_cache_miss_tokens":8,"completion_tokens":5,"total_tokens":16}}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"indirect\",\"confidence\":0.7,\"reason\":\"Useful context.\",\"recommended_action\":\"scan\",\"translated_title_zh\":\"RNA 方法\"}]}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"indirect\",\"confidence\":0.7,\"reason\":\"Useful context.\",\"recommended_action\":\"scan\",\"translated_title_zh\":\"RNA 方法\"}]}"}}],"usage":{"prompt_tokens":13,"prompt_cache_hit_tokens":4,"prompt_cache_miss_tokens":9,"completion_tokens":7,"total_tokens":20}}`))
 	}))
 	defer server.Close()
 
+	usage := llmusage.NewCollector()
 	results, err := ClassifyPapers([]store.Paper{{ID: 1, Title: "RNA method"}}, testProfile(), LLMConfig{
 		APIKey:  "key",
 		Model:   "model",
 		BaseURL: server.URL,
+		Usage:   usage,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -257,6 +260,10 @@ func TestClassifyPapersRetriesMalformedContentJSON(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].Relevance != "indirect" {
 		t.Fatalf("unexpected results: %#v", results)
+	}
+	summary := usage.Summary()
+	if summary.RequestCount != 2 || summary.PromptCacheHitTokens != 7 || summary.PromptCacheMissTokens != 17 || summary.CompletionTokens != 12 {
+		t.Fatalf("usage summary = %#v", summary)
 	}
 }
 

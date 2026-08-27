@@ -15,6 +15,7 @@ import type {
 } from "../../shared/types";
 import {AppTab} from "./AppTab";
 import {DashboardTab} from "./DashboardTab";
+import {DeepSeekPricingEditor} from "./DeepSeekPricingEditor";
 import {FeedsTab} from "./FeedsTab";
 import {ProfileTab} from "./ProfileTab";
 import {SettingsConfigEditor} from "./SettingsConfigEditor";
@@ -30,6 +31,7 @@ const adminTabs: Array<{id: AdminTab; label: string}> = [
 ];
 
 const modelSections = new Set(["Classifier model", "Profile model"]);
+const pricingSection = "DeepSeek pricing";
 const appSections = new Set(["Zotero", "Local app"]);
 
 export type AdminPanelProps = {
@@ -86,6 +88,10 @@ export function AdminPanel(props: AdminPanelProps) {
   );
   const appFields = React.useMemo(
     () => props.configFields.filter((field) => appSections.has(field.section)),
+    [props.configFields],
+  );
+  const pricingFields = React.useMemo(
+    () => props.configFields.filter((field) => field.section === pricingSection),
     [props.configFields],
   );
 
@@ -150,6 +156,7 @@ export function AdminPanel(props: AdminPanelProps) {
               <Card.Header><h3 className="text-xl font-semibold text-(--ink)">Model</h3></Card.Header>
               <Card.Content>
                 <SettingsConfigEditor fields={modelFields} saving={props.configSaving} saveLabel="Save model settings" title="Model settings" onSave={props.onSaveConfig} />
+                <DeepSeekPricingEditor fields={pricingFields} saving={props.configSaving} onSave={props.onSaveConfig} />
               </Card.Content>
             </Card>
           </div>
