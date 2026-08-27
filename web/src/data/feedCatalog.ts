@@ -3243,7 +3243,7 @@ export const feedCatalog: FeedCatalogEntry[] = [
   {
     publisher: "Oxford Academic",
     journal: "Nucleic Acids Research",
-    url: "https://academic.oup.com/rss/site_5127/advanceAccess_3091.xml",
+    url: "https://academic.oup.com/rss/site_5127/3091.xml",
     subjects: ["molecular biology", "genomics"],
   },
   {
