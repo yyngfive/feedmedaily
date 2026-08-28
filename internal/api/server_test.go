@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"github.com/yyngfive/scirssagent/internal/config"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -466,13 +468,19 @@ func stubAPIGlobals(t *testing.T) func() {
 	previousReclassify := reclassifyPaperIDsFunc
 	previousRebuildLatestReport := rebuildLatestReportFunc
 	previousRunSync := runSyncFunc
+	previousTestClassifierConnection := testClassifierConnectionFunc
 	previousNotifyTraySettingsChanged := notifyTraySettingsChangedFunc
 	previousStartVerification := startVerificationFlowFunc
 	previousCompleteVerification := completeVerificationFlowFunc
 	previousNow := nowFunc
 	previousJobs := apiJobs
+	previousCancellations := jobCancellations
 	previousVerifications := apiVerifications
 	apiJobs = jobRegistry{jobs: map[string]jobInfo{}}
+	jobCancellations = struct {
+		mu    sync.Mutex
+		items map[string]context.CancelFunc
+	}{items: map[string]context.CancelFunc{}}
 	apiVerifications = verificationRegistry{items: map[string]*pendingVerification{}}
 	return func() {
 		openExternalTargetFunc = previousOpen
@@ -486,11 +494,13 @@ func stubAPIGlobals(t *testing.T) func() {
 		reclassifyPaperIDsFunc = previousReclassify
 		rebuildLatestReportFunc = previousRebuildLatestReport
 		runSyncFunc = previousRunSync
+		testClassifierConnectionFunc = previousTestClassifierConnection
 		notifyTraySettingsChangedFunc = previousNotifyTraySettingsChanged
 		startVerificationFlowFunc = previousStartVerification
 		completeVerificationFlowFunc = previousCompleteVerification
 		nowFunc = previousNow
 		apiJobs = previousJobs
+		jobCancellations = previousCancellations
 		apiVerifications = previousVerifications
 	}
 }
@@ -500,7 +510,7 @@ func waitForJobCompletion(t *testing.T, jobID string) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		job, ok := jobByID(jobID)
-		if ok && (job.Status == "completed" || job.Status == "failed") {
+		if ok && (job.Status == "completed" || job.Status == "failed" || job.Status == "cancelled") {
 			if job.Status != "completed" {
 				t.Fatalf("job %s finished with status %s: %s", jobID, job.Status, job.Error)
 			}
@@ -516,7 +526,7 @@ func waitForJobTerminalStatus(t *testing.T, jobID string) jobInfo {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		job, ok := jobByID(jobID)
-		if ok && (job.Status == "completed" || job.Status == "failed") {
+		if ok && (job.Status == "completed" || job.Status == "failed" || job.Status == "cancelled") {
 			return job
 		}
 		time.Sleep(10 * time.Millisecond)

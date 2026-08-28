@@ -101,6 +101,133 @@ func TestClassifyPapersWithTranslationFallback(t *testing.T) {
 	}
 }
 
+func TestManagedClassifierAdaptersSetProviderThinkingAndDoNotFallbackAcrossProviders(t *testing.T) {
+	tests := []struct {
+		name         string
+		provider     string
+		model        string
+		wantType     string
+		wantEffort   string
+		wantDoSample bool
+		failPrimary  bool
+	}{
+		{name: "deepseek", provider: "deepseek", model: "deepseek-v4-flash", wantType: "disabled"},
+		{name: "glm", provider: "zhipu", model: "glm-5.3-flash", wantType: "enabled", wantEffort: "low", wantDoSample: true, failPrimary: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requests := []map[string]any{}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer r.Body.Close()
+				var payload map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Fatal(err)
+				}
+				requests = append(requests, payload)
+				messages := payload["messages"].([]any)
+				userContent := messages[1].(map[string]any)["content"].(string)
+				if test.failPrimary && len(requests) == 1 {
+					http.Error(w, "thinking request timed out", http.StatusGatewayTimeout)
+					return
+				}
+				if strings.Contains(userContent, "Translate each paper title") {
+					_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"translated_title_zh\":\"中文标题\"}]}"}}]}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.8,\"reason\":\"Relevant.\"}]}"}}]}`))
+			}))
+			defer server.Close()
+
+			results, err := ClassifyPapers([]store.Paper{{ID: 1, Title: "RNA paper"}}, testProfile(), LLMConfig{
+				APIKey: "key", Model: test.model, Provider: test.provider, BaseURL: server.URL, Thinking: "enabled",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(results) != 1 || results[0].TranslatedTitleZH == nil {
+				t.Fatalf("unexpected classification result: %#v", results)
+			}
+			if len(requests) < 2 {
+				t.Fatalf("expected classification and title translation requests, got %d", len(requests))
+			}
+			for index, request := range requests {
+				thinking, ok := request["thinking"].(map[string]any)
+				if !ok || thinking["type"] != test.wantType {
+					t.Fatalf("request %d thinking = %#v, want %s", index, request["thinking"], test.wantType)
+				}
+				if test.wantEffort == "" {
+					if _, exists := request["reasoning_effort"]; exists {
+						t.Fatalf("DeepSeek request %d must not send reasoning_effort: %#v", index, request)
+					}
+				} else if request["reasoning_effort"] != test.wantEffort {
+					t.Fatalf("GLM request %d reasoning_effort = %#v", index, request["reasoning_effort"])
+				}
+				if test.wantDoSample && request["do_sample"] != false {
+					t.Fatalf("GLM request %d do_sample = %#v", index, request["do_sample"])
+				}
+			}
+			if test.failPrimary && len(requests) != 3 {
+				t.Fatalf("GLM should retry once without disabling thinking, requests=%d", len(requests))
+			}
+		})
+	}
+}
+
+func TestTestConnectionUsesManagedProviderPayload(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   string
+		model      string
+		wantType   string
+		wantEffort string
+		wantSample *bool
+	}{
+		{name: "deepseek", provider: "deepseek", model: "deepseek-v4-flash", wantType: "disabled"},
+		{name: "glm", provider: "zhipu", model: "glm-5.3-flash", wantType: "enabled", wantEffort: "low", wantSample: func() *bool { value := false; return &value }()},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var request map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer r.Body.Close()
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Fatal(err)
+				}
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"ok\":true}"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+			}))
+			defer server.Close()
+
+			if err := TestConnection(LLMConfig{APIKey: "key", Model: test.model, Provider: test.provider, BaseURL: server.URL, Thinking: "enabled"}); err != nil {
+				t.Fatal(err)
+			}
+			thinking, ok := request["thinking"].(map[string]any)
+			if !ok || thinking["type"] != test.wantType {
+				t.Fatalf("thinking = %#v, want %s", request["thinking"], test.wantType)
+			}
+			if test.wantEffort == "" {
+				if _, exists := request["reasoning_effort"]; exists {
+					t.Fatalf("DeepSeek connection test must omit reasoning_effort: %#v", request)
+				}
+			} else if request["reasoning_effort"] != test.wantEffort {
+				t.Fatalf("GLM reasoning_effort = %#v", request["reasoning_effort"])
+			}
+			if test.wantSample != nil && request["do_sample"] != *test.wantSample {
+				t.Fatalf("GLM do_sample = %#v", request["do_sample"])
+			}
+		})
+	}
+}
+
+func TestTestConnectionRejectsFalseOKResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"ok\":false}"}}]}`))
+	}))
+	defer server.Close()
+	if err := TestConnection(LLMConfig{APIKey: "key", Model: "model", BaseURL: server.URL}); err == nil {
+		t.Fatal("expected false ok response to fail")
+	}
+}
+
 func TestClassifyPapersUsesCompactOutputAndDerivesRecommendedActions(t *testing.T) {
 	userPrompt := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -264,6 +391,25 @@ func TestClassifyPapersRetriesMalformedContentJSON(t *testing.T) {
 	summary := usage.Summary()
 	if summary.RequestCount != 2 || summary.PromptCacheHitTokens != 7 || summary.PromptCacheMissTokens != 17 || summary.CompletionTokens != 12 {
 		t.Fatalf("usage summary = %#v", summary)
+	}
+}
+
+func TestClassifyPapersReadsOpenAIStyleCachedTokenDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Relevant.\",\"translated_title_zh\":\"RNA 方法\"}]}"}}],"usage":{"prompt_tokens":13,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens":7,"total_tokens":20}}`))
+	}))
+	defer server.Close()
+
+	usage := llmusage.NewCollector()
+	_, err := ClassifyPapers([]store.Paper{{ID: 1, Title: "RNA method"}}, testProfile(), LLMConfig{
+		APIKey: "key", Model: "glm-5.3-flash", BaseURL: server.URL, Usage: usage,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := usage.Summary()
+	if summary.PromptCacheHitTokens != 4 || summary.PromptCacheMissTokens != 9 || summary.CompletionTokens != 7 {
+		t.Fatalf("OpenAI-style usage summary = %#v", summary)
 	}
 }
 

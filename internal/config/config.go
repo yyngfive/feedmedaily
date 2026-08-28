@@ -36,6 +36,7 @@ type Settings struct {
 	WebDistDir          string
 	FeedsPath           string
 	ProfilePath         string
+	ClassifierModels    ClassifierModels
 	ClassifierAPIKey    string
 	ClassifierBaseURL   string
 	ClassifierModel     string
@@ -45,7 +46,7 @@ type Settings struct {
 	ProfileBaseURL      string
 	ProfileModel        string
 	ProfileThinking     string
-	DeepSeekPricing     llmusage.DeepSeekPricing
+	LLMPricing          llmusage.PricingCatalog
 	ZoteroAPIKey        string
 	ZoteroLibraryType   string
 	ZoteroLibraryID     string
@@ -98,7 +99,8 @@ type SettingsConfigField struct {
 }
 
 type SettingsConfigResponse struct {
-	Fields []SettingsConfigField `json:"fields"`
+	Fields           []SettingsConfigField    `json:"fields"`
+	ClassifierModels ClassifierModelsResponse `json:"classifier_models"`
 }
 
 type SettingsConfigFieldUpdate struct {
@@ -107,15 +109,48 @@ type SettingsConfigFieldUpdate struct {
 }
 
 type SettingsConfigUpdateRequest struct {
-	Fields map[string]SettingsConfigFieldUpdate `json:"fields"`
+	Fields           map[string]SettingsConfigFieldUpdate `json:"fields"`
+	ClassifierModels *ClassifierModelsUpdate              `json:"classifier_models,omitempty"`
 }
 
 var Options = []Option{
 	{
+		Key:         classifierEnabledModelsKey,
+		Label:       "Enabled classifier models",
+		Description: "Comma-separated IDs of the classifier models enabled for selection.",
+		Section:     "Managed classifier models",
+		InputType:   "text",
+		Default:     ClassifierModelDeepSeekV4Flash,
+	},
+	{
+		Key:         classifierDefaultModelKey,
+		Label:       "Default classifier model",
+		Description: "Model used by new sync and reclassification jobs.",
+		Section:     "Managed classifier models",
+		InputType:   "text",
+		Default:     ClassifierModelDeepSeekV4Flash,
+	},
+	{
+		Key:         classifierDeepSeekAPIKey,
+		Label:       "DeepSeek classifier API key",
+		Description: "Used for deepseek-v4-flash classification requests.",
+		Section:     "Managed classifier models",
+		InputType:   "password",
+		Secret:      true,
+	},
+	{
+		Key:         classifierGLMAPIKey,
+		Label:       "GLM classifier API key",
+		Description: "Used for glm-5.3-flash classification requests.",
+		Section:     "Managed classifier models",
+		InputType:   "password",
+		Secret:      true,
+	},
+	{
 		Key:         "SCIRSS_CLASSIFIER_API_KEY",
 		Label:       "Classifier API key",
 		Description: "Used only for paper classification requests.",
-		Section:     "Classifier model",
+		Section:     "Legacy classifier model",
 		InputType:   "password",
 		Secret:      true,
 	},
@@ -123,7 +158,7 @@ var Options = []Option{
 		Key:         "SCIRSS_CLASSIFIER_BASE_URL",
 		Label:       "Classifier base URL",
 		Description: "Base URL for the classifier model provider.",
-		Section:     "Classifier model",
+		Section:     "Legacy classifier model",
 		InputType:   "url",
 		Default:     "https://api.deepseek.com",
 	},
@@ -131,7 +166,7 @@ var Options = []Option{
 		Key:         "SCIRSS_CLASSIFIER_MODEL",
 		Label:       "Classifier model",
 		Description: "Model name used for paper classification.",
-		Section:     "Classifier model",
+		Section:     "Legacy classifier model",
 		InputType:   "text",
 		Default:     "deepseek-v4-flash",
 	},
@@ -139,7 +174,7 @@ var Options = []Option{
 		Key:         "SCIRSS_CLASSIFIER_THINKING",
 		Label:       "Classifier thinking",
 		Description: "Whether the classifier role requests provider reasoning mode.",
-		Section:     "Classifier model",
+		Section:     "Legacy classifier model",
 		InputType:   "select",
 		Default:     "disabled",
 		Options: []SettingOption{
@@ -151,7 +186,7 @@ var Options = []Option{
 		Key:         "SCIRSS_CLASSIFIER_BATCH_SIZE",
 		Label:       "Classifier batch size",
 		Description: "How many papers are sent to the classifier per batch.",
-		Section:     "Classifier model",
+		Section:     "Classifier tuning",
 		InputType:   "number",
 		Default:     strconv.Itoa(DefaultClassifierBatchSize),
 	},
@@ -238,6 +273,18 @@ var Options = []Option{
 	{
 		Key: "SCIRSS_DEEPSEEK_PRO_PEAK_OUTPUT_CNY_PER_MILLION", Label: "Pro peak output", Description: "CNY per million output tokens.",
 		Section: "DeepSeek pricing", InputType: "decimal", Default: "27",
+	},
+	{
+		Key: "SCIRSS_GLM_53_FLASH_CACHE_HIT_CNY_PER_MILLION", Label: "GLM-5.3-Flash cache hit", Description: "Promotional CNY per million cached input tokens.",
+		Section: "GLM pricing", InputType: "decimal", Default: "0.115",
+	},
+	{
+		Key: "SCIRSS_GLM_53_FLASH_CACHE_MISS_CNY_PER_MILLION", Label: "GLM-5.3-Flash input", Description: "Promotional CNY per million uncached input tokens.",
+		Section: "GLM pricing", InputType: "decimal", Default: "0.4",
+	},
+	{
+		Key: "SCIRSS_GLM_53_FLASH_OUTPUT_CNY_PER_MILLION", Label: "GLM-5.3-Flash output", Description: "Promotional CNY per million output tokens.",
+		Section: "GLM pricing", InputType: "decimal", Default: "1.4",
 	},
 	{
 		Key:         "SCIRSS_ZOTERO_API_KEY",
@@ -336,16 +383,23 @@ func Load(root string) (Settings, error) {
 	}
 	valueMap := resolvedValueMap(values)
 	settings.ProfilePath = filepath.Join(dataDir, "classification_profile.json")
+	// Populate legacy fields first so unknown legacy models remain runnable during migration.
 	settings.ClassifierAPIKey = optionalValue(valueMap["SCIRSS_CLASSIFIER_API_KEY"])
 	settings.ClassifierBaseURL = valueOrDefault(valueMap["SCIRSS_CLASSIFIER_BASE_URL"], "https://api.deepseek.com")
-	settings.ClassifierModel = valueOrDefault(valueMap["SCIRSS_CLASSIFIER_MODEL"], "deepseek-v4-flash")
+	settings.ClassifierModel = valueOrDefault(valueMap["SCIRSS_CLASSIFIER_MODEL"], ClassifierModelDeepSeekV4Flash)
 	settings.ClassifierThinking = valueOrDefault(strings.ToLower(strings.TrimSpace(valueMap["SCIRSS_CLASSIFIER_THINKING"])), "disabled")
+	settings.ClassifierModels = classifierModelsFromResolvedValues(values)
+	effectiveClassifier := settings.EffectiveClassifierModel()
+	settings.ClassifierAPIKey = effectiveClassifier.APIKey
+	settings.ClassifierBaseURL = effectiveClassifier.BaseURL
+	settings.ClassifierModel = effectiveClassifier.ID
+	settings.ClassifierThinking = effectiveClassifier.Thinking
 	settings.ClassifierBatchSize = positiveInt(valueMap["SCIRSS_CLASSIFIER_BATCH_SIZE"], DefaultClassifierBatchSize)
 	settings.ProfileAPIKey = optionalValue(valueMap["SCIRSS_PROFILE_API_KEY"])
 	settings.ProfileBaseURL = valueOrDefault(valueMap["SCIRSS_PROFILE_BASE_URL"], "https://api.deepseek.com")
 	settings.ProfileModel = valueOrDefault(valueMap["SCIRSS_PROFILE_MODEL"], "deepseek-v4-pro")
 	settings.ProfileThinking = valueOrDefault(strings.ToLower(strings.TrimSpace(valueMap["SCIRSS_PROFILE_THINKING"])), "enabled")
-	settings.DeepSeekPricing = deepSeekPricingFromValues(values, valueMap)
+	settings.LLMPricing = pricingFromValues(values, valueMap)
 	settings.ZoteroAPIKey = optionalValue(valueMap["SCIRSS_ZOTERO_API_KEY"])
 	settings.ZoteroLibraryType = valueOrDefault(strings.ToLower(strings.TrimSpace(valueMap["SCIRSS_ZOTERO_LIBRARY_TYPE"])), "user")
 	settings.ZoteroLibraryID = optionalValue(valueMap["SCIRSS_ZOTERO_LIBRARY_ID"])
@@ -443,7 +497,14 @@ func SettingsConfig(root string) (SettingsConfigResponse, error) {
 	if err != nil {
 		return SettingsConfigResponse{}, err
 	}
-	return SettingsConfigResponse{Fields: fieldsFromResolvedValues(values)}, nil
+	settings, err := Load(root)
+	if err != nil {
+		return SettingsConfigResponse{}, err
+	}
+	return SettingsConfigResponse{
+		Fields:           fieldsFromResolvedValues(values),
+		ClassifierModels: classifierModelsResponse(settings),
+	}, nil
 }
 
 func UpdateLocalSettings(root string, updates map[string]SettingsConfigFieldUpdate) (SettingsConfigResponse, error) {
@@ -734,8 +795,8 @@ func normalizeSettingValue(option Option, value *string) (string, bool, error) {
 	}
 }
 
-func deepSeekPricingFromValues(values []ResolvedValue, valueMap map[string]string) llmusage.DeepSeekPricing {
-	pricing := llmusage.DefaultDeepSeekPricing()
+func pricingFromValues(values []ResolvedValue, valueMap map[string]string) llmusage.PricingCatalog {
+	pricing := llmusage.DefaultPricing()
 	for _, value := range values {
 		if value.Option.Section == "DeepSeek pricing" && value.Source != "default" {
 			pricing.Snapshot = llmusage.PricingSnapshotDeepSeekManual
@@ -746,6 +807,13 @@ func deepSeekPricingFromValues(values []ResolvedValue, valueMap map[string]strin
 	pricing.Flash.Peak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_FLASH_PEAK", pricing.Flash.Peak)
 	pricing.Pro.OffPeak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_PRO_OFF_PEAK", pricing.Pro.OffPeak)
 	pricing.Pro.Peak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_PRO_PEAK", pricing.Pro.Peak)
+	pricing.GLM53Flash = tokenRatesFromValues(valueMap, "SCIRSS_GLM_53_FLASH", pricing.GLM53Flash)
+	for _, value := range values {
+		if value.Option.Section == "GLM pricing" && value.Source != "default" {
+			pricing.GLM53FlashSnapshot = llmusage.PricingSnapshotGLMManual
+			break
+		}
+	}
 	return pricing
 }
 

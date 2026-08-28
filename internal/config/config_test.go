@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yyngfive/scirssagent/internal/llmusage"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 )
 
@@ -70,8 +71,11 @@ func TestLoadUsesOfficialDeepSeekPricingDefaultsAndAcceptsManualOverrides(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.DeepSeekPricing.Flash.OffPeak.CacheMissNanoCNYPerToken != 1_500 || settings.DeepSeekPricing.Pro.Peak.CompletionNanoCNYPerToken != 27_000 {
-		t.Fatalf("default DeepSeek pricing = %#v", settings.DeepSeekPricing)
+	if settings.LLMPricing.Flash.OffPeak.CacheMissNanoCNYPerToken != 1_500 || settings.LLMPricing.Pro.Peak.CompletionNanoCNYPerToken != 27_000 {
+		t.Fatalf("default DeepSeek pricing = %#v", settings.LLMPricing)
+	}
+	if settings.LLMPricing.GLM53Flash.CacheHitNanoCNYPerToken != 115 || settings.LLMPricing.GLM53Flash.CacheMissNanoCNYPerToken != 400 || settings.LLMPricing.GLM53Flash.CompletionNanoCNYPerToken != 1_400 {
+		t.Fatalf("default GLM pricing = %#v", settings.LLMPricing.GLM53Flash)
 	}
 
 	manual := "2.25"
@@ -89,8 +93,22 @@ func TestLoadUsesOfficialDeepSeekPricingDefaultsAndAcceptsManualOverrides(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.DeepSeekPricing.Flash.OffPeak.CacheMissNanoCNYPerToken != 2_250 || settings.DeepSeekPricing.Snapshot != "deepseek-cny-manual" {
-		t.Fatalf("manual DeepSeek pricing = %#v", settings.DeepSeekPricing)
+	if settings.LLMPricing.Flash.OffPeak.CacheMissNanoCNYPerToken != 2_250 || settings.LLMPricing.Snapshot != "deepseek-cny-manual" {
+		t.Fatalf("manual DeepSeek pricing = %#v", settings.LLMPricing)
+	}
+
+	glmOutput := "2.8"
+	if _, err := UpdateLocalSettings(root, map[string]SettingsConfigFieldUpdate{
+		"SCIRSS_GLM_53_FLASH_OUTPUT_CNY_PER_MILLION": {Value: &glmOutput},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	settings, err = Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.LLMPricing.GLM53Flash.CompletionNanoCNYPerToken != 2_800 || settings.LLMPricing.GLM53FlashSnapshot != llmusage.PricingSnapshotGLMManual {
+		t.Fatalf("manual GLM pricing = %#v", settings.LLMPricing)
 	}
 }
 

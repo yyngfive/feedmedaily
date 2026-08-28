@@ -16,20 +16,22 @@ FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载
 
 - [FeedMeDaily Releases](https://github.com/yyngfive/feedmedaily/releases/latest)
 
-安装完成后启动托盘程序，再从托盘打开 FeedMeDaily。首次使用需要填写兴趣描述和 LLM API key，然后生成初始 Profile；也可以先点击 `Save Settings` 单独保存 API key 和高级设置，再生成 Profile。高级设置中可以填写 Zotero API key 用于保存文献。
+安装完成后启动托盘程序，再从托盘打开 FeedMeDaily。首次使用需要填写兴趣描述、选择分类模型并录入对应 API key，然后生成初始 Profile；也可以先点击 `Save Settings` 单独保存模型和其他设置，再生成 Profile。正式界面的 `Settings → Model` 可以随时修改同一组模型配置。
 
 在设置的Feed界面可以添加期刊的RSS订阅地址：参见[部分出版社期刊RSS订阅地址汇总](https://github.com/yyngfive/sci-rss-list)
 
 说明：
 
-- 默认推荐使用 DeepSeek，其他 OpenAI-compatible API 目前没有做系统兼容性测试
+- 分类模型目前固定为 `DeepSeek V4 Flash (deepseek-v4-flash)` 和 `GLM-5.3-Flash (glm-5.3-flash)`；配置 key 即启用对应模型，默认模型菜单只显示已有 key 的模型，每个 sync/reclassify job 只使用入队时的默认模型。
 
 ### DeepSeek 设置
 
 1. 在 [DeepSeek Platform](https://platform.deepseek.com/) 注册并登录
 2. 在 [API Keys](https://platform.deepseek.com/api_keys) 页面创建 API Key
 
-默认分类配置使用 `deepseek-v4-flash`、`thinking=disabled` 和 batch size `5`。分类请求保留简短 `reason`，不要求模型生成内部决策轨迹或阅读动作；阅读动作由应用根据相关性标签确定。
+默认分类配置使用 `deepseek-v4-flash`、`thinking=disabled` 和 batch size `5`。DeepSeek 分类和标题翻译固定关闭 thinking；GLM 分类和标题翻译固定使用 `thinking=enabled`、`reasoning_effort=low` 及确定性采样设置。分类请求保留简短 `reason`，不要求模型生成内部决策轨迹或阅读动作；阅读动作由应用根据相关性标签确定。Profile 生成仍独立使用 DeepSeek V4 Pro key。
+
+连接测试会在后台发送一个最小 JSON 请求，会消耗少量对应提供商额度；测试 key 不会被保存。停用模型不会删除其 key，必须单独点击 `Clear key` 才会删除。
 
 ### Zotero 设置
 

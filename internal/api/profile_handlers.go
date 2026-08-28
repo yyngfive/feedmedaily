@@ -18,16 +18,17 @@ import (
 )
 
 func (s *Server) handleProfileCurrent(w http.ResponseWriter, r *http.Request) {
+	serverSettings := s.snapshotSettings()
 	switch r.Method {
 	case http.MethodGet:
-		profilePayload, err := profile.ReadCurrent(s.settings.ProfilePath)
+		profilePayload, err := profile.ReadCurrent(serverSettings.ProfilePath)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"profile": profilePayload})
 	case http.MethodPut:
-		currentProfile, err := profile.ReadCurrent(s.settings.ProfilePath)
+		currentProfile, err := profile.ReadCurrent(serverSettings.ProfilePath)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -46,7 +47,7 @@ func (s *Server) handleProfileCurrent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := profile.WriteCurrent(s.settings.ProfilePath, updatedProfile); err != nil {
+		if err := profile.WriteCurrent(serverSettings.ProfilePath, updatedProfile); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -61,7 +62,8 @@ func (s *Server) handleProfileBootstrap(w http.ResponseWriter, r *http.Request) 
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	currentProfile, err := profile.ReadCurrent(s.settings.ProfilePath)
+	serverSettings := s.snapshotSettings()
+	currentProfile, err := profile.ReadCurrent(serverSettings.ProfilePath)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -83,14 +85,14 @@ func (s *Server) handleProfileBootstrap(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	job := launchLocalJob(
-		s.settings,
+		serverSettings,
 		"profile-bootstrap",
 		"profile.bootstrap.queued",
 		"Queued initial profile generation.",
 		"profile.bootstrap.generating",
 		"Generating the initial classification profile proposal.",
 		func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
-			return bootstrapProfileFunc(s.settings, payload.InterestDescription, payload.Name, progress, usage)
+			return bootstrapProfileFunc(serverSettings, payload.InterestDescription, payload.Name, progress, usage)
 		},
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})
@@ -177,7 +179,8 @@ func (s *Server) handleProfileProposalGenerate(w http.ResponseWriter, r *http.Re
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	currentProfile, err := profile.ReadCurrent(s.settings.ProfilePath)
+	serverSettings := s.snapshotSettings()
+	currentProfile, err := profile.ReadCurrent(serverSettings.ProfilePath)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -187,14 +190,14 @@ func (s *Server) handleProfileProposalGenerate(w http.ResponseWriter, r *http.Re
 		return
 	}
 	job := launchLocalJob(
-		s.settings,
+		serverSettings,
 		"profile-proposal",
 		"",
 		"",
 		"profile.proposal.collecting_feedback",
 		"Collecting feedback for profile review.",
 		func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
-			return generateProfileProposalFunc(s.settings, progress, usage)
+			return generateProfileProposalFunc(serverSettings, progress, usage)
 		},
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})
@@ -441,6 +444,7 @@ func (s *Server) handleProfileProposalDetail(w http.ResponseWriter, proposalID i
 
 func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Request, proposalID int64) {
 	// 支持 legacy 整份 apply，以及带 accepted/rejected change ids 的局部 apply。
+	serverSettings := s.snapshotSettings()
 	sqliteStore, err := s.getWriteStore()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -468,7 +472,7 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	currentProfile, err := profile.ReadCurrent(s.settings.ProfilePath)
+	currentProfile, err := profile.ReadCurrent(serverSettings.ProfilePath)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -512,7 +516,7 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-	if err := profile.WriteCurrent(s.settings.ProfilePath, appliedProfile); err != nil {
+	if err := profile.WriteCurrent(serverSettings.ProfilePath, appliedProfile); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -544,12 +548,12 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if len(paperIDs) > 0 {
-		if _, err := reclassifyPaperIDsFunc(s.settings, paperIDs, nil); err != nil {
+		if _, err := reclassifyPaperIDsFunc(serverSettings, paperIDs, nil); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
-	if _, err := rebuildLatestReportFunc(s.settings, nil); err != nil {
+	if _, err := rebuildLatestReportFunc(serverSettings, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -627,7 +631,7 @@ func (s *Server) handleZoteroCollections(w http.ResponseWriter, r *http.Request)
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	payload, err := listZoteroCollectionsFunc(s.settings)
+	payload, err := listZoteroCollectionsFunc(s.snapshotSettings())
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -692,7 +696,7 @@ func (s *Server) handleZoteroSave(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, current)
 		return
 	}
-	itemKey, saveErr := savePaperToZoteroFunc(s.settings, *paper, *classification, payload.CollectionKey)
+	itemKey, saveErr := savePaperToZoteroFunc(s.snapshotSettings(), *paper, *classification, payload.CollectionKey)
 	if saveErr != nil {
 		status, err := sqliteStore.UpsertZoteroStatus(paperID, "error", nil, stringPtr(saveErr.Error()), time.Now().UTC())
 		if err != nil {

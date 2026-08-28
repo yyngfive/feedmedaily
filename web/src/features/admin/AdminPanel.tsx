@@ -4,6 +4,7 @@ import React from "react";
 import type {
   AppMeta,
   AppUpdate,
+  ClassifierModelsResponse,
   ClassificationProfile,
   FeedSubscription,
   FeedbackRecord,
@@ -11,14 +12,16 @@ import type {
   ProfileProposal,
   SchedulerSettings,
   SettingsConfigField,
+  ClassifierModelsUpdate,
   SettingsConfigUpdate,
 } from "../../shared/types";
 import {AppTab} from "./AppTab";
 import {DashboardTab} from "./DashboardTab";
 import {DeepSeekPricingEditor} from "./DeepSeekPricingEditor";
+import {ClassifierModelsEditor, classifierModelsDraftHasRequiredKeys, classifierModelsUpdateFromDraft, createClassifierModelsDraft, type ClassifierModelsDraft} from "./ClassifierModelsEditor";
 import {FeedsTab} from "./FeedsTab";
 import {ProfileTab} from "./ProfileTab";
-import {SettingsConfigEditor} from "./SettingsConfigEditor";
+import {SettingsConfigEditor, type SettingsConfigEditorHandle} from "./SettingsConfigEditor";
 
 export type AdminTab = "dashboard" | "feeds" | "profile" | "model" | "app";
 
@@ -30,8 +33,8 @@ const adminTabs: Array<{id: AdminTab; label: string}> = [
   {id: "app", label: "App"},
 ];
 
-const modelSections = new Set(["Classifier model", "Profile model"]);
-const pricingSection = "DeepSeek pricing";
+const modelSections = new Set(["Classifier tuning", "Profile model"]);
+const pricingSections = new Set(["DeepSeek pricing", "GLM pricing"]);
 const appSections = new Set(["Zotero", "Local app"]);
 
 export type AdminPanelProps = {
@@ -41,6 +44,7 @@ export type AdminPanelProps = {
   appUpdateChecking: boolean;
   configFields: SettingsConfigField[];
   configSaving: boolean;
+  classifierModels: ClassifierModelsResponse;
   feedback: FeedbackRecord[];
   feeds: FeedSubscription[];
   feedsSaving: boolean;
@@ -62,7 +66,9 @@ export type AdminPanelProps = {
   onRejectProposal: (id: number) => void;
   onRemoveFeed: (index: number) => void;
   onRunSync: (feedURLs?: string[]) => void;
-  onSaveConfig: (fields: Record<string, SettingsConfigUpdate>) => Promise<void>;
+  onStopSync: (jobID: string) => Promise<void> | void;
+  onSaveConfig: (fields: Record<string, SettingsConfigUpdate>, classifierModels?: ClassifierModelsUpdate) => Promise<void>;
+  onTestClassifierModel: (modelID: string, apiKey?: string) => Promise<JobInfo>;
   onSaveFeeds: () => void;
   onSaveProfile: (profile: ClassificationProfile) => Promise<void> | void;
   onSaveScheduler: (dailyTime: string) => Promise<void>;
@@ -91,9 +97,15 @@ export function AdminPanel(props: AdminPanelProps) {
     [props.configFields],
   );
   const pricingFields = React.useMemo(
-    () => props.configFields.filter((field) => field.section === pricingSection),
+    () => props.configFields.filter((field) => pricingSections.has(field.section)),
     [props.configFields],
   );
+
+  const [classifierDraft, setClassifierDraft] = React.useState<ClassifierModelsDraft>(() => createClassifierModelsDraft(props.classifierModels));
+  const modelSettingsRef = React.useRef<SettingsConfigEditorHandle | null>(null);
+  React.useEffect(() => {
+    setClassifierDraft(createClassifierModelsDraft(props.classifierModels));
+  }, [props.classifierModels]);
 
   React.useEffect(() => {
     if (!props.open) return;
@@ -139,6 +151,7 @@ export function AdminPanel(props: AdminPanelProps) {
               onReclassifyFeedback={props.onReclassifyFeedback}
               onReclassifyRecent={props.onReclassifyRecent}
               onRunSync={props.onRunSync}
+              onStopSync={props.onStopSync}
               onStartVerification={props.onStartVerification}
               onSubmitVerificationXML={props.onSubmitVerificationXML}
               verificationSubmitting={props.verificationSubmitting}
@@ -155,7 +168,27 @@ export function AdminPanel(props: AdminPanelProps) {
             <Card className="rounded-md border border-(--line) bg-(--paper-accent) shadow-none">
               <Card.Header><h3 className="text-xl font-semibold text-(--ink)">Model</h3></Card.Header>
               <Card.Content>
-                <SettingsConfigEditor fields={modelFields} saving={props.configSaving} saveLabel="Save model settings" title="Model settings" onSave={props.onSaveConfig} />
+                <div className="mb-5 flex justify-start">
+                  <Button
+                    isDisabled={props.configSaving || classifierDraft.enabledModelIds.length === 0 || !classifierDraft.enabledModelIds.includes(classifierDraft.defaultModelId) || !classifierModelsDraftHasRequiredKeys(classifierDraft, props.classifierModels)}
+                    size="sm"
+                    onPress={() => void props.onSaveConfig(modelSettingsRef.current?.getPayload() ?? {}, classifierModelsUpdateFromDraft(classifierDraft))}
+                  >
+                    {props.configSaving ? "Saving..." : "Save model settings"}
+                  </Button>
+                </div>
+                <div className="space-y-4 border-b border-(--line) pb-5">
+                  <ClassifierModelsEditor
+                    draft={classifierDraft}
+                    jobs={props.jobs}
+                    models={props.classifierModels}
+                    onChange={setClassifierDraft}
+                    onTest={props.onTestClassifierModel}
+                  />
+                </div>
+                <div className="pt-5">
+                  <SettingsConfigEditor ref={modelSettingsRef} fields={modelFields} saving={props.configSaving} showSaveAction={false} title="Profile and classifier tuning" onSave={props.onSaveConfig} />
+                </div>
                 <DeepSeekPricingEditor fields={pricingFields} saving={props.configSaving} onSave={props.onSaveConfig} />
               </Card.Content>
             </Card>

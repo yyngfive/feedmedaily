@@ -28,7 +28,7 @@ export function useAppData(state: AppState) {
     setAdminHydrationWarning, setAdminOpen, setAdminTab, setAppMeta, setAppUpdate,
     setAppUpdateChecking, setFeedbackRecords, setFeeds, setFeedsLoaded, setJobs, setMessage,
     setPendingReadOverrides, setProfile, setProfileProposals, setProfileResolved, setReport,
-    setReportLoadError, setReportLoading, setScheduler, setSettingsConfig,
+    setReportLoadError, setReportLoading, setScheduler, setSettingsConfig, setClassifierModels,
   } = state;
 
   const formatAdminHydrationWarning = React.useCallback((areas: string[]) => {
@@ -125,7 +125,11 @@ export function useAppData(state: AppState) {
     }
   }, [pushErrorMessage, setAppUpdate, setAppUpdateChecking]);
   const refreshScheduler = React.useCallback(async () => setScheduler(await fetchSchedulerSettings()), [setScheduler]);
-  const refreshConfig = React.useCallback(async () => setSettingsConfig((await fetchSettingsConfig()).fields), [setSettingsConfig]);
+  const refreshConfig = React.useCallback(async () => {
+    const next = await fetchSettingsConfig();
+    setSettingsConfig(next.fields);
+    setClassifierModels(next.classifier_models);
+  }, [setClassifierModels, setSettingsConfig]);
   const refreshProposals = React.useCallback(async () => setProfileProposals(await fetchProfileProposals()), [setProfileProposals]);
 
   React.useEffect(() => {
@@ -258,12 +262,12 @@ export function useAppData(state: AppState) {
         let activeAnnouncement: JobInfo | null = null;
         const nextJobState = new Map<string, string>();
         for (const job of serverJobs) {
-          const signature = `${job.status}:${job.finished_at ?? job.started_at ?? ""}:${job.message_key ?? ""}:${job.message ?? ""}:${job.error ?? ""}:${job.progress_stage ?? ""}:${job.progress_current ?? ""}:${job.progress_total ?? ""}:${job.progress_percent ?? ""}:${job.progress_label ?? ""}:${job.progress_mode ?? ""}`;
+          const signature = `${job.status}:${job.finished_at ?? job.started_at ?? ""}:${job.message_key ?? ""}:${job.message ?? ""}:${job.error ?? ""}:${job.cancel_requested ?? false}:${job.progress_stage ?? ""}:${job.progress_current ?? ""}:${job.progress_total ?? ""}:${job.progress_percent ?? ""}:${job.progress_label ?? ""}:${job.progress_mode ?? ""}`;
           const previousSignature = knownJobStateRef.current.get(job.id);
           nextJobState.set(job.id, signature);
           if (!activeAnnouncement && (job.status === "queued" || job.status === "running")) activeAnnouncement = job;
           if (!jobsHydratedRef.current || previousSignature === signature || (!profile && job.job_type === "profile-bootstrap")) continue;
-          if (job.status === "failed") { announcement = job; break; }
+          if (job.status === "failed" || job.status === "cancelled") { announcement = job; break; }
           if (job.status === "completed" || !announcement) announcement = job;
         }
         setJobs((current) => {
@@ -271,7 +275,7 @@ export function useAppData(state: AppState) {
           const byId = new Map(current.map((job) => [job.id, job]));
           serverJobs.forEach((job) => {
             const previousStatus = previousStatusById.get(job.id);
-            if ((((previousStatus && previousStatus !== job.status) || (!previousStatus && (job.status === "completed" || job.status === "failed") && Boolean(job.finished_at))) && (job.status === "completed" || job.status === "failed"))) shouldRefresh = true;
+            if (job.job_type !== "model-test" && (((previousStatus && previousStatus !== job.status) || (!previousStatus && (job.status === "completed" || job.status === "failed" || job.status === "cancelled") && Boolean(job.finished_at))) && (job.status === "completed" || job.status === "failed" || job.status === "cancelled"))) shouldRefresh = true;
             byId.set(job.id, job);
           });
           return Array.from(byId.values()).sort((left, right) => left.created_at < right.created_at ? 1 : -1);
@@ -281,7 +285,7 @@ export function useAppData(state: AppState) {
           activeJobMessageRef.current = null;
           setMessage(messageFromJob(announcement));
         } else if (!jobsHydratedRef.current && activeAnnouncement) {
-          const activeSignature = `${activeAnnouncement.id}:${activeAnnouncement.status}:${activeAnnouncement.message_key ?? ""}:${activeAnnouncement.message ?? ""}:${activeAnnouncement.progress_stage ?? ""}:${activeAnnouncement.progress_current ?? ""}:${activeAnnouncement.progress_total ?? ""}:${activeAnnouncement.progress_percent ?? ""}:${activeAnnouncement.progress_label ?? ""}:${activeAnnouncement.progress_mode ?? ""}`;
+          const activeSignature = `${activeAnnouncement.id}:${activeAnnouncement.status}:${activeAnnouncement.message_key ?? ""}:${activeAnnouncement.message ?? ""}:${activeAnnouncement.cancel_requested ?? false}:${activeAnnouncement.progress_stage ?? ""}:${activeAnnouncement.progress_current ?? ""}:${activeAnnouncement.progress_total ?? ""}:${activeAnnouncement.progress_percent ?? ""}:${activeAnnouncement.progress_label ?? ""}:${activeAnnouncement.progress_mode ?? ""}`;
           if (activeJobMessageRef.current !== activeSignature) {
             activeJobMessageRef.current = activeSignature;
             setMessage(messageFromJob(activeAnnouncement));

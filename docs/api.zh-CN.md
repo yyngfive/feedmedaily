@@ -23,7 +23,8 @@
 {
   id: string;
   job_type: string;
-  status: "queued" | "running" | "waiting_for_user" | "completed" | "failed";
+  status: "queued" | "running" | "waiting_for_user" | "completed" | "failed" | "cancelled";
+  cancel_requested?: boolean;
   message_key?: string;
   message?: string;
   error?: string;
@@ -273,7 +274,7 @@ Query：
 
 ### `GET /api/settings/config`
 
-用途：读取可编辑配置字段和每个字段来源。
+用途：读取可编辑配置字段、字段来源，以及固定分类模型目录的启用状态、默认模型和密钥元数据。
 
 请求体：无。
 
@@ -286,7 +287,7 @@ Query：
       "key": "SCIRSS_CLASSIFIER_MODEL",
       "label": "Classifier model",
       "description": "Model name used for paper classification.",
-      "section": "Classifier model",
+      "section": "Legacy classifier model",
       "input_type": "text",
       "secret": false,
       "configured": true,
@@ -297,32 +298,75 @@ Query：
       "default_value": "deepseek-v4-flash",
       "options": []
     }
-  ]
+  ],
+  "classifier_models": {
+    "models": [
+      {
+        "id": "deepseek-v4-flash",
+        "provider": "deepseek",
+        "label": "DeepSeek V4 Flash",
+        "base_url": "https://api.deepseek.com",
+        "thinking": "disabled",
+        "enabled": true,
+        "default": true,
+        "configured": true,
+        "source": "dotenv",
+        "stored_locally": true,
+        "environment_override": false
+      },
+      {
+        "id": "glm-5.3-flash",
+        "provider": "zhipu",
+        "label": "GLM-5.3-Flash",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "thinking": "enabled",
+        "reasoning_effort": "low",
+        "enabled": false,
+        "default": false,
+        "configured": false,
+        "source": "unset",
+        "stored_locally": false,
+        "environment_override": false
+      }
+    ],
+    "enabled_model_ids": ["deepseek-v4-flash"],
+    "default_model_id": "deepseek-v4-flash"
+  }
 }
 ```
 
-secret 字段不以明文返回。
+secret 字段和 `classifier_models` 中的 key 均不以明文返回。`source=environment` 且 `environment_override=true` 表示系统环境变量覆盖了本地值。
 
-当前分类器默认值为 `SCIRSS_CLASSIFIER_THINKING=disabled`、`SCIRSS_CLASSIFIER_BATCH_SIZE=5`。模型响应不要求 `decision_trace` 或 `recommended_action`；报告 API 中保留的 `recommended_action` 由后端按 relevance 确定。
+当前固定分类目录为 DeepSeek V4 Flash 和 Zhipu GLM-5.3-Flash。DeepSeek 自动使用 `thinking.type=disabled` 且不发送 `reasoning_effort`；GLM 自动使用 `thinking.type=enabled`、`reasoning_effort=low` 和确定性采样。分类器默认 batch size 为 `5`。模型响应不要求 `decision_trace` 或 `recommended_action`；报告 API 中保留的 `recommended_action` 由后端按 relevance 确定。
 
-`DeepSeek pricing` section 提供 Flash/Pro 各自的 off-peak/peak 缓存命中、缓存未命中和输出价格，单位均为 CNY / 1M tokens，字段名采用 `SCIRSS_DEEPSEEK_<FLASH|PRO>_<OFF_PEAK|PEAK>_<CACHE_HIT|CACHE_MISS|OUTPUT>_CNY_PER_MILLION`。价格允许 0 或最多三位小数，默认值是当前内置官方价格。
+`DeepSeek pricing` section 提供 Flash/Pro 各自的 off-peak/peak 价格；`GLM pricing` 提供 GLM-5.3-Flash 的缓存命中、普通输入和输出价格。单位均为 CNY / 1M tokens，价格允许 0 或最多三位小数。GLM 默认值为 2026-08-28 官方页面展示的限时 5 折价：`0.115 / 0.4 / 1.4`，促销结束后可在 UI 或 `SCIRSS_GLM_53_FLASH_<CACHE_HIT|CACHE_MISS|OUTPUT>_CNY_PER_MILLION` 更新。
 
 前端入口：`fetchSettingsConfig()`。
 
 ### `PUT /api/settings/config`
 
-用途：更新本地配置，并立即重载后端 settings。定价修改只会被之后启动的 job 捕获；正在运行和已经完成的 job 保留启动时或完成时的价格快照。
+用途：更新本地配置，并立即重载后端 settings。除传统 `fields` 外，可用 `classifier_models` 一次更新启用模型、默认模型和按模型密钥。定价修改只会被之后启动的 job 捕获；正在运行和已经完成的 job 保留启动时或完成时的价格快照。
 
 请求体：
 
 ```json
 {
   "fields": {
-    "SCIRSS_CLASSIFIER_MODEL": {"value": "deepseek-v4-flash"},
     "SCIRSS_ZOTERO_API_KEY": {"clear": true}
+  },
+  "classifier_models": {
+    "enabled_model_ids": ["deepseek-v4-flash", "glm-5.3-flash"],
+    "default_model_id": "deepseek-v4-flash",
+    "credentials": {
+      "deepseek-v4-flash": {"value": "new-deepseek-key"},
+      "glm-5.3-flash": {"clear": true}
+    },
+    "reuse_deepseek_key_for_profile": false
   }
 }
 ```
+
+`credentials` 只需要提交新 key 或 `{ "clear": true }`；空对象表示保留已有 key。停用模型不会删除 key。至少启用一个固定模型，且默认模型必须属于启用集合；后端会拒绝未知模型、缺少默认模型约束或无效密钥更新。旧的 `SCIRSS_CLASSIFIER_API_KEY/BASE_URL/MODEL/THINKING` 会在首次结构化保存时迁移到对应 provider key，无法覆盖的系统环境变量仍优先并在响应中提示。
 
 成功响应：同 `GET /api/settings/config`。
 
@@ -331,7 +375,19 @@ secret 字段不以明文返回。
 - 400：无效 JSON、未知字段、非法值。
 - 500：更新后 settings 重载失败。
 
-前端入口：`saveSettingsConfig(fields)`。
+前端入口：`saveSettingsConfig(fields, classifierModels?)`。
+
+### `POST /api/settings/classifier-models/test`
+
+用途：以后台 `model-test` job 发送一个最小真实 JSON 请求，验证固定 endpoint、鉴权、模型参数和响应解析。连接测试不改变默认模型，不保存请求中的临时 key，并记录返回的 token 用量；请求会消耗少量对应提供商额度。
+
+请求体：
+
+```json
+{"model_id":"glm-5.3-flash","api_key":"optional-unsaved-key"}
+```
+
+省略 `api_key` 时使用已保存 key。成功响应为 `{ "job": JobInfo }`，前端可通过 `GET /api/admin/jobs` 轮询；未知模型或没有可用 key 返回 400。日志不会写入 API key。
 
 ### `GET /api/settings/feeds`
 
@@ -697,7 +753,7 @@ Linux source mode 只保存设置，不由 Web UI 自动执行；响应会给出
 {"job": {"id":"...","job_type":"sync","status":"queued"}, "reused": false}
 ```
 
-sync 启动采用 single-flight 语义。已有 sync 处于 `queued`、`running` 或 `waiting_for_user` 时，重复请求返回 `200`、同一个 `job`，并设置 `reused: true`；不会启动第二次完整或定向同步。任务进入 `completed` 或 `failed` 后可以再次启动。
+sync 启动采用 single-flight 语义。已有 sync 处于 `queued`、`running` 或 `waiting_for_user` 时，重复请求返回 `200`、同一个 `job`，并设置 `reused: true`；不会启动第二次完整或定向同步。任务进入 `completed`、`failed` 或 `cancelled` 后可以再次启动。
 
 job result 典型字段：
 
@@ -714,6 +770,7 @@ job result 典型字段：
 - `waiting_for_user`
 - `completed`
 - `failed`
+- `cancelled`
 
 前端入口：`launchAdminJob("/api/admin/run")`。
 
@@ -753,7 +810,7 @@ job result 典型字段：
 
 成功响应：`JobInfo[]`。
 
-LLM job 在完成或失败后包含可选 `llm_usage`：请求数、三类 token、模型、pricing 状态、价格快照和格式化人民币估算。没有精确 usage、未知模型或非官方 DeepSeek endpoint 时 `pricing_status` 为 `unavailable`，不会返回伪造金额。
+LLM job 在完成或失败后包含可选 `llm_usage`：请求数、三类 token、模型、pricing 状态、价格快照和格式化人民币估算。DeepSeek 与 GLM 官方 endpoint 的已知模型可估价；没有精确 usage、未知模型或非官方 endpoint 时 `pricing_status` 为 `unavailable`，不会返回伪造金额。
 
 前端入口：`fetchJobs()`。
 
@@ -770,6 +827,20 @@ LLM job 在完成或失败后包含可选 `llm_usage`：请求数、三类 token
 常见错误：404 job 不存在。
 
 前端入口：`fetchJob(id)`。
+
+### `POST /api/admin/jobs/{id}/cancel`
+
+用途：停止当前正在执行的 sync job。停止请求会取消网络/LLM 请求和重试等待；如果任务正在等待受保护 feed 验证，也会关闭该次等待。已写入数据库的内容不会回滚。
+
+仅 `sync` 且状态为 `queued`、`running` 或 `waiting_for_user` 的任务可停止。成功接受停止请求返回 `202`：
+
+```json
+{"job":{"id":"...","job_type":"sync","status":"running","cancel_requested":true},"cancel_requested":true}
+```
+
+任务最终状态为 `cancelled`；重复停止已结束任务返回 `200` 并设置 `already_terminal: true`。非 sync 任务返回 400，未知 job 返回 404。
+
+前端入口：`cancelSyncJob(id)`。
 
 ### `GET /api/admin/llm-usage?since=<RFC3339>`
 

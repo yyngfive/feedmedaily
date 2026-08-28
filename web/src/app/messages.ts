@@ -62,6 +62,10 @@ const catalog = {
   "job.verification.completed": {text: "Trying the captured feed XML again.", tone: "info"},
   "job.completed": {text: "Completed.", tone: "success"},
   "job.failed": {text: "Job failed.", tone: "danger"},
+  "sync.cancel.requested": {text: "Stopping sync…", tone: "info"},
+  "sync.cancel.failed": {text: "Could not stop the sync job.", tone: "danger"},
+  "sync.cancelling": {text: "Stopping sync.", tone: "info"},
+  "sync.cancelled": {text: "Sync stopped.", tone: "info"},
   "pipeline.feeds.fetching": {text: "Fetching RSS feeds.", tone: "info"},
   "pipeline.metadata.enriching": {text: "Getting metadata.", tone: "info"},
   "pipeline.classifier.classifying": {text: "Classifying papers.", tone: "info"},
@@ -111,6 +115,13 @@ export function messageFromJob(job: JobInfo): UiMessage {
     const message = createUiMessage(job.message_key ?? "job.completed", {
       text: job.message ?? "Completed.",
       tone: warningCount > 0 ? "warning" : "success",
+    });
+    return {...message, ttlMs: JOB_FINAL_TTL_MS};
+  }
+  if (job.status === "cancelled") {
+    const message = createUiMessage(job.message_key ?? "sync.cancelled", {
+      text: job.message ?? "Sync stopped.",
+      tone: "info",
     });
     return {...message, ttlMs: JOB_FINAL_TTL_MS};
   }

@@ -143,14 +143,17 @@ func RebuildLatestReport(settings config.Settings, progress ProgressFunc) (int, 
 }
 
 func classifierConfig(settings config.Settings, usage *llmusage.Collector) (classifier.LLMConfig, error) {
-	if settings.ClassifierAPIKey == "" {
-		return classifier.LLMConfig{}, fmt.Errorf("SCIRSS_CLASSIFIER_API_KEY is required for classification.")
+	model := settings.EffectiveClassifierModel()
+	if model.APIKey == "" {
+		return classifier.LLMConfig{}, fmt.Errorf("API key is required for classifier model %s.", settings.EffectiveClassifierModelName())
 	}
 	return classifier.LLMConfig{
-		APIKey:   settings.ClassifierAPIKey,
-		Model:    settings.ClassifierModel,
-		BaseURL:  settings.ClassifierBaseURL,
-		Thinking: settings.ClassifierThinking,
-		Usage:    usage,
+		APIKey:          model.APIKey,
+		Model:           model.ID,
+		BaseURL:         model.BaseURL,
+		Provider:        model.Provider,
+		Thinking:        model.Thinking,
+		ReasoningEffort: model.ReasoningEffort,
+		Usage:           usage,
 	}, nil
 }

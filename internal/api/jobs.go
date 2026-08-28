@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	goruntime "runtime"
@@ -44,6 +45,7 @@ type jobInfo struct {
 	StartedAt                *time.Time        `json:"started_at,omitempty"`
 	FinishedAt               *time.Time        `json:"finished_at,omitempty"`
 	LLMUsage                 *llmusage.Summary `json:"llm_usage,omitempty"`
+	CancelRequested          bool              `json:"cancel_requested,omitempty"`
 }
 
 type jobRegistry struct {
@@ -52,11 +54,65 @@ type jobRegistry struct {
 }
 
 var (
-	apiJobs               = jobRegistry{jobs: map[string]jobInfo{}}
+	apiJobs          = jobRegistry{jobs: map[string]jobInfo{}}
+	jobCancellations = struct {
+		mu    sync.Mutex
+		items map[string]context.CancelFunc
+	}{items: map[string]context.CancelFunc{}}
 	nowFunc               = time.Now
 	backendRunCommandFunc = backendRunCommand
 	jobCounter            atomic.Uint64
 )
+
+func registerJobCancellation(id string, cancel context.CancelFunc) {
+	if strings.TrimSpace(id) == "" || cancel == nil {
+		return
+	}
+	jobCancellations.mu.Lock()
+	defer jobCancellations.mu.Unlock()
+	jobCancellations.items[id] = cancel
+}
+
+func unregisterJobCancellation(id string) {
+	jobCancellations.mu.Lock()
+	defer jobCancellations.mu.Unlock()
+	delete(jobCancellations.items, id)
+}
+
+func cancelRegisteredJob(id string) bool {
+	jobCancellations.mu.Lock()
+	cancel, ok := jobCancellations.items[id]
+	jobCancellations.mu.Unlock()
+	if !ok {
+		return false
+	}
+	cancel()
+	return true
+}
+
+// requestJobCancellation asks an active sync to stop and returns its latest state.
+func requestJobCancellation(id string) (jobInfo, bool, bool) {
+	job, exists := jobByID(id)
+	if !exists {
+		return jobInfo{}, false, false
+	}
+	if job.JobType != "sync" || !isActiveJobStatus(job.Status) {
+		return job, false, true
+	}
+	requested := cancelRegisteredJob(id)
+	if requested {
+		updateJob(id, func(current *jobInfo) {
+			if !isActiveJobStatus(current.Status) {
+				return
+			}
+			current.CancelRequested = true
+			current.MessageKey = "sync.cancelling"
+			current.Message = "Stopping sync."
+		})
+	}
+	job, _ = jobByID(id)
+	return job, requested, true
+}
 
 type localJobFunc func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error)
 
@@ -104,7 +160,7 @@ func launchLocalJob(settings config.Settings, jobType string, queuedMessageKey s
 	storeJob(job)
 
 	go func() {
-		usage := llmusage.NewCollector(settings.DeepSeekPricing)
+		usage := llmusage.NewCollector(settings.LLMPricing)
 		started := nowFunc().UTC()
 		logJobEvent(settings.LogsDir, &job, "info", "started", runningMessageKey, runningMessage, "", nil)
 		updateJob(job.ID, func(current *jobInfo) {
@@ -166,8 +222,8 @@ func finalizeLLMUsage(settings config.Settings, jobID string, jobType string, st
 	summary := collector.Summary()
 	if len(summary.Models) == 0 {
 		switch jobType {
-		case "sync", "reclassify":
-			summary.Models = []string{settings.ClassifierModel}
+		case "sync", "reclassify", "model-test":
+			summary.Models = []string{settings.EffectiveClassifierModelName()}
 		case "profile-bootstrap", "profile-proposal":
 			summary.Models = []string{settings.ProfileModel}
 		}

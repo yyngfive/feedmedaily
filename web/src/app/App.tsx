@@ -56,12 +56,14 @@ export function App() {
           busy={data.onboardingBusy}
           configFields={state.settingsConfig}
           configSaving={state.settingsConfigSaving}
+          classifierModels={state.classifierModels}
           jobs={state.jobs}
           proposals={state.profileProposals}
           onAcceptDraft={admin.handleOnboardingAcceptDraft}
           onRejectProposal={admin.handleOnboardingRejectProposal}
           onSaveSettings={admin.handleOnboardingSaveSettings}
           onSaveAndBootstrap={admin.handleOnboardingSaveAndBootstrap}
+          onTestClassifierModel={admin.handleTestClassifierModel}
         />
       </>
     );
@@ -78,6 +80,7 @@ export function App() {
         appUpdateChecking={state.appUpdateChecking}
         configFields={state.settingsConfig}
         configSaving={state.settingsConfigSaving}
+        classifierModels={state.classifierModels}
         open={state.adminOpen}
         profile={state.profile}
         profileSaving={state.profileSaving}
@@ -95,6 +98,7 @@ export function App() {
         onCheckForUpdates={() => void data.handleCheckAppUpdate()}
         onRemoveFeed={admin.handleRemoveFeed}
         onSaveConfig={admin.handleSaveConfig}
+        onTestClassifierModel={admin.handleTestClassifierModel}
         onSaveProfile={admin.handleSaveProfile}
         onSaveScheduler={admin.handleSaveScheduler}
         onSaveFeeds={() => void admin.handleSaveFeeds()}
@@ -107,6 +111,7 @@ export function App() {
         onApplyProposal={(id, selection) => void admin.handleApplyProposal(id, selection)}
         onRejectProposal={(id) => void admin.handleRejectProposal(id)}
         onRunSync={(feedURLs) => void admin.handleRunAdminJob("/api/admin/run", feedURLs)}
+        onStopSync={admin.handleStopSync}
         onReclassifyRecent={() => void admin.handleReclassify("recent")}
         onReclassifyFeedback={() => void admin.handleReclassify("feedback")}
         onReclassifyAll={() => void admin.handleReclassify("all")}

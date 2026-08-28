@@ -2,6 +2,7 @@ package classifier
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,11 +38,14 @@ Labels are fixed:
 Return concise, evidence-based reasoning grounded in the title and abstract.`
 
 type LLMConfig struct {
-	APIKey   string
-	Model    string
-	BaseURL  string
-	Thinking string
-	Usage    *llmusage.Collector
+	Context         context.Context
+	APIKey          string
+	Model           string
+	BaseURL         string
+	Provider        string
+	Thinking        string
+	ReasoningEffort string
+	Usage           *llmusage.Collector
 }
 
 type promptPaper struct {
@@ -63,6 +67,9 @@ type chatCompletionResponse struct {
 		PromptCacheHitTokens  *int64 `json:"prompt_cache_hit_tokens"`
 		PromptCacheMissTokens *int64 `json:"prompt_cache_miss_tokens"`
 		CompletionTokens      int64  `json:"completion_tokens"`
+		PromptTokensDetails   *struct {
+			CachedTokens *int64 `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 }
 
@@ -72,8 +79,18 @@ const classifierMaxAttempts = 2
 
 func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig) ([]store.Classification, error) {
 	// 复刻 Python classifier 的批量分类与缺失标题翻译补全逻辑。
+	ctx := cfg.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(cfg.APIKey) == "" {
-		return nil, fmt.Errorf("SCIRSS_CLASSIFIER_API_KEY is required for classification.")
+		if strings.TrimSpace(cfg.Model) != "" {
+			return nil, fmt.Errorf("API key is required for classifier model %s.", cfg.Model)
+		}
+		return nil, fmt.Errorf("classifier API key is required for classification.")
 	}
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "info",
@@ -105,13 +122,16 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 		"temperature":     0,
 		"max_tokens":      max(600, 220*len(papers)),
 		"response_format": map[string]string{"type": "json_object"},
-		"thinking":        map[string]string{"type": normalizedThinking(cfg.Thinking)},
 	}
+	applyProviderControls(cfg, payload, false)
 
 	var decoded map[string]any
 	lastContent := ""
 	var lastParseErr error
 	for attempt := 1; attempt <= classifierMaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		content, err := requestJSONContentWithFallback(cfg, payload, "classification")
 		if err != nil {
 			return nil, err
@@ -170,6 +190,9 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 		}
 	}
 	if len(missingTitles) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		_, _ = logging.WriteDefault(logging.Event{
 			Level:     "info",
 			Component: "classifier",
@@ -182,6 +205,9 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 		})
 		translations, err := TranslateTitlesBatch(missingTitles, cfg)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			_, _ = logging.WriteDefault(logging.Event{
 				Level:     "warning",
 				Component: "classifier",
@@ -209,6 +235,9 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 	results := make([]store.Classification, 0, len(indexed))
 	missingIDs := make([]string, 0)
 	for _, item := range indexed {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		classification, ok := byID[item.ID]
 		if !ok {
 			missingIDs = append(missingIDs, item.ID)
@@ -245,8 +274,8 @@ func TranslateTitlesBatch(papers []promptPaper, cfg LLMConfig) (map[string]strin
 		"temperature":     0,
 		"max_tokens":      max(300, 120*len(papers)),
 		"response_format": map[string]string{"type": "json_object"},
-		"thinking":        map[string]string{"type": "disabled"},
 	}
+	applyProviderControls(cfg, payload, !isManagedClassifierProvider(cfg))
 	content, err := requestJSONContentWithFallback(cfg, payload, "title_translation")
 	if err != nil {
 		return nil, err
@@ -281,7 +310,11 @@ func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string,
 		return "", fmt.Errorf("encode classifier request: %w", err)
 	}
 	endpoint := strings.TrimRight(cfg.BaseURL, "/") + "/chat/completions"
-	request, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	ctx := cfg.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("build classifier request: %w", err)
 	}
@@ -343,7 +376,7 @@ func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string,
 		if message == "" {
 			message = response.Status
 		}
-		return "", fmt.Errorf("classifier request failed: %s", message)
+		return "", fmt.Errorf("classifier request failed: %s", redactClassifierSecret(message, cfg.APIKey))
 	}
 	var decoded chatCompletionResponse
 	if err := json.Unmarshal(responseBody, &decoded); err != nil {
@@ -351,16 +384,26 @@ func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string,
 		return "", fmt.Errorf("parse classifier response envelope: %w", err)
 	}
 	if decoded.Usage != nil && cfg.Usage != nil {
+		cacheHit := decoded.Usage.PromptCacheHitTokens
+		cacheMiss := decoded.Usage.PromptCacheMissTokens
+		if cacheHit == nil && decoded.Usage.PromptTokensDetails != nil && decoded.Usage.PromptTokensDetails.CachedTokens != nil {
+			cacheHit = decoded.Usage.PromptTokensDetails.CachedTokens
+			miss := decoded.Usage.PromptTokens - *cacheHit
+			if miss < 0 {
+				miss = 0
+			}
+			cacheMiss = &miss
+		}
 		usage := llmusage.ResponseUsage{
 			PromptTokens:          decoded.Usage.PromptTokens,
 			CompletionTokens:      decoded.Usage.CompletionTokens,
-			CacheBreakdownPresent: decoded.Usage.PromptCacheHitTokens != nil && decoded.Usage.PromptCacheMissTokens != nil,
+			CacheBreakdownPresent: cacheHit != nil && cacheMiss != nil,
 		}
-		if decoded.Usage.PromptCacheHitTokens != nil {
-			usage.PromptCacheHitTokens = *decoded.Usage.PromptCacheHitTokens
+		if cacheHit != nil {
+			usage.PromptCacheHitTokens = *cacheHit
 		}
-		if decoded.Usage.PromptCacheMissTokens != nil {
-			usage.PromptCacheMissTokens = *decoded.Usage.PromptCacheMissTokens
+		if cacheMiss != nil {
+			usage.PromptCacheMissTokens = *cacheMiss
 		}
 		cfg.Usage.Record(llmusage.Event{Role: "classifier", Operation: operation, BaseURL: cfg.BaseURL, Model: cfg.Model, OccurredAt: time.Now().UTC(), Usage: usage})
 	}
@@ -368,6 +411,14 @@ func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string,
 		return "", fmt.Errorf("classifier response did not contain any choices")
 	}
 	return decoded.Choices[0].Message.Content, nil
+}
+
+func redactClassifierSecret(message string, secret string) string {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return message
+	}
+	return strings.ReplaceAll(message, secret, "[redacted]")
 }
 
 func requestJSONContentWithFallback(cfg LLMConfig, payload map[string]any, operation string) (string, error) {
@@ -378,7 +429,7 @@ func requestJSONContentWithFallback(cfg LLMConfig, payload map[string]any, opera
 	if err == nil {
 		err = fmt.Errorf("classifier response content was empty")
 	}
-	if normalizedThinking(cfg.Thinking) == "disabled" || !shouldRetryWithoutThinking(err) {
+	if !supportsThinkingFallback(cfg) || !shouldRetryWithoutThinking(err) {
 		if !shouldRetryClassifierRequest(err) {
 			return "", err
 		}
@@ -398,7 +449,7 @@ func requestJSONContentWithFallback(cfg LLMConfig, payload map[string]any, opera
 		},
 	})
 	fallbackPayload := clonePayload(payload)
-	fallbackPayload["thinking"] = map[string]string{"type": "disabled"}
+	applyProviderControls(cfg, fallbackPayload, true)
 	content, fallbackErr := requestJSONContentWithRetries(cfg, fallbackPayload, operation, "thinking_disabled", 1)
 	if fallbackErr != nil {
 		_, _ = logging.WriteDefault(logging.Event{
@@ -428,8 +479,15 @@ func requestJSONContentWithFallback(cfg LLMConfig, payload map[string]any, opera
 }
 
 func requestJSONContentWithRetries(cfg LLMConfig, payload map[string]any, operation string, phase string, startAttempt int) (string, error) {
+	ctx := cfg.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var lastErr error
 	for attempt := startAttempt; attempt <= classifierMaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		content, err := requestJSONContent(cfg, payload, operation, attempt)
 		if err == nil {
 			if strings.TrimSpace(content) != "" {
@@ -442,7 +500,13 @@ func requestJSONContentWithRetries(cfg LLMConfig, payload map[string]any, operat
 			break
 		}
 		logRequestRetry(cfg.Model, operation, phase, attempt, err)
-		time.Sleep(time.Duration(attempt) * 250 * time.Millisecond)
+		timer := time.NewTimer(time.Duration(attempt) * 250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", ctx.Err()
+		case <-timer.C:
+		}
 	}
 	return "", lastErr
 }
@@ -640,6 +704,97 @@ func normalizedThinking(value string) string {
 		return "disabled"
 	}
 	return strings.TrimSpace(value)
+}
+
+// TestConnection sends one tiny structured request using the exact provider adapter used by classification.
+func TestConnection(cfg LLMConfig) error {
+	ctx := cfg.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		return fmt.Errorf("classifier API key is required")
+	}
+	payload := map[string]any{
+		"model": cfg.Model,
+		"messages": []map[string]string{
+			{"role": "system", "content": "Return only a JSON object with the boolean field ok."},
+			{"role": "user", "content": "Return {\"ok\":true}."},
+		},
+		"temperature":     0,
+		"max_tokens":      32,
+		"response_format": map[string]string{"type": "json_object"},
+	}
+	applyProviderControls(cfg, payload, false)
+	content, err := requestJSONContentWithFallback(cfg, payload, "connection_test")
+	if err != nil {
+		return err
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(content), &decoded); err != nil {
+		return fmt.Errorf("parse classifier connection test response: %w", err)
+	}
+	ok, valid := decoded["ok"].(bool)
+	if !valid || !ok {
+		return fmt.Errorf("classifier connection test response did not contain ok")
+	}
+	return nil
+}
+
+func applyProviderControls(cfg LLMConfig, payload map[string]any, forceDisabled bool) {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	model := strings.ToLower(strings.TrimSpace(cfg.Model))
+	if provider == "" {
+		switch {
+		case model == "glm-5.3-flash" || strings.Contains(model, "glm-5.3-flash"):
+			provider = "zhipu"
+		case strings.Contains(model, "deepseek"):
+			provider = "deepseek"
+		}
+	}
+	if forceDisabled {
+		payload["thinking"] = map[string]string{"type": "disabled"}
+		delete(payload, "reasoning_effort")
+		return
+	}
+	if provider == "zhipu" || model == "glm-5.3-flash" {
+		payload["thinking"] = map[string]string{"type": "enabled"}
+		payload["reasoning_effort"] = "low"
+		// GLM accepts temperature, but do_sample=false makes classification deterministic.
+		payload["do_sample"] = false
+		return
+	}
+	if provider == "deepseek" || model == "deepseek-v4-flash" {
+		payload["thinking"] = map[string]string{"type": "disabled"}
+		delete(payload, "reasoning_effort")
+		return
+	}
+	thinking := normalizedThinking(cfg.Thinking)
+	payload["thinking"] = map[string]string{"type": thinking}
+	if effort := strings.TrimSpace(cfg.ReasoningEffort); effort != "" {
+		payload["reasoning_effort"] = effort
+	}
+}
+
+func supportsThinkingFallback(cfg LLMConfig) bool {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	model := strings.ToLower(strings.TrimSpace(cfg.Model))
+	if provider == "zhipu" || provider == "deepseek" {
+		return false
+	}
+	if model == "glm-5.3-flash" || strings.Contains(model, "glm-5.3-flash") || model == "deepseek-v4-flash" {
+		return false
+	}
+	return normalizedThinking(cfg.Thinking) != "disabled"
+}
+
+func isManagedClassifierProvider(cfg LLMConfig) bool {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	model := strings.ToLower(strings.TrimSpace(cfg.Model))
+	return provider == "deepseek" || provider == "zhipu" || model == "deepseek-v4-flash" || model == "glm-5.3-flash"
 }
 
 func shouldRetryWithoutThinking(err error) bool {

@@ -1,6 +1,7 @@
 package feeds
 
 import (
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ type FetchProgressFunc func(current int, total int, label string)
 type VerifyHostFunc func(requests []VerificationRequest) VerificationResult
 
 type FetchOptions struct {
+	Context          context.Context
 	MaxPapers        int
 	SelectedFeedURLs []string
 	OverrideBodies   map[string][]byte
@@ -295,6 +297,13 @@ func filterSubscriptionsByURLs(subscriptions []Subscription, selectedURLs []stri
 
 // FetchAll reads configured feeds, fetches them, and normalizes entries into paper candidates.
 func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return FetchResult{}, err
+	}
 	subscriptions, err := ReadSubscriptions(feedsPath)
 	if err != nil {
 		return FetchResult{}, err
@@ -319,6 +328,9 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 		VerificationRequests: []VerificationRequest{},
 	}
 	for index := 0; index < len(subscriptions); index++ {
+		if err := ctx.Err(); err != nil {
+			return FetchResult{}, err
+		}
 		subscription := subscriptions[index]
 		result.FeedURLs = append(result.FeedURLs, subscription.URL)
 		label := fetchProgressLabel(subscription.Journal, subscription.URL)
@@ -342,6 +354,9 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 						}
 					}
 					result.Papers = append(result.Papers, resolveHostVerification(requests, opts, &result)...)
+					if err := ctx.Err(); err != nil {
+						return FetchResult{}, err
+					}
 					index = nextIndex - 1
 					continue
 				}
@@ -358,6 +373,9 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 		}
 		rememberFeedBody(subscription.URL, opts.BodyCache, fetched.Body)
 		result.Papers = append(result.Papers, fetched.Papers...)
+	}
+	if err := ctx.Err(); err != nil {
+		return FetchResult{}, err
 	}
 	if opts.MaxPapers > 0 && len(result.Papers) > opts.MaxPapers {
 		_, _ = logging.WriteDefault(logging.Event{
@@ -470,6 +488,13 @@ type fetchedFeed struct {
 }
 
 func fetchFeed(url string, opts FetchOptions) (fetchedFeed, error) {
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return fetchedFeed{}, err
+	}
 	if body, ok := feedOverrideBody(url, opts.OverrideBodies); ok {
 		papers, err := parseFeedBody(url, 0, body)
 		return fetchedFeed{Papers: papers, Body: body}, err
@@ -485,7 +510,7 @@ func fetchFeed(url string, opts FetchOptions) (fetchedFeed, error) {
 	var lastErr error
 	for attempt := 1; attempt <= attemptCount; attempt++ {
 		attempted = attempt
-		fetched, statusCode, challenge, retryable, err := fetchFeedAttempt(url, attempt)
+		fetched, statusCode, challenge, retryable, err := fetchFeedAttemptWithContext(ctx, url, attempt)
 		if err == nil {
 			return fetched, nil
 		}
@@ -499,7 +524,13 @@ func fetchFeed(url string, opts FetchOptions) (fetchedFeed, error) {
 		if !retryable || attempt == attemptCount {
 			break
 		}
-		time.Sleep(fetchRetryBackoffs[attempt-1])
+		timer := time.NewTimer(fetchRetryBackoffs[attempt-1])
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fetchedFeed{}, ctx.Err()
+		case <-timer.C:
+		}
 	}
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "warning",
@@ -518,7 +549,14 @@ func fetchFeed(url string, opts FetchOptions) (fetchedFeed, error) {
 }
 
 func fetchFeedAttempt(url string, attempt int) (fetchedFeed, int, bool, bool, error) {
-	request, err := http.NewRequest(http.MethodGet, url, nil)
+	return fetchFeedAttemptWithContext(context.Background(), url, attempt)
+}
+
+func fetchFeedAttemptWithContext(ctx context.Context, url string, attempt int) (fetchedFeed, int, bool, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fetchedFeed{}, 0, false, false, err
 	}

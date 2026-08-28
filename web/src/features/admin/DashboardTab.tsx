@@ -174,6 +174,7 @@ export function DashboardTab({
   onReclassifyFeedback,
   onReclassifyRecent,
   onRunSync,
+  onStopSync,
   onStartVerification,
   onSubmitVerificationXML,
   verificationSubmitting,
@@ -191,6 +192,7 @@ export function DashboardTab({
   onReclassifyFeedback: () => void;
   onReclassifyRecent: () => void;
   onRunSync: (feedURLs?: string[]) => void;
+  onStopSync: (jobID: string) => Promise<void> | void;
   onStartVerification: (job: JobInfo) => void;
   onSubmitVerificationXML: (job: JobInfo, xml: string) => Promise<void> | void;
   verificationSubmitting: boolean;
@@ -201,6 +203,7 @@ export function DashboardTab({
   const [selectedSyncFeedURLs, setSelectedSyncFeedURLs] = React.useState<string[]>([]);
   const [llmUsage, setLLMUsage] = React.useState<LLMUsageRecord[]>([]);
   const [llmUsageError, setLLMUsageError] = React.useState<string | null>(null);
+  const [stoppingSync, setStoppingSync] = React.useState(false);
   const latestJob = jobs[0] ?? null;
   const activeSyncJob = jobs.find((job) => job.job_type === "sync" && ["queued", "running", "waiting_for_user"].includes(job.status)) ?? null;
   const verificationJob = jobs.find((job) => job.status === "waiting_for_user" && job.verification_required) ?? null;
@@ -234,6 +237,12 @@ export function DashboardTab({
     onRunSync(selected.length > 0 && selected.length < savedSyncFeedURLs.length ? selected : undefined);
   };
 
+  const stopSync = () => {
+    if (!activeSyncJob || activeSyncJob.cancel_requested || stoppingSync) return;
+    setStoppingSync(true);
+    void Promise.resolve(onStopSync(activeSyncJob.id)).catch(() => undefined).finally(() => setStoppingSync(false));
+  };
+
   return (
     <div className="mt-5 space-y-5">
       <Card className="rounded-md border border-(--line) bg-(--paper-accent) shadow-none">
@@ -243,6 +252,11 @@ export function DashboardTab({
             {!hasFeeds ? <p className="mb-3 text-sm leading-6 text-muted">Add and save at least one RSS feed before running a manual sync.</p> : null}
             <div className="flex flex-wrap gap-2">
               <Button isDisabled={!hasFeeds || Boolean(activeSyncJob)} size="sm" onPress={runSync}>{activeSyncJob ? "Sync running" : "Sync"}</Button>
+              {activeSyncJob ? (
+                <Button isDisabled={stoppingSync || Boolean(activeSyncJob.cancel_requested)} size="sm" variant="danger" onPress={stopSync}>
+                  {stoppingSync || activeSyncJob.cancel_requested ? "Stopping…" : "Stop sync"}
+                </Button>
+              ) : null}
               <Button size="sm" variant="outline" onPress={onReclassifyRecent}>Reclassify recent 50</Button>
               <Button size="sm" variant="outline" onPress={onReclassifyFeedback}>Reclassify feedback papers</Button>
               <Button size="sm" variant="ghost" onPress={onReclassifyAll}>Reclassify all</Button>

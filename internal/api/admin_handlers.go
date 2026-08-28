@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/yyngfive/scirssagent/internal/feeds"
@@ -33,20 +34,22 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	selectedFeedURLs, err := validateSelectedFeedURLs(s.settings.FeedsPath, payload.FeedURLs)
+	serverSettings := s.snapshotSettings()
+	selectedFeedURLs, err := validateSelectedFeedURLs(serverSettings.FeedsPath, payload.FeedURLs)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	job, reused := launchVerificationAwareSyncJob(
-		s.settings,
-		func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc, usage *llmusage.Collector) (map[string]any, error) {
-			summary, err := runSyncFunc(s.settings, jobruntime.RunOptions{
+		serverSettings,
+		func(ctx context.Context, progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc, usage *llmusage.Collector) (map[string]any, error) {
+			summary, err := runSyncFunc(serverSettings, jobruntime.RunOptions{
 				SelectedFeedURLs:  selectedFeedURLs,
 				FeedBodyOverrides: overrides,
 				SkippedFeeds:      skippedFeeds,
 				VerifyFeedHost:    verifyHost,
 				Usage:             usage,
+				Context:           ctx,
 			}, progress)
 			if err != nil {
 				return nil, err
@@ -122,23 +125,24 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "limit must be between 1 and 500.")
 		return
 	}
+	serverSettings := s.snapshotSettings()
 	job := launchLocalJob(
-		s.settings,
+		serverSettings,
 		"reclassify",
 		"job.started",
 		"Job queued.",
 		"pipeline.metadata.enriching",
 		"Getting metadata for papers to reclassify.",
 		func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
-			paperIDs, err := selectReclassifyPaperIDsFunc(s.settings, payload.Scope, payload.Limit)
+			paperIDs, err := selectReclassifyPaperIDsFunc(serverSettings, payload.Scope, payload.Limit)
 			if err != nil {
 				return nil, err
 			}
-			reclassified, err := reclassifyPaperIDsFunc(s.settings, paperIDs, progress, usage)
+			reclassified, err := reclassifyPaperIDsFunc(serverSettings, paperIDs, progress, usage)
 			if err != nil {
 				return nil, err
 			}
-			reportCount, err := rebuildLatestReportFunc(s.settings, progress)
+			reportCount, err := rebuildLatestReportFunc(serverSettings, progress)
 			if err != nil {
 				return nil, err
 			}
@@ -161,10 +165,20 @@ func (s *Server) handleAdminJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminJobByID(w http.ResponseWriter, r *http.Request) {
+	rawID := strings.TrimPrefix(r.URL.Path, "/api/admin/jobs/")
+	if strings.HasSuffix(rawID, "/cancel") {
+		jobID := strings.TrimSuffix(rawID, "/cancel")
+		if jobID == "" || strings.Contains(jobID, "/") {
+			writeError(w, http.StatusNotFound, "Job not found.")
+			return
+		}
+		s.handleAdminJobCancel(w, r, jobID)
+		return
+	}
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	jobID := strings.TrimPrefix(r.URL.Path, "/api/admin/jobs/")
+	jobID := rawID
 	if jobID == "" || strings.Contains(jobID, "/") {
 		writeError(w, http.StatusNotFound, "Job not found.")
 		return
@@ -175,6 +189,30 @@ func (s *Server) handleAdminJobByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, job)
+}
+
+func (s *Server) handleAdminJobCancel(w http.ResponseWriter, r *http.Request, jobID string) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	job, requested, exists := requestJobCancellation(jobID)
+	if !exists {
+		writeError(w, http.StatusNotFound, "Job not found.")
+		return
+	}
+	if job.JobType != "sync" {
+		writeError(w, http.StatusBadRequest, "Only sync jobs can be stopped.")
+		return
+	}
+	if !isActiveJobStatus(job.Status) {
+		writeJSON(w, http.StatusOK, map[string]any{"job": job, "cancel_requested": false, "already_terminal": true})
+		return
+	}
+	if !requested {
+		writeError(w, http.StatusConflict, "Sync job is no longer cancellable.")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"job": job, "cancel_requested": true})
 }
 
 func (s *Server) handleAdminLLMUsage(w http.ResponseWriter, r *http.Request) {

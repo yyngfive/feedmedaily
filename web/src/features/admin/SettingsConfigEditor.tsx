@@ -57,21 +57,27 @@ function toFieldGroups(fields: SettingsConfigField[]) {
   return order.map((section) => ({section, fields: groups.get(section) ?? []}));
 }
 
-export function SettingsConfigEditor({
-  fields,
-  intro,
-  saving,
-  saveLabel = "Save local settings",
-  title = "Local configuration",
-  onSave,
-}: {
+export type SettingsConfigEditorHandle = {
+  getPayload: () => Record<string, SettingsConfigUpdate>;
+};
+
+export const SettingsConfigEditor = React.forwardRef<SettingsConfigEditorHandle, {
   fields: SettingsConfigField[];
   intro?: React.ReactNode;
   saving: boolean;
   saveLabel?: string;
+  showSaveAction?: boolean;
   title?: string;
   onSave: (fields: Record<string, SettingsConfigUpdate>) => Promise<void>;
-}) {
+}>(function SettingsConfigEditor({
+  fields,
+  intro,
+  saving,
+  saveLabel = "Save local settings",
+  showSaveAction = true,
+  title = "Local configuration",
+  onSave,
+}, ref) {
   const [values, setValues] = React.useState<Record<string, string>>({});
   const [secretValues, setSecretValues] = React.useState<Record<string, string>>({});
   const [secretClears, setSecretClears] = React.useState<Record<string, boolean>>({});
@@ -94,7 +100,7 @@ export function SettingsConfigEditor({
 
   const groups = React.useMemo(() => toFieldGroups(fields), [fields]);
 
-  const submit = async () => {
+  const buildPayload = React.useCallback(() => {
     const payload: Record<string, SettingsConfigUpdate> = {};
     fields.forEach((field) => {
       if (field.secret) {
@@ -107,8 +113,12 @@ export function SettingsConfigEditor({
       }
       payload[field.key] = {value: values[field.key] ?? ""};
     });
-    await onSave(payload);
-  };
+    return payload;
+  }, [fields, secretClears, secretValues, values]);
+
+  React.useImperativeHandle(ref, () => ({getPayload: buildPayload}), [buildPayload]);
+
+  const submit = async () => onSave(buildPayload());
 
   return (
     <div className="space-y-4">
@@ -123,9 +133,11 @@ export function SettingsConfigEditor({
             </p>
             {intro}
           </div>
-          <Button isDisabled={saving} size="sm" onPress={() => void submit()}>
-            {saving ? "Saving..." : saveLabel}
-          </Button>
+          {showSaveAction ? (
+            <Button isDisabled={saving} size="sm" onPress={() => void submit()}>
+              {saving ? "Saving..." : saveLabel}
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -223,4 +235,4 @@ export function SettingsConfigEditor({
       ))}
     </div>
   );
-}
+});

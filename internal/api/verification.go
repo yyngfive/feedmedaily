@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	neturl "net/url"
 	"strings"
@@ -58,7 +60,7 @@ const (
 	verificationMethodBrowserManual = "browser_manual"
 )
 
-func launchVerificationAwareSyncJob(settings config.Settings, run func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc, usage *llmusage.Collector) (map[string]any, error)) (jobInfo, bool) {
+func launchVerificationAwareSyncJob(settings config.Settings, run func(context.Context, jobruntime.ProgressFunc, map[string][]byte, map[string]string, feeds.VerifyHostFunc, *llmusage.Collector) (map[string]any, error)) (jobInfo, bool) {
 	job := jobInfo{
 		ID:         nextJobID(),
 		JobType:    "sync",
@@ -83,9 +85,15 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 		job.LogPath = path
 		storeJob(job)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	registerJobCancellation(job.ID, cancel)
 
 	go func() {
-		usage := llmusage.NewCollector(settings.DeepSeekPricing)
+		defer func() {
+			unregisterJobCancellation(job.ID)
+			cancel()
+		}()
+		usage := llmusage.NewCollector(settings.LLMPricing)
 		started := nowFunc().UTC()
 		logJobEvent(settings.LogsDir, &job, "info", "started", "pipeline.feeds.fetching", "Fetching RSS feeds.", "", nil)
 		updateJob(job.ID, func(current *jobInfo) {
@@ -109,10 +117,10 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 			})
 		}
 
-		runWithUsage := func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error) {
-			return run(progress, overrides, skippedFeeds, verifyHost, usage)
+		runWithUsage := func(runCtx context.Context, progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error) {
+			return run(runCtx, progress, overrides, skippedFeeds, verifyHost, usage)
 		}
-		result, err := runVerificationAwareSync(settings, job.ID, "", progress, runWithUsage, verificationAwareSyncCallbacks{
+		result, err := runVerificationAwareSyncContext(ctx, settings, job.ID, "", progress, runWithUsage, verificationAwareSyncCallbacks{
 			OnWaiting: func(pending *pendingVerification) {
 				logJobEvent(settings.LogsDir, &job, "warning", "waiting_for_user", "pipeline.feeds.verification_required", "A protected feed requires manual verification.", "", map[string]any{
 					"verification_target":   pending.Target,
@@ -222,12 +230,20 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 				})
 			},
 		})
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			finishCancelledSyncJob(settings, &job, usage)
+			return
+		}
 		if err == nil {
 			warningCount := countWarnings(result)
 			finished := nowFunc().UTC()
 			summary := finalizeLLMUsage(settings, job.ID, "sync", "completed", usage, finished)
-			logJobEvent(settings.LogsDir, &job, "info", "completed", "sync.completed", "Completed.", "", result)
+			completed := true
 			updateJob(job.ID, func(current *jobInfo) {
+				if current.CancelRequested || ctx.Err() != nil {
+					completed = false
+					return
+				}
 				current.Status = "completed"
 				current.MessageKey = "sync.completed"
 				current.Message = summarizeResult("sync", result) + usageMessage(summary)
@@ -244,12 +260,21 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 				current.VerificationMethod = ""
 				current.VerificationSessionState = ""
 			})
+			if !completed {
+				finishCancelledSyncJob(settings, &job, usage)
+				return
+			}
+			logJobEvent(settings.LogsDir, &job, "info", "completed", "sync.completed", "Completed.", "", result)
 			return
 		}
 		finished := nowFunc().UTC()
 		summary := finalizeLLMUsage(settings, job.ID, "sync", "failed", usage, finished)
-		logJobEvent(settings.LogsDir, &job, "error", "failed", "sync.failed", "", err.Error(), nil)
+		failed := true
 		updateJob(job.ID, func(current *jobInfo) {
+			if current.CancelRequested || ctx.Err() != nil {
+				failed = false
+				return
+			}
 			current.Status = "failed"
 			current.MessageKey = "sync.failed"
 			current.Error = err.Error()
@@ -264,10 +289,40 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(progress 
 			current.VerificationMethod = ""
 			current.VerificationSessionState = ""
 		})
+		if !failed {
+			finishCancelledSyncJob(settings, &job, usage)
+			return
+		}
+		logJobEvent(settings.LogsDir, &job, "error", "failed", "sync.failed", "", err.Error(), nil)
 		return
 	}()
 
 	return job, false
+}
+
+func finishCancelledSyncJob(settings config.Settings, job *jobInfo, usage *llmusage.Collector) {
+	finished := nowFunc().UTC()
+	summary := finalizeLLMUsage(settings, job.ID, "sync", "cancelled", usage, finished)
+	logJobEvent(settings.LogsDir, job, "info", "cancelled", "sync.cancelled", "Sync stopped.", "", nil)
+	updateJob(job.ID, func(current *jobInfo) {
+		current.Status = "cancelled"
+		current.MessageKey = "sync.cancelled"
+		current.Message = "Sync stopped."
+		current.Error = ""
+		current.Result = nil
+		current.LLMUsage = &summary
+		current.WarningCount = 0
+		clearJobProgress(current)
+		current.FinishedAt = &finished
+		current.CancelRequested = true
+		current.VerificationRequired = false
+		current.VerificationTarget = ""
+		current.VerificationFeedURL = ""
+		current.VerificationJournal = ""
+		current.VerificationHost = ""
+		current.VerificationMethod = ""
+		current.VerificationSessionState = ""
+	})
 }
 
 func storePendingVerification(jobID string, request feeds.VerificationRequest) *pendingVerification {
@@ -329,10 +384,21 @@ func deletePendingVerification(id string) {
 }
 
 func waitForVerification(pending *pendingVerification, timeout time.Duration) verificationResult {
+	return waitForVerificationContext(context.Background(), pending, timeout)
+}
+
+func waitForVerificationContext(ctx context.Context, pending *pendingVerification, timeout time.Duration) verificationResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case result := <-pending.Result:
 		return result
-	case <-time.After(timeout):
+	case <-ctx.Done():
+		return verificationResult{Warning: "sync cancellation requested", Err: ctx.Err()}
+	case <-timer.C:
 		return verificationResult{
 			Status:  "timeout",
 			Warning: "the verification window timed out before RSS XML was captured",

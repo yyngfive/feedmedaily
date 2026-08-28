@@ -3,6 +3,7 @@ import React from "react";
 
 import {statusMessage} from "../../app/utils";
 import type {
+  ClassifierModelsResponse,
   ClassificationProfile,
   JobInfo,
   ProfileProposal,
@@ -12,14 +13,10 @@ import type {
 import {TextAreaField, TextInputField} from "../../shared/components/FormFields";
 import {SelectField} from "../../shared/components/SelectField";
 import {StatusBanner, type StatusTone} from "../../shared/components/StatusBanner";
+import {ClassifierModelsEditor, classifierModelsDraftHasRequiredKeys, classifierModelsUpdateFromDraft, createClassifierModelsDraft, type ClassifierModelsDraft} from "../admin/ClassifierModelsEditor";
 
 const aiAdvancedKeys = [
-  "SCIRSS_CLASSIFIER_API_KEY",
-  "SCIRSS_CLASSIFIER_BASE_URL",
-  "SCIRSS_CLASSIFIER_MODEL",
-  "SCIRSS_CLASSIFIER_THINKING",
   "SCIRSS_CLASSIFIER_BATCH_SIZE",
-  "SCIRSS_PROFILE_API_KEY",
   "SCIRSS_PROFILE_BASE_URL",
   "SCIRSS_PROFILE_MODEL",
   "SCIRSS_PROFILE_THINKING",
@@ -73,10 +70,6 @@ function fieldsForKeys(fields: SettingsConfigField[], keys: string[]) {
   });
 }
 
-function isOverrideKey(fieldKey: string) {
-  return fieldKey === "SCIRSS_CLASSIFIER_API_KEY" || fieldKey === "SCIRSS_PROFILE_API_KEY";
-}
-
 function createDraft(profile: ClassificationProfile): ProfileDraft {
   return {
     name: profile.meta.name,
@@ -113,32 +106,16 @@ function draftToProfile(profile: ClassificationProfile, draft: ProfileDraft): Cl
 function buildSettingsPayload(
   fields: SettingsConfigField[],
   values: Record<string, string>,
-  sharedApiKey: string,
+  profileApiKey: string,
 ): Record<string, SettingsConfigUpdate> {
   const payload: Record<string, SettingsConfigUpdate> = {};
-  const shared = sharedApiKey.trim();
+  const profileKey = profileApiKey.trim();
 
   fields.forEach((field) => {
     const rawValue = values[field.key] ?? "";
     const trimmedValue = rawValue.trim();
 
     if (field.secret) {
-      if (field.key === "SCIRSS_CLASSIFIER_API_KEY") {
-        if (trimmedValue) {
-          payload[field.key] = {value: trimmedValue};
-        } else if (shared) {
-          payload[field.key] = {value: shared};
-        }
-        return;
-      }
-      if (field.key === "SCIRSS_PROFILE_API_KEY") {
-        if (trimmedValue) {
-          payload[field.key] = {value: trimmedValue};
-        } else if (shared) {
-          payload[field.key] = {value: shared};
-        }
-        return;
-      }
       if (trimmedValue) {
         payload[field.key] = {value: trimmedValue};
       }
@@ -148,28 +125,9 @@ function buildSettingsPayload(
     payload[field.key] = {value: trimmedValue};
   });
 
+  if (profileKey) payload.SCIRSS_PROFILE_API_KEY = {value: profileKey};
+
   return payload;
-}
-
-function sharedKeySummary(
-  classifierField: SettingsConfigField | undefined,
-  profileField: SettingsConfigField | undefined,
-): string | null {
-  const configuredClassifier = Boolean(classifierField?.configured);
-  const configuredProfile = Boolean(profileField?.configured);
-  if (!configuredClassifier && !configuredProfile) {
-    return null;
-  }
-
-  if (configuredClassifier && configuredProfile) {
-    return "Leave blank to keep the current model keys.";
-  }
-
-  if (configuredClassifier) {
-    return "Leave blank to keep the current classifier key.";
-  }
-
-  return "Leave blank to keep the current profile key.";
 }
 
 function SettingFieldRow({
@@ -182,10 +140,8 @@ function SettingFieldRow({
   onChange: (value: string) => void;
 }) {
   const placeholder = field.secret
-    ? field.configured
-      ? "Leave blank to keep the current secret"
-      : isOverrideKey(field.key)
-        ? "Leave blank to use the shared API key"
+      ? field.configured
+        ? "Leave blank to keep the current secret"
         : "Paste your API key"
     : field.default_value ?? "";
 
@@ -440,6 +396,7 @@ function ProposalDraftCard({
 
 export function Onboarding({
   busy,
+  classifierModels,
   configFields,
   configSaving,
   jobs,
@@ -447,9 +404,11 @@ export function Onboarding({
   onRejectProposal,
   onSaveSettings,
   onSaveAndBootstrap,
+  onTestClassifierModel,
   proposals,
 }: {
   busy: boolean;
+  classifierModels: ClassifierModelsResponse;
   configFields: SettingsConfigField[];
   configSaving: boolean;
   jobs: JobInfo[];
@@ -457,15 +416,19 @@ export function Onboarding({
   onRejectProposal: (proposalId: number) => Promise<ActionResult>;
   onSaveSettings: (
     fields: Record<string, SettingsConfigUpdate>,
+    classifierModels: ReturnType<typeof classifierModelsUpdateFromDraft>,
   ) => Promise<{message: string; ok: boolean; tone: StatusTone}>;
   onSaveAndBootstrap: (
     fields: Record<string, SettingsConfigUpdate>,
+    classifierModels: ReturnType<typeof classifierModelsUpdateFromDraft>,
     interestDescription: string,
   ) => Promise<{message: string; ok: boolean; tone: StatusTone}>;
+  onTestClassifierModel: (modelID: string, apiKey?: string) => Promise<JobInfo>;
   proposals: ProfileProposal[];
 }) {
   const [interestDescription, setInterestDescription] = React.useState("");
-  const [sharedApiKey, setSharedApiKey] = React.useState("");
+  const [profileApiKey, setProfileApiKey] = React.useState("");
+  const [classifierDraft, setClassifierDraft] = React.useState<ClassifierModelsDraft>(() => createClassifierModelsDraft(classifierModels));
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const [advancedValues, setAdvancedValues] = React.useState<Record<string, string>>(() =>
     createInitialFieldValues(configFields),
@@ -498,17 +461,9 @@ export function Onboarding({
     () => fieldsForKeys(configFields, aiAdvancedKeys),
     [configFields],
   );
-  const classifierApiKeyField = React.useMemo(
-    () => configFields.find((field) => field.key === "SCIRSS_CLASSIFIER_API_KEY"),
-    [configFields],
-  );
   const profileApiKeyField = React.useMemo(
     () => configFields.find((field) => field.key === "SCIRSS_PROFILE_API_KEY"),
     [configFields],
-  );
-  const sharedKeyHint = React.useMemo(
-    () => sharedKeySummary(classifierApiKeyField, profileApiKeyField),
-    [classifierApiKeyField, profileApiKeyField],
   );
   const zoteroFields = React.useMemo(
     () => fieldsForKeys(configFields, zoteroKeys),
@@ -532,6 +487,22 @@ export function Onboarding({
   React.useEffect(() => {
     setAdvancedValues(createInitialFieldValues(configFields));
   }, [configFields]);
+
+  React.useEffect(() => {
+    const next = createClassifierModelsDraft(classifierModels);
+    next.reuseDeepSeekKeyForProfile = !profileApiKeyField?.configured &&
+      next.enabledModelIds.includes("deepseek-v4-flash") &&
+      Boolean(classifierModels.models.find((model) => model.id === "deepseek-v4-flash")?.configured);
+    setClassifierDraft(next);
+  }, [classifierModels, profileApiKeyField?.configured]);
+
+  const profileReady = Boolean(profileApiKey.trim()) || Boolean(profileApiKeyField?.configured);
+  const deepSeekModel = classifierModels.models.find((model) => model.id === "deepseek-v4-flash");
+  const deepSeekReady = classifierDraft.enabledModelIds.includes("deepseek-v4-flash") &&
+    (Boolean(deepSeekModel?.configured) || Boolean(classifierDraft.credentials["deepseek-v4-flash"]?.value));
+  const classifierSelectionValid = classifierDraft.enabledModelIds.length > 0 && classifierDraft.enabledModelIds.includes(classifierDraft.defaultModelId);
+  const classifierKeysReady = classifierModelsDraftHasRequiredKeys(classifierDraft, classifierModels);
+  const canGenerate = classifierSelectionValid && classifierKeysReady && Boolean(interestDescription.trim()) && (profileReady || (classifierDraft.reuseDeepSeekKeyForProfile && deepSeekReady));
 
   React.useEffect(() => {
     const currentPendingProposal = pendingProposal;
@@ -559,12 +530,13 @@ export function Onboarding({
     setSettingsMessage(null);
     setProposalMessage(null);
     const result = await onSaveAndBootstrap(
-      buildSettingsPayload(editableSettingsFields, advancedValues, sharedApiKey),
+      buildSettingsPayload(editableSettingsFields, advancedValues, profileApiKey),
+      classifierModelsUpdateFromDraft(classifierDraft),
       interestDescription.trim(),
     );
     setSettingsMessage({tone: result.tone, text: result.message});
     if (result.ok) {
-      setSharedApiKey("");
+      setProfileApiKey("");
     }
   };
 
@@ -572,11 +544,12 @@ export function Onboarding({
     setSettingsMessage(null);
     setProposalMessage(null);
     const result = await onSaveSettings(
-      buildSettingsPayload(editableSettingsFields, advancedValues, sharedApiKey),
+      buildSettingsPayload(editableSettingsFields, advancedValues, profileApiKey),
+      classifierModelsUpdateFromDraft(classifierDraft),
     );
     setSettingsMessage({tone: result.tone, text: result.message});
     if (result.ok) {
-      setSharedApiKey("");
+      setProfileApiKey("");
     }
   };
 
@@ -634,28 +607,38 @@ export function Onboarding({
                 value={interestDescription}
                 onChange={setInterestDescription}
               />
-              <TextInputField
-                className="p-2"
-                description={
-                  <>
-                    DeepSeek is the default provider. Get and fund your key at{" "}
-                    <a
-                      className="underline underline-offset-2"
-                      href="https://platform.deepseek.com/"
-                      rel="noopener noreferrer"
-                      target="_blank"
-                    >
-                      platform.deepseek.com
-                    </a>
-                    .
-                  </>
-                }
-                label="LLM API Key"
-                placeholder={sharedKeyHint ? "Leave blank to keep the current model keys" : "sk-..."}
-                type="password"
-                value={sharedApiKey}
-                onChange={setSharedApiKey}
-              />
+              <div className="space-y-5 p-2">
+                <ClassifierModelsEditor
+                  draft={classifierDraft}
+                  jobs={jobs}
+                  models={classifierModels}
+                  onChange={setClassifierDraft}
+                  onTest={onTestClassifierModel}
+                  profileConfigured={Boolean(profileApiKeyField?.configured)}
+                  showReuse
+                />
+                <TextInputField
+                  description={
+                    <>
+                      Profile generation uses DeepSeek V4 Pro with its own key. Get and fund a key at{" "}
+                      <a
+                        className="underline underline-offset-2"
+                        href="https://platform.deepseek.com/"
+                        rel="noopener noreferrer"
+                        target="_blank"
+                      >
+                        platform.deepseek.com
+                      </a>
+                      .
+                    </>
+                  }
+                  label="Profile generation — DeepSeek V4 Pro API key"
+                  placeholder={profileApiKeyField?.configured ? "Leave blank to keep the current Profile key" : "Paste Profile API key"}
+                  type="password"
+                  value={profileApiKey}
+                  onChange={setProfileApiKey}
+                />
+              </div>
 
               {latestBootstrapJob ? (
                 <StatusBanner
@@ -680,14 +663,14 @@ export function Onboarding({
             </Card.Content>
             <Card.Footer className="flex flex-wrap items-center justify-end gap-3">
               <Button
-                isDisabled={busy || configSaving || bootstrapRunning}
+                isDisabled={busy || configSaving || bootstrapRunning || !classifierSelectionValid || !classifierKeysReady}
                 variant="outline"
                 onPress={() => void handleSaveSettings()}
               >
                 {configSaving ? "Saving..." : "Save Settings"}
               </Button>
               <Button
-                isDisabled={busy || configSaving || bootstrapRunning || !interestDescription.trim()}
+                isDisabled={busy || configSaving || bootstrapRunning || !canGenerate}
                 onPress={() => void handleSaveAndGenerate()}
               >
                 {configSaving ? "Saving..." : bootstrapRunning ? "Generating..." : "Save and Generate"}
