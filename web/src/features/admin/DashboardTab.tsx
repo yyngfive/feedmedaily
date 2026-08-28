@@ -79,16 +79,16 @@ function LatestJobPanel({feeds, job}: {feeds: FeedSubscription[]; job: JobInfo})
       ) : null}
       {job.error ? <p className="mt-3 text-rose-700">{job.error}</p> : null}
       {errors.length > 0 ? (
-        <div className="mt-3 space-y-2">
-          <p className="font-medium text-(--ink)">Warnings</p>
-          {errors.map((item, index) => (
-            <div key={`${item.url}-${index}`} className="rounded-md border border-(--line) px-3 py-2">
-              <p className="font-medium text-(--ink)">{item.label}</p>
-              {item.url ? <p className="break-all text-xs text-muted">{item.url}</p> : null}
-              <p className="mt-1 leading-6 text-(--body)">{item.detail}</p>
-            </div>
-          ))}
-        </div>
+        <details className="mt-3 rounded-md border border-(--line)">
+          <summary className="cursor-pointer list-none px-3 py-2 font-medium text-(--ink)">Warnings ({errors.length})</summary>
+          <div className="space-y-2 border-t border-(--line) p-3">{errors.map((item, index) => (
+              <div key={`${item.url}-${index}`}>
+                <p className="font-medium text-(--ink)">{item.label}</p>
+                {item.url ? <p className="break-all text-xs text-muted">{item.url}</p> : null}
+                <p className="mt-1 leading-6 text-(--body)">{item.detail}</p>
+              </div>
+          ))}</div>
+        </details>
       ) : job.message ? (
         <p className="mt-3 leading-6 text-(--body)">{job.message}</p>
       ) : null}
@@ -244,114 +244,76 @@ export function DashboardTab({
   };
 
   return (
-    <div className="mt-5 space-y-5">
-      <Card className="rounded-md border border-(--line) bg-(--paper-accent) shadow-none">
-        <Card.Header><h3 className="text-xl font-semibold text-(--ink)">Dashboard</h3></Card.Header>
-        <Card.Content className="space-y-6">
-          <section className="border-b border-(--line) py-5">
-            {!hasFeeds ? <p className="mb-3 text-sm leading-6 text-muted">Add and save at least one RSS feed before running a manual sync.</p> : null}
-            <div className="flex flex-wrap gap-2">
-              <Button isDisabled={!hasFeeds || Boolean(activeSyncJob)} size="sm" onPress={runSync}>{activeSyncJob ? "Sync running" : "Sync"}</Button>
-              {activeSyncJob ? (
-                <Button isDisabled={stoppingSync || Boolean(activeSyncJob.cancel_requested)} size="sm" variant="danger" onPress={stopSync}>
-                  {stoppingSync || activeSyncJob.cancel_requested ? "Stopping…" : "Stop sync"}
-                </Button>
-              ) : null}
-              <Button size="sm" variant="outline" onPress={onReclassifyRecent}>Reclassify recent 50</Button>
-              <Button size="sm" variant="outline" onPress={onReclassifyFeedback}>Reclassify feedback papers</Button>
-              <Button size="sm" variant="ghost" onPress={onReclassifyAll}>Reclassify all</Button>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-(--line) pb-4">
+        <div><h2 className="text-xl font-semibold text-(--ink)">Dashboard</h2><p className="mt-1 text-sm text-muted">Run maintenance tasks and review recent activity.</p></div>
+        {activeSyncJob ? <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-900">Sync · {activeSyncJob.status}</span> : <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-900">Ready</span>}
+      </div>
+
+      {verificationJob ? <VerificationPanel job={verificationJob} submitting={verificationSubmitting} submitError={verificationSubmitError} xml={verificationXML} onXMLChange={setVerificationXML} onOpenInBrowser={() => onOpenVerificationInBrowser(verificationJob)} onReopen={() => onStartVerification(verificationJob)} onSubmitXML={() => void onSubmitVerificationXML(verificationJob, verificationXML)} /> : null}
+
+      <section className="border-b border-(--line) pb-6">
+        <h3 className="text-sm font-semibold text-(--ink)">Sync</h3>
+        {!hasFeeds ? <p className="mt-2 text-sm leading-6 text-muted">Add and save at least one RSS feed before running a manual sync.</p> : null}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button isDisabled={!hasFeeds || Boolean(activeSyncJob)} size="sm" onPress={runSync}>{activeSyncJob ? "Sync running" : "Sync now"}</Button>
+          {activeSyncJob ? <Button isDisabled={stoppingSync || Boolean(activeSyncJob.cancel_requested)} size="sm" variant="danger" onPress={stopSync}>{stoppingSync || activeSyncJob.cancel_requested ? "Stopping…" : "Stop sync"}</Button> : null}
+        </div>
+        {hasFeeds ? (
+          <details className="mt-4 rounded-md border border-(--line)">
+            <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-(--ink)">Target specific feeds</summary>
+            <div className="border-t border-(--line) p-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <TextInputField hideLabel className="min-w-60 flex-1" label="Search feeds for targeted sync" placeholder="Search feeds" value={syncFeedQuery} onChange={setSyncFeedQuery} />
+                <Button size="sm" variant="outline" onPress={() => setSelectedSyncFeedURLs(savedSyncFeedURLs)}>Select all</Button>
+                <Button isDisabled={selectedSyncFeedURLs.length === 0} size="sm" variant="ghost" onPress={() => setSelectedSyncFeedURLs([])}>Clear</Button>
+              </div>
+              <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
+                {syncFeedMatches.length === 0 ? <p className="rounded-md border border-(--line) px-3 py-3 text-sm text-muted">No feed matches.</p> : syncFeedMatches.map((feed) => {
+                  const url = feed.url.trim();
+                  return <CheckboxRow key={feed.client_id ?? url} checked={selectedSyncFeedURLs.includes(url)} className="rounded-md border border-(--line) px-3 py-2 text-sm" onChange={() => setSelectedSyncFeedURLs((current) => current.includes(url) ? current.filter((item) => item !== url) : [...current, url])}><span className="min-w-0"><span className="font-medium text-(--ink)">{feed.journal}</span><span className="mt-1 block break-all text-xs text-muted">{feed.url}</span></span></CheckboxRow>;
+                })}
+              </div>
             </div>
-            {hasFeeds ? (
-              <div className="mt-4 w-full">
-                <div className="flex flex-wrap items-end gap-2">
-                  <TextInputField hideLabel className="min-w-60 flex-1" label="Search feeds for targeted sync" placeholder="Search feeds" value={syncFeedQuery} onChange={setSyncFeedQuery} />
-                  <Button size="sm" variant="outline" onPress={() => setSelectedSyncFeedURLs(savedSyncFeedURLs)}>Select all</Button>
-                  <Button isDisabled={selectedSyncFeedURLs.length === 0} size="sm" variant="ghost" onPress={() => setSelectedSyncFeedURLs([])}>Clear</Button>
-                </div>
-                <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
-                  {syncFeedMatches.length === 0 ? <p className="rounded-md border border-(--line) px-3 py-3 text-sm text-muted">No feed matches.</p> : syncFeedMatches.map((feed) => {
-                    const url = feed.url.trim();
-                    return (
-                      <CheckboxRow key={feed.client_id ?? url} checked={selectedSyncFeedURLs.includes(url)} className="rounded-md border border-(--line) px-3 py-2 text-sm" onChange={() => setSelectedSyncFeedURLs((current) => current.includes(url) ? current.filter((item) => item !== url) : [...current, url])}>
-                        <span className="min-w-0"><span className="font-medium text-(--ink)">{feed.journal}</span><span className="mt-1 block break-all text-xs text-muted">{feed.url}</span></span>
-                      </CheckboxRow>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
-          </section>
-          <section className="border-b border-(--line) pb-5">
-            <h3 className="text-sm font-semibold text-(--ink)">Service</h3>
-            <p className="mt-2 text-sm leading-6 text-muted">
-              {appMeta ? appMeta.process_running ? "Backend process is running." : "Backend process state is unknown." : "Release metadata is unavailable."}
-              {appMeta?.server_url ? <span className="ml-2">{appMeta.server_url}</span> : null}
-            </p>
-            {latestJob ? <LatestJobPanel feeds={feeds} job={latestJob} /> : <p className="mt-3 text-sm text-muted">No tracked jobs yet.</p>}
-          </section>
-          <section className="border-b border-(--line) pb-5">
-            <h3 className="text-sm font-semibold text-(--ink)">LLM usage · last 3 days</h3>
-            {llmUsageError ? <p className="mt-2 text-sm text-rose-700">{llmUsageError}</p> : llmUsage.length === 0 ? (
-              <p className="mt-2 text-sm text-muted">No completed LLM jobs in this window.</p>
-            ) : (
-              <div className="mt-3 overflow-x-auto">
-                <table className="w-full min-w-[45rem] text-left text-xs">
-                  <thead className="border-b border-(--line) text-muted"><tr><th className="py-2 pr-3 font-medium">Time</th><th className="py-2 pr-3 font-medium">Job</th><th className="py-2 pr-3 font-medium">Model</th><th className="py-2 pr-3 font-medium">Requests</th><th className="py-2 pr-3 font-medium">Tokens · hit / miss / output</th><th className="py-2 font-medium">Cost</th></tr></thead>
-                  <tbody>{llmUsage.map((item) => (
-                    <tr key={item.job_id} className="border-b border-(--line)/70 last:border-0">
-                      <td className="py-2 pr-3 whitespace-nowrap text-muted">{formatJobTime(item.completed_at)}</td>
-                      <td className="py-2 pr-3 text-(--ink)">{item.job_type} · {item.status}</td>
-                      <td className="py-2 pr-3 text-muted">{item.model || "Unknown"}</td>
-                      <td className="py-2 pr-3 text-muted">{formatTokenCount(item.request_count)}</td>
-                      <td className="py-2 pr-3 whitespace-nowrap text-muted">{formatTokenCount(item.prompt_cache_hit_tokens)} / {formatTokenCount(item.prompt_cache_miss_tokens)} / {formatTokenCount(item.completion_tokens)}</td>
-                      <td className="py-2 whitespace-nowrap text-(--ink)">{usageCostLabel(item)}</td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            )}
-          </section>
+          </details>
+        ) : null}
+        <details className="mt-4 rounded-md border border-(--line)">
+          <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-(--ink)">Reclassify papers</summary>
+          <div className="flex flex-wrap gap-2 border-t border-(--line) p-3">
+            <Button size="sm" variant="outline" onPress={onReclassifyRecent}>Recent 50</Button>
+            <Button size="sm" variant="outline" onPress={onReclassifyFeedback}>Feedback papers</Button>
+            <Button size="sm" variant="ghost" onPress={onReclassifyAll}>All papers</Button>
+          </div>
+        </details>
+      </section>
+
+      <section className="border-b border-(--line) pb-6">
+        <h3 className="text-sm font-semibold text-(--ink)">Latest activity</h3>
+        {latestJob ? <LatestJobPanel feeds={feeds} job={latestJob} /> : <p className="mt-3 text-sm text-muted">No tracked jobs yet.</p>}
+      </section>
+
+      <details className="rounded-md border border-(--line)">
+        <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-(--ink)">Cost and usage · last 3 days</summary>
+        <div className="border-t border-(--line) p-4">
+          {llmUsageError ? <p className="text-sm text-rose-700">{llmUsageError}</p> : llmUsage.length === 0 ? <p className="text-sm text-muted">No completed LLM jobs in this window.</p> : (
+            <div className="overflow-x-auto"><table className="w-full min-w-[45rem] text-left text-xs"><thead className="border-b border-(--line) text-muted"><tr><th className="py-2 pr-3 font-medium">Time</th><th className="py-2 pr-3 font-medium">Job</th><th className="py-2 pr-3 font-medium">Model</th><th className="py-2 pr-3 font-medium">Requests</th><th className="py-2 pr-3 font-medium">Tokens · hit / miss / output</th><th className="py-2 font-medium">Cost</th></tr></thead><tbody>{llmUsage.map((item) => <tr key={item.job_id} className="border-b border-(--line)/70 last:border-0"><td className="py-2 pr-3 whitespace-nowrap text-muted">{formatJobTime(item.completed_at)}</td><td className="py-2 pr-3 text-(--ink)">{item.job_type} · {item.status}</td><td className="py-2 pr-3 text-muted">{item.model || "Unknown"}</td><td className="py-2 pr-3 text-muted">{formatTokenCount(item.request_count)}</td><td className="py-2 pr-3 whitespace-nowrap text-muted">{formatTokenCount(item.prompt_cache_hit_tokens)} / {formatTokenCount(item.prompt_cache_miss_tokens)} / {formatTokenCount(item.completion_tokens)}</td><td className="py-2 whitespace-nowrap text-(--ink)">{usageCostLabel(item)}</td></tr>)}</tbody></table></div>
+          )}
+        </div>
+      </details>
+
+      <details className="rounded-md border border-(--line)">
+        <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-(--ink)">Diagnostics</summary>
+        <div className="space-y-6 border-t border-(--line) p-4">
           <section>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold text-(--ink)">Runtime</h3>
-              {appMeta ? <span className="text-sm text-muted">{appMeta.name} v{appMeta.version} · {appMeta.mode}</span> : null}
-            </div>
-            {appMeta ? (
-              <div className="mt-3 space-y-2 text-sm leading-6 text-muted">
-                <p className="break-all">Server: <code>{appMeta.server_url ?? "Unavailable"}</code></p>
-                <p className="break-all">Install dir: <code>{appMeta.install_dir}</code></p>
-                <p className="break-all">Static dir: <code>{appMeta.static_dir}</code></p>
-                <p className="break-all">Data: <code>{appMeta.data_dir}</code></p>
-                <p className="break-all">Logs: <code>{appMeta.logs_dir}</code></p>
-                <p className="break-all">Config: <code>{appMeta.config_dir ?? "Unavailable"}</code></p>
-              </div>
-            ) : <p className="mt-3 text-sm text-muted">Release metadata is unavailable.</p>}
+            <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-semibold text-(--ink)">Runtime</h3>{appMeta ? <span className="text-sm text-muted">{appMeta.name} v{appMeta.version} · {appMeta.mode}</span> : null}</div>
+            {appMeta ? <div className="mt-3 space-y-2 text-sm leading-6 text-muted"><p className="break-all">Server: <code>{appMeta.server_url ?? "Unavailable"}</code></p><p className="break-all">Install dir: <code>{appMeta.install_dir}</code></p><p className="break-all">Static dir: <code>{appMeta.static_dir}</code></p><p className="break-all">Data: <code>{appMeta.data_dir}</code></p><p className="break-all">Logs: <code>{appMeta.logs_dir}</code></p><p className="break-all">Config: <code>{appMeta.config_dir ?? "Unavailable"}</code></p></div> : <p className="mt-3 text-sm text-muted">Release metadata is unavailable.</p>}
           </section>
           <section className="border-t border-(--line) pt-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold text-(--ink)">Update check</h3>
-              <Button isDisabled={appUpdateChecking} size="sm" variant="outline" onPress={onCheckForUpdates}>
-                <span className="inline-flex items-center gap-2">{appUpdateChecking ? <Spinner color="current" size="sm" /> : null}{appUpdateChecking ? "Checking..." : "Check for updates"}</span>
-              </Button>
-            </div>
-            {appUpdate ? (
-              <div className="mt-3 text-sm leading-6 text-muted">
-                <p>Status: {appUpdate.status}</p>
-                {appUpdate.latest_version ? <p>Latest version: {appUpdate.latest_version}</p> : null}
-                {lastCheckedLabel ? <p>Last checked: {lastCheckedLabel}</p> : null}
-                {appUpdate.detail ? <p>{appUpdate.detail}</p> : null}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {appUpdate.download_url ? <a className="rounded-md border border-(--line) px-3 py-2 text-sm text-(--ink)" href={appUpdate.download_url} rel="noreferrer" target="_blank">Download installer</a> : null}
-                  {appUpdate.release_notes_url ? <a className="rounded-md border border-(--line) px-3 py-2 text-sm text-(--ink)" href={appUpdate.release_notes_url} rel="noreferrer" target="_blank">Release notes</a> : null}
-                </div>
-              </div>
-            ) : <p className="mt-3 text-sm text-muted">Update information is unavailable.</p>}
+            <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-semibold text-(--ink)">Update check</h3><Button isDisabled={appUpdateChecking} size="sm" variant="outline" onPress={onCheckForUpdates}><span className="inline-flex items-center gap-2">{appUpdateChecking ? <Spinner color="current" size="sm" /> : null}{appUpdateChecking ? "Checking..." : "Check for updates"}</span></Button></div>
+            {appUpdate ? <div className="mt-3 text-sm leading-6 text-muted"><p>Status: {appUpdate.status}</p>{appUpdate.latest_version ? <p>Latest version: {appUpdate.latest_version}</p> : null}{lastCheckedLabel ? <p>Last checked: {lastCheckedLabel}</p> : null}{appUpdate.detail ? <p>{appUpdate.detail}</p> : null}<div className="mt-3 flex flex-wrap gap-2">{appUpdate.download_url ? <a className="rounded-md border border-(--line) px-3 py-2 text-sm text-(--ink)" href={appUpdate.download_url} rel="noreferrer" target="_blank">Download installer</a> : null}{appUpdate.release_notes_url ? <a className="rounded-md border border-(--line) px-3 py-2 text-sm text-(--ink)" href={appUpdate.release_notes_url} rel="noreferrer" target="_blank">Release notes</a> : null}</div></div> : <p className="mt-3 text-sm text-muted">Update information is unavailable.</p>}
           </section>
-          {verificationJob ? (
-            <VerificationPanel job={verificationJob} submitting={verificationSubmitting} submitError={verificationSubmitError} xml={verificationXML} onXMLChange={setVerificationXML} onOpenInBrowser={() => onOpenVerificationInBrowser(verificationJob)} onReopen={() => onStartVerification(verificationJob)} onSubmitXML={() => void onSubmitVerificationXML(verificationJob, verificationXML)} />
-          ) : null}
-        </Card.Content>
-      </Card>
+        </div>
+      </details>
     </div>
   );
 }

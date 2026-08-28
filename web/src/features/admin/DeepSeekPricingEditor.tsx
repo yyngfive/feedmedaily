@@ -4,6 +4,10 @@ import React from "react";
 import {TextInputField} from "../../shared/components/FormFields";
 import type {SettingsConfigField, SettingsConfigUpdate} from "../../shared/types";
 
+export type DeepSeekPricingEditorHandle = {
+  getPayload: () => Record<string, SettingsConfigUpdate>;
+};
+
 const pricingRows = [
   {model: "V4 Flash", tier: "Off-peak", prefix: "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK"},
   {model: "V4 Flash", tier: "Peak", prefix: "SCIRSS_DEEPSEEK_FLASH_PEAK"},
@@ -19,15 +23,17 @@ const priceColumns = [
 ] as const;
 
 // DeepSeek 定价用紧凑表格编辑，保存后的费率只用于后续新任务。
-export function DeepSeekPricingEditor({
-  fields,
-  saving,
-  onSave,
-}: {
+export const DeepSeekPricingEditor = React.forwardRef<DeepSeekPricingEditorHandle, {
   fields: SettingsConfigField[];
   saving: boolean;
+  showSaveAction?: boolean;
   onSave: (fields: Record<string, SettingsConfigUpdate>) => Promise<void>;
-}) {
+}>(function DeepSeekPricingEditor({
+  fields,
+  saving,
+  showSaveAction = true,
+  onSave,
+}, ref) {
   const [values, setValues] = React.useState<Record<string, string>>({});
   const fieldsByKey = React.useMemo(
     () => new Map(fields.map((field) => [field.key, field])),
@@ -38,13 +44,14 @@ export function DeepSeekPricingEditor({
     setValues(Object.fromEntries(fields.map((field) => [field.key, field.value ?? field.default_value ?? ""])));
   }, [fields]);
 
-  const submit = async () => {
-    await onSave(Object.fromEntries(
+  const buildPayload = React.useCallback(() => Object.fromEntries(
       fields
         .filter((field) => field.source !== "environment")
         .map((field) => [field.key, {value: values[field.key] ?? ""}]),
-    ));
-  };
+    ), [fields, values]);
+  React.useImperativeHandle(ref, () => ({getPayload: buildPayload}), [buildPayload]);
+
+  const submit = async () => onSave(buildPayload());
   const hasEnvironmentOverride = fields.some((field) => field.source === "environment");
 
   return (
@@ -65,9 +72,9 @@ export function DeepSeekPricingEditor({
             </p>
           ) : null}
         </div>
-        <Button isDisabled={saving || fields.length === 0} size="sm" onPress={() => void submit()}>
+        {showSaveAction ? <Button isDisabled={saving || fields.length === 0} size="sm" onPress={() => void submit()}>
           {saving ? "Saving..." : "Save pricing"}
-        </Button>
+        </Button> : null}
       </div>
 
       <div className="mt-4 overflow-x-auto">
@@ -110,4 +117,4 @@ export function DeepSeekPricingEditor({
       </div>
     </section>
   );
-}
+});

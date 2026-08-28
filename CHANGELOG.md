@@ -17,6 +17,7 @@ Changes since `0.5.0`:
 
 ### Changed
 
+- Simplified the Settings drawer around a stable sidebar and document-style pages. Dashboard now prioritizes active work and progressively reveals targeted sync, reclassification, usage, and diagnostics; Feeds uses a cancellable local draft and a focused add flow; Profile always shows its open feedback count without blocking zero-feedback proposal generation; Model hides tuning and pricing behind Advanced while saving once; App presents Zotero connection state, a collection picker, compact scheduling, and advanced local fields.
 - Changed new daily sync schedules from `10:00` to local time `12:30`, which is in DeepSeek's current midday off-peak window on China Standard Time, while preserving existing saved schedules.
 - Reduced the default classifier batch size from 10 to 5 and kept classifier thinking disabled by default.
 - Changed classifier requests to use provider adapters: DeepSeek V4 Flash always disables thinking without `reasoning_effort`; GLM-5.3-Flash always enables thinking with `reasoning_effort=low` and deterministic sampling, without cross-provider fallback. Jobs snapshot the selected classifier model when queued.

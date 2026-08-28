@@ -1,4 +1,4 @@
-import {Button, Card} from "@heroui/react";
+import {Button} from "@heroui/react";
 import React from "react";
 
 import type {
@@ -17,7 +17,7 @@ import type {
 } from "../../shared/types";
 import {AppTab} from "./AppTab";
 import {DashboardTab} from "./DashboardTab";
-import {DeepSeekPricingEditor} from "./DeepSeekPricingEditor";
+import {DeepSeekPricingEditor, type DeepSeekPricingEditorHandle} from "./DeepSeekPricingEditor";
 import {ClassifierModelsEditor, classifierModelsDraftHasRequiredKeys, classifierModelsUpdateFromDraft, createClassifierModelsDraft, type ClassifierModelsDraft} from "./ClassifierModelsEditor";
 import {FeedsTab} from "./FeedsTab";
 import {ProfileTab} from "./ProfileTab";
@@ -50,26 +50,22 @@ export type AdminPanelProps = {
   feedsSaving: boolean;
   hasFeeds: boolean;
   jobs: JobInfo[];
-  onAddFeed: () => void;
-  onAddFeeds: (feeds: FeedSubscription[]) => void;
   onApplyProposal: (id: number, selection?: {accepted_change_ids: string[]; rejected_change_ids: string[]}) => Promise<void> | void;
   onCheckForUpdates: () => void;
   onClose: () => void;
   onDeleteFeedback: (id: number) => void;
   onDeleteScheduler: () => Promise<void>;
-  onFeedChange: (index: number, field: "journal" | "url", value: string) => void;
   onGenerateProposal: () => void;
   onOpenVerificationInBrowser: (job: JobInfo) => void;
   onReclassifyAll: () => void;
   onReclassifyFeedback: () => void;
   onReclassifyRecent: () => void;
   onRejectProposal: (id: number) => void;
-  onRemoveFeed: (index: number) => void;
   onRunSync: (feedURLs?: string[]) => void;
   onStopSync: (jobID: string) => Promise<void> | void;
   onSaveConfig: (fields: Record<string, SettingsConfigUpdate>, classifierModels?: ClassifierModelsUpdate) => Promise<void>;
   onTestClassifierModel: (modelID: string, apiKey?: string) => Promise<JobInfo>;
-  onSaveFeeds: () => void;
+  onSaveFeeds: (feeds?: FeedSubscription[]) => Promise<boolean | void> | boolean | void;
   onSaveProfile: (profile: ClassificationProfile) => Promise<void> | void;
   onSaveScheduler: (dailyTime: string) => Promise<void>;
   onStartVerification: (job: JobInfo) => void;
@@ -102,42 +98,102 @@ export function AdminPanel(props: AdminPanelProps) {
   );
 
   const [classifierDraft, setClassifierDraft] = React.useState<ClassifierModelsDraft>(() => createClassifierModelsDraft(props.classifierModels));
-  const modelSettingsRef = React.useRef<SettingsConfigEditorHandle | null>(null);
+  const profileModelRef = React.useRef<SettingsConfigEditorHandle | null>(null);
+  const advancedModelRef = React.useRef<SettingsConfigEditorHandle | null>(null);
+  const pricingRef = React.useRef<DeepSeekPricingEditorHandle | null>(null);
+  const dialogRef = React.useRef<HTMLElement | null>(null);
+  const closeButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const restoreFocusRef = React.useRef<HTMLElement | null>(null);
+  const onCloseRef = React.useRef(props.onClose);
+  onCloseRef.current = props.onClose;
+  const primaryModelFields = React.useMemo(
+    () => modelFields.filter((field) => field.key === "SCIRSS_PROFILE_API_KEY"),
+    [modelFields],
+  );
+  const advancedModelFields = React.useMemo(
+    () => modelFields.filter((field) => field.key !== "SCIRSS_PROFILE_API_KEY"),
+    [modelFields],
+  );
   React.useEffect(() => {
     setClassifierDraft(createClassifierModelsDraft(props.classifierModels));
   }, [props.classifierModels]);
 
   React.useEffect(() => {
     if (!props.open) return;
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const originalBodyOverflow = document.body.style.overflow;
     const originalDocumentOverflow = document.documentElement.style.overflow;
     document.body.style.overflow = "hidden";
     document.documentElement.style.overflow = "hidden";
+    window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCloseRef.current();
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])"))
+        .filter((element) => element.getClientRects().length > 0);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.body.style.overflow = originalBodyOverflow;
       document.documentElement.style.overflow = originalDocumentOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+      restoreFocusRef.current?.focus();
     };
   }, [props.open]);
 
-  return (
-    <div className={props.open ? "fixed inset-0 z-40 flex justify-end overscroll-contain bg-slate-900/20" : "hidden"}>
-      <aside className="h-full w-full max-w-[min(1040px,96vw)] overflow-auto overscroll-contain border-l border-(--line) bg-(--paper) p-5 shadow-xl">
-        <div className="w-full">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 space-y-3">
-              <h2 className="mt-2 mb-4 text-2xl font-semibold text-(--ink)">Settings</h2>
-              <div className="flex flex-wrap gap-2">
-                {adminTabs.map((tab) => (
-                  <Button key={tab.id} size="sm" variant={props.activeTab === tab.id ? "secondary" : "outline"} onPress={() => props.onTabChange(tab.id)}>
-                    {tab.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-            <Button size="sm" variant="ghost" onPress={props.onClose}>Close</Button>
-          </div>
+  const saveModelSettings = () => {
+    const fields = {
+      ...(profileModelRef.current?.getPayload() ?? {}),
+      ...(advancedModelRef.current?.getPayload() ?? {}),
+      ...(pricingRef.current?.getPayload() ?? {}),
+    };
+    return props.onSaveConfig(fields, classifierModelsUpdateFromDraft(classifierDraft));
+  };
 
-          <div hidden={props.activeTab !== "dashboard"}>
+  return (
+    <div
+      className={props.open ? "fixed inset-0 z-40 flex justify-end overscroll-contain bg-slate-900/20" : "hidden"}
+      onMouseDown={(event) => { if (event.target === event.currentTarget) props.onClose(); }}
+    >
+      <aside ref={dialogRef} aria-labelledby="settings-title" aria-modal="true" className="h-full w-full max-w-[min(1040px,96vw)] overflow-hidden overscroll-contain border-l border-(--line) bg-(--paper) shadow-xl" role="dialog">
+        <header className="flex h-18 items-center justify-between gap-4 border-b border-(--line) px-5">
+          <div>
+            <p className="text-xs font-medium text-muted">FeedMeDaily</p>
+            <h2 id="settings-title" className="text-xl font-semibold text-(--ink)">Settings</h2>
+          </div>
+          <Button ref={closeButtonRef} size="sm" variant="ghost" onPress={props.onClose}>Close</Button>
+        </header>
+
+        <div className="grid h-[calc(100%-4.5rem)] min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[176px_minmax(0,1fr)] md:grid-rows-1">
+          <nav aria-label="Settings sections" className="overflow-x-auto border-b border-(--line) px-3 py-2 md:overflow-y-auto md:border-r md:border-b-0 md:px-3 md:py-4">
+            <div className="flex min-w-max gap-1 md:min-w-0 md:flex-col">
+              {adminTabs.map((tab) => (
+                <Button
+                  key={tab.id}
+                  aria-current={props.activeTab === tab.id ? "page" : undefined}
+                  className="justify-start"
+                  size="sm"
+                  variant={props.activeTab === tab.id ? "secondary" : "ghost"}
+                  onPress={() => props.onTabChange(tab.id)}
+                >
+                  {tab.label}
+                </Button>
+              ))}
+            </div>
+          </nav>
+
+          <main className="min-h-0 overflow-y-auto overscroll-contain px-5 py-5 md:px-6">
+            <div hidden={props.activeTab !== "dashboard"}>
             <DashboardTab
               appMeta={props.appMeta}
               appUpdate={props.appUpdate}
@@ -157,27 +213,29 @@ export function AdminPanel(props: AdminPanelProps) {
               verificationSubmitting={props.verificationSubmitting}
               verificationSubmitError={props.verificationSubmitError}
             />
-          </div>
-          <div hidden={props.activeTab !== "feeds"}>
-            <FeedsTab feeds={props.feeds} feedsSaving={props.feedsSaving} onAddFeed={props.onAddFeed} onAddFeeds={props.onAddFeeds} onFeedChange={props.onFeedChange} onRemoveFeed={props.onRemoveFeed} onSaveFeeds={props.onSaveFeeds} />
-          </div>
-          <div hidden={props.activeTab !== "profile"}>
+            </div>
+            <div hidden={props.activeTab !== "feeds"}>
+              <FeedsTab feeds={props.feeds} feedsSaving={props.feedsSaving} onSaveFeeds={props.onSaveFeeds} />
+            </div>
+            <div hidden={props.activeTab !== "profile"}>
             <ProfileTab feedback={props.feedback} onApplyProposal={props.onApplyProposal} onDeleteFeedback={props.onDeleteFeedback} onGenerateProposal={props.onGenerateProposal} onRejectProposal={props.onRejectProposal} onSaveProfile={props.onSaveProfile} profile={props.profile} profileSaving={props.profileSaving} proposalGenerating={props.proposalGenerating} proposals={props.proposals} />
-          </div>
-          <div className="mt-5 space-y-5" hidden={props.activeTab !== "model"}>
-            <Card className="rounded-md border border-(--line) bg-(--paper-accent) shadow-none">
-              <Card.Header><h3 className="text-xl font-semibold text-(--ink)">Model</h3></Card.Header>
-              <Card.Content>
-                <div className="mb-5 flex justify-start">
+            </div>
+            <div className="space-y-6" hidden={props.activeTab !== "model"}>
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-(--line) pb-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-(--ink)">Model</h2>
+                  <p className="mt-1 text-sm text-muted">Choose the models used for classification and profile generation.</p>
+                </div>
                   <Button
                     isDisabled={props.configSaving || classifierDraft.enabledModelIds.length === 0 || !classifierDraft.enabledModelIds.includes(classifierDraft.defaultModelId) || !classifierModelsDraftHasRequiredKeys(classifierDraft, props.classifierModels)}
                     size="sm"
-                    onPress={() => void props.onSaveConfig(modelSettingsRef.current?.getPayload() ?? {}, classifierModelsUpdateFromDraft(classifierDraft))}
+                    onPress={() => void saveModelSettings()}
                   >
                     {props.configSaving ? "Saving..." : "Save model settings"}
                   </Button>
-                </div>
-                <div className="space-y-4 border-b border-(--line) pb-5">
+              </div>
+              <section className="space-y-4 border-b border-(--line) pb-6">
+                <h3 className="text-sm font-semibold text-(--ink)">Classifier</h3>
                   <ClassifierModelsEditor
                     draft={classifierDraft}
                     jobs={props.jobs}
@@ -185,17 +243,23 @@ export function AdminPanel(props: AdminPanelProps) {
                     onChange={setClassifierDraft}
                     onTest={props.onTestClassifierModel}
                   />
+              </section>
+              <section className="border-b border-(--line) pb-6">
+                <h3 className="mb-3 text-sm font-semibold text-(--ink)">Profile generator</h3>
+                <SettingsConfigEditor ref={profileModelRef} fields={primaryModelFields} hideGroupTitles saving={props.configSaving} showHeader={false} showSaveAction={false} title="Profile generator" onSave={props.onSaveConfig} />
+              </section>
+              <details className="group rounded-md border border-(--line) bg-(--paper-accent)">
+                <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-(--ink)">Advanced model settings</summary>
+                <div className="border-t border-(--line) px-4 py-4">
+                  <SettingsConfigEditor ref={advancedModelRef} fields={advancedModelFields} saving={props.configSaving} showHeader={false} showSaveAction={false} title="Advanced model settings" onSave={props.onSaveConfig} />
+                  <DeepSeekPricingEditor ref={pricingRef} fields={pricingFields} saving={props.configSaving} showSaveAction={false} onSave={props.onSaveConfig} />
                 </div>
-                <div className="pt-5">
-                  <SettingsConfigEditor ref={modelSettingsRef} fields={modelFields} saving={props.configSaving} showSaveAction={false} title="Profile and classifier tuning" onSave={props.onSaveConfig} />
-                </div>
-                <DeepSeekPricingEditor fields={pricingFields} saving={props.configSaving} onSave={props.onSaveConfig} />
-              </Card.Content>
-            </Card>
-          </div>
-          <div hidden={props.activeTab !== "app"}>
-            <AppTab configFields={appFields} configSaving={props.configSaving} onDeleteScheduler={props.onDeleteScheduler} onSaveConfig={props.onSaveConfig} onSaveScheduler={props.onSaveScheduler} scheduler={props.scheduler} schedulerSaving={props.schedulerSaving} />
-          </div>
+              </details>
+            </div>
+            <div hidden={props.activeTab !== "app"}>
+              <AppTab appMeta={props.appMeta} appUpdate={props.appUpdate} configFields={appFields} configSaving={props.configSaving} onDeleteScheduler={props.onDeleteScheduler} onSaveConfig={props.onSaveConfig} onSaveScheduler={props.onSaveScheduler} scheduler={props.scheduler} schedulerSaving={props.schedulerSaving} />
+            </div>
+          </main>
         </div>
       </aside>
     </div>

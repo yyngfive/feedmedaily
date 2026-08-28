@@ -92,16 +92,12 @@ export function App() {
         proposalGenerating={Boolean(data.profileProposalJob)}
         proposals={state.profileProposals}
         onClose={() => state.setAdminOpen(false)}
-        onFeedChange={admin.handleFeedChange}
-        onAddFeed={admin.handleAddFeed}
-        onAddFeeds={admin.handleAddFeeds}
         onCheckForUpdates={() => void data.handleCheckAppUpdate()}
-        onRemoveFeed={admin.handleRemoveFeed}
         onSaveConfig={admin.handleSaveConfig}
         onTestClassifierModel={admin.handleTestClassifierModel}
         onSaveProfile={admin.handleSaveProfile}
         onSaveScheduler={admin.handleSaveScheduler}
-        onSaveFeeds={() => void admin.handleSaveFeeds()}
+        onSaveFeeds={admin.handleSaveFeeds}
         onTabChange={state.setAdminTab}
         onDeleteScheduler={admin.handleDeleteScheduler}
         onGenerateProposal={() => void admin.handleGenerateProposal()}
@@ -159,7 +155,6 @@ export function App() {
           onRunSync={() => void admin.handleRunAdminJob("/api/admin/run")}
           onSelectPaper={(paper) => state.setSelectedId(paper.id)}
           onStartFeedSetup={() => {
-            if (state.feeds.length === 0) admin.handleAddFeed();
             state.setAdminTab("feeds");
             state.setAdminOpen(true);
           }}
