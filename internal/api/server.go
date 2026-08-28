@@ -20,6 +20,7 @@ import (
 
 type Server struct {
 	settings    config.Settings
+	settingsMu  sync.RWMutex
 	version     string
 	shutdown    func()
 	storeMu     sync.RWMutex
@@ -27,6 +28,18 @@ type Server struct {
 	writeStore  *store.Store
 	updateMu    sync.Mutex
 	updateCache *cachedUpdateStatus
+}
+
+func (s *Server) snapshotSettings() config.Settings {
+	s.settingsMu.RLock()
+	defer s.settingsMu.RUnlock()
+	return s.settings
+}
+
+func (s *Server) replaceSettings(settings config.Settings) {
+	s.settingsMu.Lock()
+	s.settings = settings
+	s.settingsMu.Unlock()
 }
 
 type cachedUpdateStatus struct {
@@ -90,6 +103,7 @@ func migrateExistingDatabase(settings config.Settings) {
 }
 
 func (s *Server) getReadStore() (*store.Store, error) {
+	settings := s.snapshotSettings()
 	s.storeMu.RLock()
 	sqliteStore := s.readStore
 	s.storeMu.RUnlock()
@@ -102,7 +116,7 @@ func (s *Server) getReadStore() (*store.Store, error) {
 	if s.readStore != nil {
 		return s.readStore, nil
 	}
-	sqliteStore, err := store.OpenRead(s.settings.DatabasePath)
+	sqliteStore, err := store.OpenRead(settings.DatabasePath)
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +125,7 @@ func (s *Server) getReadStore() (*store.Store, error) {
 }
 
 func (s *Server) getWriteStore() (*store.Store, error) {
+	settings := s.snapshotSettings()
 	s.storeMu.RLock()
 	sqliteStore := s.writeStore
 	s.storeMu.RUnlock()
@@ -123,7 +138,7 @@ func (s *Server) getWriteStore() (*store.Store, error) {
 	if s.writeStore != nil {
 		return s.writeStore, nil
 	}
-	sqliteStore, err := store.OpenWrite(s.settings.DatabasePath)
+	sqliteStore, err := store.OpenWrite(settings.DatabasePath)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +173,7 @@ func (s *Server) cachedUpdateStatus(force bool) map[string]any {
 		return cloneJSONMap(s.updateCache.payload)
 	}
 
-	payload := fetchUpdateStatus(s.settings)
+	payload := fetchUpdateStatus(s.snapshotSettings())
 	ttl := updateStatusSuccessTTL
 	if status, ok := payload["status"].(string); ok && status == "check_failed" {
 		ttl = updateStatusFailureTTL
@@ -179,6 +194,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/app/open", s.handleAppOpen)
 	mux.HandleFunc("/api/app/exit", s.handleAppExit)
 	mux.HandleFunc("/api/settings/config", s.handleSettingsConfig)
+	mux.HandleFunc("/api/settings/classifier-models/test", s.handleClassifierModelTest)
 	mux.HandleFunc("/api/settings/feeds", s.handleSettingsFeeds)
 	mux.HandleFunc("/api/settings/scheduler", s.handleSettingsScheduler)
 	mux.HandleFunc("/api/profile/current", s.handleProfileCurrent)

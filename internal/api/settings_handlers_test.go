@@ -49,6 +49,115 @@ func TestSettingsConfigAPI(t *testing.T) {
 	}
 }
 
+func TestClassifierModelsConfigAPI(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "web", "package.json"), `{"version":"1.2.3"}`)
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
+	writeFile(t, filepath.Join(root, ".env"), "SCIRSS_CLASSIFIER_API_KEY=legacy-secret\nSCIRSS_CLASSIFIER_MODEL=deepseek-v4-flash\n")
+	handler := newTestHandler(t, testSettings(root))
+
+	getRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(getRecorder, httptest.NewRequest(http.MethodGet, "/api/settings/config", nil))
+	if getRecorder.Code != http.StatusOK || contains(getRecorder.Body.String(), "legacy-secret") {
+		t.Fatalf("structured settings response = %d %s", getRecorder.Code, getRecorder.Body.String())
+	}
+	var getPayload struct {
+		ClassifierModels config.ClassifierModelsResponse `json:"classifier_models"`
+	}
+	if err := json.Unmarshal(getRecorder.Body.Bytes(), &getPayload); err != nil {
+		t.Fatal(err)
+	}
+	if getPayload.ClassifierModels.DefaultModelID != config.ClassifierModelDeepSeekV4Flash {
+		t.Fatalf("default classifier model = %q", getPayload.ClassifierModels.DefaultModelID)
+	}
+
+	putBody := strings.NewReader(`{"fields":{},"classifier_models":{"enabled_model_ids":["deepseek-v4-flash","glm-5.3-flash"],"default_model_id":"glm-5.3-flash","credentials":{"deepseek-v4-flash":{"value":"deepseek-new"},"glm-5.3-flash":{"value":"glm-new"}}}}`)
+	putRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(putRecorder, httptest.NewRequest(http.MethodPut, "/api/settings/config", putBody))
+	if putRecorder.Code != http.StatusOK || contains(putRecorder.Body.String(), "deepseek-new") || contains(putRecorder.Body.String(), "glm-new") {
+		t.Fatalf("structured settings update = %d %s", putRecorder.Code, putRecorder.Body.String())
+	}
+	settings, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.ClassifierModel != config.ClassifierModelGLM53Flash || settings.ClassifierAPIKey != "glm-new" {
+		t.Fatalf("updated effective classifier = %#v", settings.EffectiveClassifierModel())
+	}
+
+	unknownBody := strings.NewReader(`{"fields":{},"classifier_models":{"enabled_model_ids":["unknown-model"],"default_model_id":"unknown-model","credentials":{}}}`)
+	unknownRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(unknownRecorder, httptest.NewRequest(http.MethodPut, "/api/settings/config", unknownBody))
+	if unknownRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("unknown model status = %d %s", unknownRecorder.Code, unknownRecorder.Body.String())
+	}
+}
+
+func TestClassifierDefaultChangeOnlyAffectsLaterJobs(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "web", "package.json"), `{"version":"1.2.3"}`)
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
+	writeFile(t, filepath.Join(root, ".env"), "SCIRSS_CLASSIFIER_ENABLED_MODELS=deepseek-v4-flash,glm-5.3-flash\nSCIRSS_CLASSIFIER_DEFAULT_MODEL=deepseek-v4-flash\nSCIRSS_DEEPSEEK_API_KEY=deepseek-key\nSCIRSS_GLM_API_KEY=glm-key\n")
+	restore := stubAPIGlobals(t)
+	defer restore()
+	seenModels := make(chan string, 2)
+	releaseJob := make(chan struct{})
+	runSyncFunc = func(settings config.Settings, _ jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		seenModels <- settings.EffectiveClassifierModelName()
+		<-releaseJob
+		return jobruntime.RunSummary{}, nil
+	}
+	settings, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := newTestHandler(t, settings)
+	launch := func() string {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("sync launch status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var payload struct {
+			Job jobInfo `json:"job"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload.Job.ID
+	}
+
+	firstJobID := launch()
+	select {
+	case model := <-seenModels:
+		if model != config.ClassifierModelDeepSeekV4Flash {
+			t.Fatalf("first job model = %q", model)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first sync did not start")
+	}
+	configBody := strings.NewReader(`{"fields":{},"classifier_models":{"enabled_model_ids":["deepseek-v4-flash","glm-5.3-flash"],"default_model_id":"glm-5.3-flash","credentials":{}}}`)
+	configRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(configRecorder, httptest.NewRequest(http.MethodPut, "/api/settings/config", configBody))
+	if configRecorder.Code != http.StatusOK {
+		t.Fatalf("classifier default update status = %d: %s", configRecorder.Code, configRecorder.Body.String())
+	}
+	close(releaseJob)
+	waitForJobCompletion(t, firstJobID)
+
+	// The first release channel is closed, so a second job can finish immediately too.
+	secondJobID := launch()
+	select {
+	case model := <-seenModels:
+		if model != config.ClassifierModelGLM53Flash {
+			t.Fatalf("later job model = %q", model)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("later sync did not start")
+	}
+	waitForJobCompletion(t, secondJobID)
+}
+
 func TestSettingsFeedsAPI(t *testing.T) {
 	root := t.TempDir()
 	handler := newTestHandler(t, testSettings(root))

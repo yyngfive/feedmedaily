@@ -1,6 +1,8 @@
 package jobs
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ import (
 )
 
 type RunOptions struct {
+	Context           context.Context
 	MaxPapers         int
 	Reclassify        bool
 	SelectedFeedURLs  []string
@@ -54,7 +57,15 @@ var fetchAllFeedsFunc = feeds.FetchAll
 // RunSync executes the end-to-end sync pipeline in Go.
 func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (RunSummary, error) {
 	logging.SetDefaultDir(settings.LogsDir)
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return RunSummary{}, err
+	}
 	fetchResult, err := fetchAllFeedsFunc(settings.FeedsPath, feeds.FetchOptions{
+		Context:          ctx,
 		MaxPapers:        opts.MaxPapers,
 		SelectedFeedURLs: opts.SelectedFeedURLs,
 		OverrideBodies:   opts.FeedBodyOverrides,
@@ -70,6 +81,9 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 		},
 	})
 	if err != nil {
+		return RunSummary{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return RunSummary{}, err
 	}
 	if len(fetchResult.VerificationRequests) > 0 {
@@ -93,6 +107,7 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 	if err != nil {
 		return RunSummary{}, err
 	}
+	cfg.Context = ctx
 
 	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
 	if err != nil {
@@ -105,6 +120,9 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 	inserted := 0
 	updated := 0
 	for _, paper := range fetchResult.Papers {
+		if err := ctx.Err(); err != nil {
+			return RunSummary{}, err
+		}
 		paperID, isNew, err := sqliteStore.UpsertPaper(paper, now)
 		if err != nil {
 			return RunSummary{}, err
@@ -115,6 +133,9 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 		} else {
 			updated++
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return RunSummary{}, err
 	}
 
 	pendingIDs := touchedIDs
@@ -137,8 +158,11 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 			"warnings":    len(fetchResult.Errors),
 		},
 	})
-	classified, classificationWarnings, err := reclassifyExistingPapers(sqliteStore, settings, currentProfile, cfg, pendingIDs, progress)
+	classified, classificationWarnings, err := reclassifyExistingPapersContext(sqliteStore, settings, currentProfile, cfg, pendingIDs, ctx, progress)
 	if err != nil {
+		return RunSummary{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return RunSummary{}, err
 	}
 	reportCount, err := rebuildLatestReportSummary(settings, progress)
@@ -176,11 +200,24 @@ func filterNonSkippedErrors(errors []string, skippedFeeds map[string]string) []s
 }
 
 func reclassifyExistingPapers(sqliteStore *store.Store, settings config.Settings, currentProfile map[string]any, cfg classifier.LLMConfig, paperIDs []int64, progress ProgressFunc) (int, []string, error) {
+	return reclassifyExistingPapersContext(sqliteStore, settings, currentProfile, cfg, paperIDs, context.Background(), progress)
+}
+
+func reclassifyExistingPapersContext(sqliteStore *store.Store, settings config.Settings, currentProfile map[string]any, cfg classifier.LLMConfig, paperIDs []int64, ctx context.Context, progress ProgressFunc) (int, []string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, nil, err
+	}
 	logging.SetDefaultDir(settings.LogsDir)
 	EmitProgress(progress, PercentProgress("pipeline.metadata.enriching", "metadata", 0, len(paperIDs), metadataProgressMessage(0, len(paperIDs))))
 	enrichedPairs := make([]classificationPaperPair, 0, len(paperIDs))
 	now := time.Now().UTC()
 	for _, paperID := range paperIDs {
+		if err := ctx.Err(); err != nil {
+			return 0, nil, err
+		}
 		paper, err := sqliteStore.PaperByID(paperID)
 		if err != nil {
 			return 0, nil, err
@@ -219,6 +256,9 @@ func reclassifyExistingPapers(sqliteStore *store.Store, settings config.Settings
 	classified := 0
 	classificationWarnings := []string{}
 	for start := 0; start < len(enrichedPairs); start += batchSize {
+		if err := ctx.Err(); err != nil {
+			return 0, classificationWarnings, err
+		}
 		end := min(start+batchSize, len(enrichedPairs))
 		batch := enrichedPairs[start:end]
 		batchNumber := start/batchSize + 1
@@ -266,6 +306,13 @@ func reclassifyExistingPapers(sqliteStore *store.Store, settings config.Settings
 }
 
 func classifyAndSaveBatch(sqliteStore *store.Store, component string, batch []classificationPaperPair, currentProfile map[string]any, cfg classifier.LLMConfig) (int, []string, error) {
+	ctx := cfg.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, nil, err
+	}
 	papers := make([]store.Paper, 0, len(batch))
 	for _, pair := range batch {
 		papers = append(papers, pair.Paper)
@@ -273,11 +320,17 @@ func classifyAndSaveBatch(sqliteStore *store.Store, component string, batch []cl
 	results, err := classifier.ClassifyPapers(papers, currentProfile, cfg)
 	if err == nil {
 		for index, result := range results {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return 0, nil, ctxErr
+			}
 			if err := sqliteStore.SaveClassification(batch[index].PaperID, result, time.Now().UTC()); err != nil {
 				return 0, nil, err
 			}
 		}
 		return len(results), nil, nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return 0, nil, err
 	}
 	if len(batch) == 1 {
 		warning := classificationWarning(batch[0].PaperID, err)
@@ -288,8 +341,14 @@ func classifyAndSaveBatch(sqliteStore *store.Store, component string, batch []cl
 	classified := 0
 	warnings := []string{}
 	for _, pair := range batch {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return classified, warnings, ctxErr
+		}
 		results, err := classifier.ClassifyPapers([]store.Paper{pair.Paper}, currentProfile, cfg)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return classified, warnings, err
+			}
 			warning := classificationWarning(pair.PaperID, err)
 			warnings = append(warnings, warning)
 			logClassificationWarning(component, "single_failed", warning, err, 1)

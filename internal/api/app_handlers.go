@@ -38,11 +38,12 @@ func (s *Server) handleAppHealth(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+	settings := s.snapshotSettings()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     "ok",
 		"name":       appruntime.AppPublicName,
 		"version":    s.version,
-		"mode":       s.settings.Mode,
+		"mode":       settings.Mode,
 		"server_url": requestBaseURL(r),
 	})
 }
@@ -51,21 +52,22 @@ func (s *Server) handleAppMeta(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
+	settings := s.snapshotSettings()
 	processRunning := false
-	if state, err := appruntime.ReadState(s.settings.RuntimeStatePath); err == nil && state != nil {
+	if state, err := appruntime.ReadState(settings.RuntimeStatePath); err == nil && state != nil {
 		processRunning = appruntime.ProcessRunning(state.PID)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":                appruntime.AppPublicName,
 		"version":             s.version,
-		"mode":                s.settings.Mode,
-		"install_dir":         s.settings.AppDir,
-		"config_dir":          s.settings.ConfigDir,
-		"tray_instance_id":    appruntime.TrayInstanceID(s.settings.ConfigDir),
-		"data_dir":            s.settings.DataDir,
-		"logs_dir":            s.settings.LogsDir,
-		"static_dir":          s.settings.WebDistDir,
-		"tray_settings_path":  filepath.Join(s.settings.ConfigDir, "tray-settings.json"),
+		"mode":                settings.Mode,
+		"install_dir":         settings.AppDir,
+		"config_dir":          settings.ConfigDir,
+		"tray_instance_id":    appruntime.TrayInstanceID(settings.ConfigDir),
+		"data_dir":            settings.DataDir,
+		"logs_dir":            settings.LogsDir,
+		"static_dir":          settings.WebDistDir,
+		"tray_settings_path":  filepath.Join(settings.ConfigDir, "tray-settings.json"),
 		"server_url":          requestBaseURL(r),
 		"scheduler_task_name": appruntime.SchedulerTaskName,
 		"process_running":     processRunning,
@@ -91,11 +93,12 @@ func (s *Server) handleAppOpen(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid JSON body.")
 		return
 	}
+	settings := s.snapshotSettings()
 	updateStatus := map[string]any(nil)
 	if payload.Target == "download_url" || payload.Target == "release_notes_url" {
 		updateStatus = s.cachedUpdateStatus(false)
 	}
-	target, err := resolveAppOpenTarget(s.settings, payload.Target, requestBaseURL(r), updateStatus)
+	target, err := resolveAppOpenTarget(settings, payload.Target, requestBaseURL(r), updateStatus)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -122,9 +125,10 @@ func (s *Server) handleAppExit(w http.ResponseWriter, r *http.Request) {
 		"detail": "Shutting down the local FeedMeDaily service.",
 	})
 	if s.shutdown != nil {
+		settings := s.snapshotSettings()
 		go func() {
 			time.Sleep(200 * time.Millisecond)
-			_ = appruntime.ClearState(s.settings.RuntimeStatePath)
+			_ = appruntime.ClearState(settings.RuntimeStatePath)
 			s.shutdown()
 		}()
 	}
@@ -140,11 +144,12 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if filePath, ok := staticFileForPath(s.settings.WebDistDir, r.URL.Path); ok {
+	settings := s.snapshotSettings()
+	if filePath, ok := staticFileForPath(settings.WebDistDir, r.URL.Path); ok {
 		http.ServeFile(w, r, filePath)
 		return
 	}
-	indexPath := filepath.Join(s.settings.WebDistDir, "index.html")
+	indexPath := filepath.Join(settings.WebDistDir, "index.html")
 	if fileExists(indexPath) {
 		http.ServeFile(w, r, indexPath)
 		return

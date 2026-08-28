@@ -12,6 +12,8 @@ import (
 const (
 	PricingSnapshotDeepSeekCNY    = "deepseek-cny-2026-08-23-weekdays"
 	PricingSnapshotDeepSeekManual = "deepseek-cny-manual"
+	PricingSnapshotGLM53FlashCNY  = "zhipu-glm-5.3-flash-cny-2026-08-28-promo"
+	PricingSnapshotGLMManual      = "zhipu-glm-cny-manual"
 )
 
 const (
@@ -58,10 +60,12 @@ type TieredRates struct {
 	Peak    TokenRates
 }
 
-type DeepSeekPricing struct {
-	Snapshot string
-	Flash    TieredRates
-	Pro      TieredRates
+type PricingCatalog struct {
+	Snapshot           string
+	Flash              TieredRates
+	Pro                TieredRates
+	GLM53Flash         TokenRates
+	GLM53FlashSnapshot string
 }
 
 type Summary struct {
@@ -81,11 +85,11 @@ type Summary struct {
 type Collector struct {
 	mu      sync.Mutex
 	events  []Event
-	pricing DeepSeekPricing
+	pricing PricingCatalog
 }
 
-func DefaultDeepSeekPricing() DeepSeekPricing {
-	return DeepSeekPricing{
+func DefaultPricing() PricingCatalog {
+	return PricingCatalog{
 		Snapshot: PricingSnapshotDeepSeekCNY,
 		Flash: TieredRates{
 			OffPeak: TokenRates{CacheHitNanoCNYPerToken: 50, CacheMissNanoCNYPerToken: 1_500, CompletionNanoCNYPerToken: 4_500},
@@ -95,11 +99,13 @@ func DefaultDeepSeekPricing() DeepSeekPricing {
 			OffPeak: TokenRates{CacheHitNanoCNYPerToken: 150, CacheMissNanoCNYPerToken: 4_500, CompletionNanoCNYPerToken: 13_500},
 			Peak:    TokenRates{CacheHitNanoCNYPerToken: 300, CacheMissNanoCNYPerToken: 9_000, CompletionNanoCNYPerToken: 27_000},
 		},
+		GLM53Flash:         TokenRates{CacheHitNanoCNYPerToken: 115, CacheMissNanoCNYPerToken: 400, CompletionNanoCNYPerToken: 1_400},
+		GLM53FlashSnapshot: PricingSnapshotGLM53FlashCNY,
 	}
 }
 
-func NewCollector(overrides ...DeepSeekPricing) *Collector {
-	pricing := DefaultDeepSeekPricing()
+func NewCollector(overrides ...PricingCatalog) *Collector {
+	pricing := DefaultPricing()
 	if len(overrides) > 0 && strings.TrimSpace(overrides[0].Snapshot) != "" {
 		pricing = overrides[0]
 	}
@@ -144,7 +150,7 @@ func (c *Collector) Summary() Summary {
 		if operation := strings.TrimSpace(event.Operation); operation != "" {
 			operations[operation] = struct{}{}
 		}
-		rates, ok := deepSeekRates(event.BaseURL, model, event.OccurredAt, c.pricing)
+		rates, ok := providerRates(event.BaseURL, model, event.OccurredAt, c.pricing)
 		if !ok || !event.Usage.CacheBreakdownPresent {
 			summary.PricingStatus = "unavailable"
 			continue
@@ -171,9 +177,20 @@ func (c *Collector) Summary() Summary {
 	return summary
 }
 
-func deepSeekRates(baseURL string, model string, occurredAt time.Time, pricing DeepSeekPricing) (PricingBreakdown, bool) {
+func providerRates(baseURL string, model string, occurredAt time.Time, pricing PricingCatalog) (PricingBreakdown, bool) {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil || !strings.EqualFold(parsed.Hostname(), "api.deepseek.com") {
+	if err != nil {
+		return PricingBreakdown{}, false
+	}
+	if strings.EqualFold(parsed.Hostname(), "open.bigmodel.cn") && strings.EqualFold(strings.TrimSpace(model), "glm-5.3-flash") {
+		return PricingBreakdown{
+			Model: model, Snapshot: pricing.GLM53FlashSnapshot, Tier: "standard",
+			CacheHitNanoCNYPerToken:   pricing.GLM53Flash.CacheHitNanoCNYPerToken,
+			CacheMissNanoCNYPerToken:  pricing.GLM53Flash.CacheMissNanoCNYPerToken,
+			CompletionNanoCNYPerToken: pricing.GLM53Flash.CompletionNanoCNYPerToken,
+		}, true
+	}
+	if !strings.EqualFold(parsed.Hostname(), "api.deepseek.com") {
 		return PricingBreakdown{}, false
 	}
 	beijingTime := occurredAt.In(chinaStandardTime)

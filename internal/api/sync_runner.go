@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 )
 
 type syncExecuteFunc func(progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error)
+type syncExecuteContextFunc func(context.Context, jobruntime.ProgressFunc, map[string][]byte, map[string]string, feeds.VerifyHostFunc) (map[string]any, error)
 
 type verificationAwareSyncCallbacks struct {
 	OnWaiting                 func(*pendingVerification)
@@ -47,19 +49,38 @@ type verificationCallbackAck struct {
 }
 
 func runVerificationAwareSync(settings config.Settings, jobID string, callbackURL string, progress jobruntime.ProgressFunc, run syncExecuteFunc, callbacks verificationAwareSyncCallbacks) (map[string]any, error) {
+	return runVerificationAwareSyncContext(context.Background(), settings, jobID, callbackURL, progress, func(_ context.Context, progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc) (map[string]any, error) {
+		return run(progress, overrides, skippedFeeds, verifyHost)
+	}, callbacks)
+}
+
+func runVerificationAwareSyncContext(ctx context.Context, settings config.Settings, jobID string, callbackURL string, progress jobruntime.ProgressFunc, run syncExecuteContextFunc, callbacks verificationAwareSyncCallbacks) (map[string]any, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	overrideBodies := map[string][]byte{}
 	skippedFeeds := map[string]string{}
 	if strings.TrimSpace(jobID) == "" {
 		jobID = "sync-" + nextJobID()
 	}
 	verifyHost := func(requests []feeds.VerificationRequest) feeds.VerificationResult {
-		return verifyFeedHost(settings, jobID, callbackURL, requests, callbacks)
+		return verifyFeedHostContext(ctx, settings, jobID, callbackURL, requests, callbacks)
 	}
 
-	return run(progress, overrideBodies, skippedFeeds, verifyHost)
+	return run(ctx, progress, overrideBodies, skippedFeeds, verifyHost)
 }
 
 func verifyFeedHost(settings config.Settings, jobID string, callbackURL string, requests []feeds.VerificationRequest, callbacks verificationAwareSyncCallbacks) feeds.VerificationResult {
+	return verifyFeedHostContext(context.Background(), settings, jobID, callbackURL, requests, callbacks)
+}
+
+func verifyFeedHostContext(ctx context.Context, settings config.Settings, jobID string, callbackURL string, requests []feeds.VerificationRequest, callbacks verificationAwareSyncCallbacks) feeds.VerificationResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return feeds.VerificationResult{Warning: "sync cancellation requested"}
+	}
 	groupedRequests := groupVerificationRequests(requests)
 	if len(groupedRequests) == 0 {
 		return feeds.VerificationResult{Warning: "manual verification required but no feed URL was provided"}
@@ -80,12 +101,17 @@ func verifyFeedHost(settings config.Settings, jobID string, callbackURL string, 
 		}
 		return feeds.VerificationResult{Warning: err.Error()}
 	}
+	if err := ctx.Err(); err != nil {
+		terminateVerifierProcess(settings, pending.ID)
+		deletePendingVerification(pending.ID)
+		return feeds.VerificationResult{Warning: "sync cancellation requested"}
+	}
 
 	if callbacks.OnVerificationStarted != nil {
 		callbacks.OnVerificationStarted(pending)
 	}
 
-	resumeResult := waitForVerification(pending, 10*time.Minute)
+	resumeResult := waitForVerificationContext(ctx, pending, 10*time.Minute)
 	deletePendingVerification(pending.ID)
 	if strings.TrimSpace(resumeResult.Warning) != "" {
 		terminateVerifierProcess(settings, pending.ID)

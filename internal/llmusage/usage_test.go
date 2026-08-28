@@ -65,7 +65,7 @@ func TestCollectorUsesOffPeakPricingOnBeijingWeekends(t *testing.T) {
 }
 
 func TestCollectorUsesManualPricingSnapshot(t *testing.T) {
-	pricing := llmusage.DefaultDeepSeekPricing()
+	pricing := llmusage.DefaultPricing()
 	pricing.Snapshot = "deepseek-cny-manual"
 	pricing.Flash.Peak = llmusage.TokenRates{
 		CacheHitNanoCNYPerToken:   200,
@@ -111,6 +111,26 @@ func TestCollectorUsesDeepSeekProPricingAndAggregatesRequests(t *testing.T) {
 	}
 	if len(summary.Operations) != 2 {
 		t.Fatalf("operations = %#v", summary.Operations)
+	}
+}
+
+func TestCollectorPricesOfficialGLM53FlashUsage(t *testing.T) {
+	collector := llmusage.NewCollector()
+	collector.Record(llmusage.Event{
+		BaseURL: "https://open.bigmodel.cn/api/paas/v4", Model: "glm-5.3-flash",
+		Usage: llmusage.ResponseUsage{
+			PromptTokens: 2_000_000, PromptCacheHitTokens: 1_000_000,
+			PromptCacheMissTokens: 1_000_000, CompletionTokens: 1_000_000,
+			CacheBreakdownPresent: true,
+		},
+	})
+
+	summary := collector.Summary()
+	if summary.PricingStatus != "estimated" || summary.EstimatedCostCNY == nil || *summary.EstimatedCostCNY != "1.915000" {
+		t.Fatalf("GLM estimate = %#v", summary)
+	}
+	if len(summary.Pricing) != 1 || summary.Pricing[0].Snapshot != llmusage.PricingSnapshotGLM53FlashCNY || summary.Pricing[0].Tier != "standard" {
+		t.Fatalf("GLM pricing snapshot = %#v", summary.Pricing)
 	}
 }
 

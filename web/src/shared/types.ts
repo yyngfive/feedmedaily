@@ -37,8 +37,37 @@ export type SettingsConfigField = {
   options: SettingOption[];
 };
 
+export type ClassifierModelView = {
+  id: string;
+  provider: string;
+  label: string;
+  base_url: string;
+  thinking: "disabled" | "enabled" | string;
+  reasoning_effort?: string;
+  enabled: boolean;
+  default: boolean;
+  configured: boolean;
+  source: SettingsConfigSource | string;
+  stored_locally: boolean;
+  environment_override: boolean;
+};
+
+export type ClassifierModelsResponse = {
+  models: ClassifierModelView[];
+  enabled_model_ids: string[];
+  default_model_id: string;
+};
+
+export type ClassifierModelsUpdate = {
+  enabled_model_ids: string[];
+  default_model_id: string;
+  credentials: Record<string, SettingsConfigUpdate>;
+  reuse_deepseek_key_for_profile?: boolean;
+};
+
 export type SettingsConfigResponse = {
   fields: SettingsConfigField[];
+  classifier_models: ClassifierModelsResponse;
 };
 
 export type AppMeta = {
@@ -293,6 +322,7 @@ export type JobInfo = {
   id: string;
   job_type: string;
   status: string;
+  cancel_requested?: boolean;
   message_key?: string | null;
   message?: string | null;
   error?: string | null;

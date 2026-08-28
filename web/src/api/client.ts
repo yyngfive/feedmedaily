@@ -3,6 +3,7 @@ import type {
   AppControlTarget,
   AppMeta,
   AppUpdate,
+  ClassifierModelsUpdate,
   ClassificationProfile,
   CurrentProfileResponse,
   FeedSubscription,
@@ -198,17 +199,34 @@ export async function deleteSchedulerSettings(): Promise<SchedulerSettings> {
 
 export async function saveSettingsConfig(
   fields: Record<string, SettingsConfigUpdate>,
+  classifierModels?: ClassifierModelsUpdate,
 ): Promise<SettingsConfigResponse> {
+  const body: {fields: Record<string, SettingsConfigUpdate>; classifier_models?: ClassifierModelsUpdate} = {fields};
+  if (classifierModels) body.classifier_models = classifierModels;
   return localJSONRequest(
     "/api/settings/config",
     {
       method: "PUT",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({fields}),
+      body: JSON.stringify(body),
     },
     "save local settings",
     "Could not save local settings",
   );
+}
+
+export async function testClassifierModel(modelId: string, apiKey?: string): Promise<JobInfo> {
+  const payload = await localJSONRequest<{job: JobInfo}>(
+    "/api/settings/classifier-models/test",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({model_id: modelId, ...(apiKey?.trim() ? {api_key: apiKey.trim()} : {})}),
+    },
+    "test the classifier model connection",
+    "Could not test the classifier model connection",
+  );
+  return payload.job;
 }
 
 export async function saveFeedSubscriptions(
@@ -425,6 +443,16 @@ export async function fetchJob(id: string): Promise<JobInfo> {
     "load job status",
     "Could not load job status",
   );
+}
+
+export async function cancelSyncJob(id: string): Promise<JobInfo> {
+  const payload = await localJSONRequest<{job: JobInfo}>(
+    `/api/admin/jobs/${encodeURIComponent(id)}/cancel`,
+    {method: "POST"},
+    "stop the sync job",
+    "Could not stop the sync job",
+  );
+  return payload.job;
 }
 
 export async function fetchJobs(): Promise<JobInfo[]> {

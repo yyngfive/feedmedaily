@@ -23,7 +23,7 @@ corepack pnpm --dir web build
 
 按测试范围填写 `.env`：
 
-- 分类：`SCIRSS_CLASSIFIER_API_KEY`、`SCIRSS_CLASSIFIER_BASE_URL`、`SCIRSS_CLASSIFIER_MODEL`
+- 分类：`SCIRSS_CLASSIFIER_ENABLED_MODELS`、`SCIRSS_CLASSIFIER_DEFAULT_MODEL`、`SCIRSS_DEEPSEEK_API_KEY`、`SCIRSS_GLM_API_KEY`（旧 `SCIRSS_CLASSIFIER_*` 变量只用于迁移）
 - Profile：`SCIRSS_PROFILE_API_KEY`、`SCIRSS_PROFILE_BASE_URL`、`SCIRSS_PROFILE_MODEL`
 - Zotero：`SCIRSS_ZOTERO_API_KEY`、`SCIRSS_ZOTERO_LIBRARY_TYPE`、`SCIRSS_ZOTERO_LIBRARY_ID`
 
@@ -146,14 +146,18 @@ go run .\cmd\feedmedaily-tray --root .
 检查：
 
 1. 页面显示基础设置和可展开的高级设置。
-2. `Save Settings` 可以只保存本地设置，不强制生成 Profile。
-3. 输入兴趣描述后启动初始 Profile 生成。
-4. job 状态从 queued/running 更新到 completed 或 failed。
-5. 生成成功后自动出现 proposal review，无需刷新页面。
-6. 用户可以编辑初始 Profile 草稿。
-7. Accept 后保存当前 Profile 并进入三栏界面。
-8. Reject 后 proposal 状态更新，页面仍可继续生成新 proposal。
-9. 失败消息只显示一次，不重复出现在多个区域。
+2. `Classification models` 多选至少保留一个模型，`Default classifier` 只列出已选模型。
+3. 每个模型只显示一行“模型名 + API key + Test connection”；默认模型使用与 Filter 一致的下拉样式，并且只列出已有 key 或当前新填 key 的模型。
+4. `Test connection` 进入 `model-test` job，并提示会消耗少量额度；临时 key 不保存。
+5. 选择 DeepSeek 且已有 key 时，一次性复用到 Profile 的选项默认勾选；已有 Profile key 不会被覆盖；仅 GLM 时没有 Profile key 不允许生成。
+6. `Save Settings` 可以只保存本地设置，不强制生成 Profile。
+7. 输入兴趣描述后启动初始 Profile 生成。
+8. job 状态从 queued/running 更新到 completed 或 failed。
+9. 生成成功后自动出现 proposal review，无需刷新页面。
+10. 用户可以编辑初始 Profile 草稿。
+11. Accept 后保存当前 Profile 并进入三栏界面。
+12. Reject 后 proposal 状态更新，页面仍可继续生成新 proposal。
+13. 失败消息只显示一次，不重复出现在多个区域。
 
 ## 7. Settings 五个页面
 
@@ -162,6 +166,7 @@ go run .\cmd\feedmedaily-tray --root .
 - 显示 runtime、server、data、logs 和版本信息。
 - 手动 `Check for updates` 进入 checking 状态并刷新 last checked。
 - `Sync` 在没有 feeds 时禁用。
+- 运行中的 sync 显示 `Stop sync`；点击后请求立即进入 stopping，最终 job 为 `cancelled`，之后可以再次启动 sync。
 - 定向同步只提交当前选中的已保存 feed URL。
 - 最新 job 显示阶段、结果数字、warnings 和错误详情。
 - LLM job 完成或失败后显示估算费用、缓存命中/未命中和输出 token；非官方 endpoint 或未知模型显示费用不可用。
@@ -185,11 +190,14 @@ go run .\cmd\feedmedaily-tray --root .
 
 ### 7.4 Model
 
-- classifier 和 profile model 字段分组正确。
+- `Classification models` 多选、按模型 key、启用/停用和默认模型联动正确；默认值不能脱离启用集合。
+- DeepSeek V4 Flash 请求使用 `thinking=disabled` 且无 `reasoning_effort`；GLM-5.3-Flash 请求使用 `thinking=enabled` + `reasoning_effort=low`，失败重试不发送 disabled-thinking。
+- `Test connection` 以后台 `model-test` job 运行，成功/失败状态可轮询，且日志不出现 key。
 - secret 值不回显明文。
 - environment override 状态清楚显示。
+- 停用模型保留 key；只有明确 `Clear key` 后才删除。
 - 保存后同一进程内启动的新 job 使用新设置。
-- DeepSeek pricing 表默认显示当前 Flash/Pro 峰谷价格，允许分别编辑缓存命中、缓存未命中和输出单价。
+- Token pricing 表默认显示当前 DeepSeek Flash/Pro 峰谷价格和 GLM-5.3-Flash 限时价格，允许分别编辑缓存命中、缓存未命中和输出单价。
 - 保存定价后，新启动的 job 使用新价格；保存前已完成或正在运行的 job 继续显示原价格快照，不被回算。
 
 ### 7.5 App

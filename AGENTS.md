@@ -57,6 +57,23 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 - If the working tree already contains unrelated edits, commit only the files that belong to the requested change and leave the rest unstaged.
 - If the user asks to make a git commit, do not limit the commit to agent-authored edits only; include the user's local modifications in the same commit unless the user says otherwise.
 
+## Quota Economy
+
+- Treat paid model calls and agent/task usage as a limited experimental budget. Prefer the smallest valid number of calls that can answer the question.
+- Before writing a new client or experiment runner, search the repository, ignored experiment directories, and relevant history for an existing production path or reusable harness. Extend or parameterize one existing path instead of duplicating prompts, request code, parsing, retries, or pricing logic.
+- Use one parameterized runner for an experiment matrix. Do not create one program per model, condition, or sample size when a configuration value can express the difference.
+- Run a minimal compatibility gate before a full experiment. Do not start the full matrix until the provider accepts the exact request parameters and the response passes the real parser.
+- Make long experiments checkpointed and resumable. Preserve completed batches, avoid repeating successful paid calls, and keep automatic retries narrow and bounded.
+- Record request counts, cache hits, input/output tokens, failures, and price snapshots for every condition so the cost of both successful and failed calls remains auditable.
+- Do not spawn sub-agents, new ChatGPT tasks, or additional model-based judges for an experiment unless the user requests them or they are necessary to produce the requested result.
+- Quota economy must not weaken experimental validity: keep samples, prompts, model parameters, and comparison sets equivalent across conditions, and explicitly disclose any unavoidable deviation.
+
+## Verification Economy
+
+- Do not run `pytest`, `go test`, Playwright, or other broad test suites as a ritual closing step when the change is limited to experiments, reports, documentation, data summaries, or another scope those tests do not exercise.
+- Prefer direct inspection, model judgment, existing runtime evidence, and the errors produced by the actual command or workflow being changed. Treat a successful real execution and its recorded output as the primary verification for experiment/report work.
+- Run a targeted test only when the edited behavior has a concrete regression risk that the test can detect, or when the user explicitly requests it. Do not use unrelated repository-wide tests to create a false sense of confidence.
+
 ## Changelog
 
 - `CHANGELOG.md` is the canonical versioned changelog for user-facing product changes.

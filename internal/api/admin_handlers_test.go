@@ -213,3 +213,51 @@ func TestAdminRunRejectsUnknownSelectedFeedURL(t *testing.T) {
 		t.Fatalf("run response = %d %s", runRecorder.Code, runRecorder.Body.String())
 	}
 }
+
+func TestAdminSyncJobCanBeCancelled(t *testing.T) {
+	root := t.TempDir()
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	started := make(chan struct{})
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		close(started)
+		<-opts.Context.Done()
+		return jobruntime.RunSummary{}, opts.Context.Err()
+	}
+	handler := newTestHandler(t, testSettings(root))
+
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run launch = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	var runPayload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(runRecorder.Body.Bytes(), &runPayload); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sync did not start")
+	}
+
+	cancelRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(cancelRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/jobs/"+runPayload.Job.ID+"/cancel", nil))
+	if cancelRecorder.Code != http.StatusAccepted || !contains(cancelRecorder.Body.String(), `"cancel_requested":true`) {
+		t.Fatalf("cancel response = %d %s", cancelRecorder.Code, cancelRecorder.Body.String())
+	}
+
+	job := waitForJobTerminalStatus(t, runPayload.Job.ID)
+	if job.Status != "cancelled" || !job.CancelRequested {
+		t.Fatalf("cancelled job = %#v", job)
+	}
+
+	repeatRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(repeatRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/jobs/"+runPayload.Job.ID+"/cancel", nil))
+	if repeatRecorder.Code != http.StatusOK || !contains(repeatRecorder.Body.String(), `"already_terminal":true`) {
+		t.Fatalf("repeat cancel response = %d %s", repeatRecorder.Code, repeatRecorder.Body.String())
+	}
+}

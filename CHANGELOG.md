@@ -10,15 +10,20 @@ Changes since `0.5.0`:
 
 ### Added
 
-- Added per-job DeepSeek usage and estimated CNY cost tracking for sync, reclassify, initial Profile generation, and Profile proposals. Dashboard shows the latest job cost plus a persisted three-day usage table; unknown models, non-official endpoints, and missing usage remain explicitly unavailable.
-- Added manual DeepSeek Flash/Pro peak and off-peak pricing controls to Settings → Model. Saved prices apply only to subsequently started jobs, while completed usage records retain their original price snapshots.
+- Added a fixed multi-classifier model manager for DeepSeek V4 Flash and Zhipu GLM-5.3-Flash. Onboarding and Settings → Model now provide compact per-model key rows, a key-aware default classifier, and background connection tests.
+- Added structured classifier configuration migration from legacy `SCIRSS_CLASSIFIER_*` variables, source `.env` and release secure-store support, key retention when disabling a model, and explicit key clearing.
+- Added per-job DeepSeek and GLM usage and estimated CNY cost tracking for sync, reclassify, initial Profile generation, and Profile proposals. Dashboard shows the latest job cost plus a persisted three-day usage table; unknown models, non-official endpoints, and missing usage remain explicitly unavailable.
+- Added manual DeepSeek Flash/Pro peak/off-peak and GLM-5.3-Flash token pricing controls to Settings → Model. GLM defaults to the official 50% promotional rates published on 2026-08-28; saved prices apply only to subsequently started jobs.
 
 ### Changed
 
 - Changed new daily sync schedules from `10:00` to local time `12:30`, which is in DeepSeek's current midday off-peak window on China Standard Time, while preserving existing saved schedules.
 - Reduced the default classifier batch size from 10 to 5 and kept classifier thinking disabled by default.
+- Changed classifier requests to use provider adapters: DeepSeek V4 Flash always disables thinking without `reasoning_effort`; GLM-5.3-Flash always enables thinking with `reasoning_effort=low` and deterministic sampling, without cross-provider fallback. Jobs snapshot the selected classifier model when queued.
+- Simplified model settings by deriving available classifiers from configured keys, using the shared filter-style dropdown, compacting each provider to one key/test row, and merging classifier and tuning saves into one top action.
 - Removed `decision_trace` and `recommended_action` from the classifier model output contract while retaining concise reasons; recommended actions are now derived deterministically from relevance labels for API and database compatibility.
 - Prevented duplicate manual sync launches: repeated Dashboard, tray, or API requests now reuse the queued, running, or verification-blocked sync job, and Dashboard disables Sync until it finishes.
+- Added a Dashboard/API `Stop sync` action. Active sync jobs now propagate cancellation through feed fetching, LLM requests, retry waits, and protected-feed verification, then finish with a `cancelled` status without rolling back already persisted data.
 
 ### Fixed
 

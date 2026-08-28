@@ -4,6 +4,7 @@ import type {AdminTab} from "../features/admin/AdminPanel";
 import type {
   AppMeta,
   AppUpdate,
+  ClassifierModelsResponse,
   ClassificationProfile,
   FeedSubscription,
   FeedbackRecord,
@@ -53,6 +54,11 @@ export function useAppState() {
   const [feeds, setFeeds] = React.useState<FeedSubscription[]>([]);
   const [scheduler, setScheduler] = React.useState<SchedulerSettings | null>(null);
   const [settingsConfig, setSettingsConfig] = React.useState<SettingsConfigField[]>([]);
+  const [classifierModels, setClassifierModels] = React.useState<ClassifierModelsResponse>({
+    models: [],
+    enabled_model_ids: [],
+    default_model_id: "",
+  });
   const [feedsLoaded, setFeedsLoaded] = React.useState(false);
   const [profileResolved, setProfileResolved] = React.useState(false);
   const [reportLoading, setReportLoading] = React.useState(false);
@@ -170,7 +176,7 @@ export function useAppState() {
   return {
     report, setReport, profile, setProfile, appMeta, setAppMeta, appUpdate, setAppUpdate,
     appUpdateChecking, setAppUpdateChecking, feeds, setFeeds, scheduler, setScheduler,
-    settingsConfig, setSettingsConfig, feedsLoaded, setFeedsLoaded, profileResolved, setProfileResolved,
+    settingsConfig, setSettingsConfig, classifierModels, setClassifierModels, feedsLoaded, setFeedsLoaded, profileResolved, setProfileResolved,
     reportLoading, setReportLoading, adminDataLoading, setAdminDataLoading,
     verificationSubmitting, setVerificationSubmitting, verificationSubmitError, setVerificationSubmitError,
     reportLoadError, setReportLoadError, adminHydrationWarning, setAdminHydrationWarning,

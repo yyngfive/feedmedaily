@@ -3,6 +3,7 @@ import React from "react";
 import {
   applyProfileProposal,
   bootstrapProfile,
+  cancelSyncJob,
   deleteSchedulerSettings,
   exitApp,
   launchAdminJob,
@@ -17,8 +18,9 @@ import {
   saveSettingsConfig,
   startFeedVerification,
   submitFeedVerificationXML,
+  testClassifierModel,
 } from "../api/client";
-import type {ClassificationProfile, FeedSubscription, JobInfo, SettingsConfigUpdate} from "../shared/types";
+import type {ClassifierModelsUpdate, ClassificationProfile, FeedSubscription, JobInfo, SettingsConfigUpdate} from "../shared/types";
 import type {AppData} from "./useAppData";
 import type {AppState} from "./useAppState";
 
@@ -27,7 +29,7 @@ export function useAdminActions(state: AppState, data: AppData) {
   const {
     errorText, feeds, hydrateEditableFeeds, pushErrorMessage, pushMessage, setAdminOpen,
     setAppControlBusy, setBusy, setFeeds, setFeedsLoaded, setFeedsSaving, setJobs,
-    setProfile, setProfileSaving, setScheduler, setSchedulerSaving, setSettingsConfig,
+    setProfile, setProfileSaving, setScheduler, setSchedulerSaving, setSettingsConfig, setClassifierModels,
     setSettingsConfigSaving, setVerificationSubmitError, setVerificationSubmitting,
   } = state;
   const {
@@ -66,17 +68,19 @@ export function useAdminActions(state: AppState, data: AppData) {
     } finally { setFeedsSaving(false); }
   };
 
-  const handleSaveConfig = React.useCallback(async (fields: Record<string, SettingsConfigUpdate>) => {
+  const handleSaveConfig = React.useCallback(async (fields: Record<string, SettingsConfigUpdate>, classifierModels?: ClassifierModelsUpdate) => {
     try {
       setSettingsConfigSaving(true);
-      setSettingsConfig((await saveSettingsConfig(fields)).fields);
+      const saved = await saveSettingsConfig(fields, classifierModels);
+      setSettingsConfig(saved.fields);
+      setClassifierModels(saved.classifier_models);
       const currentProfile = await refreshProfileGate();
       await Promise.all([refreshAdminData(), currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve()]);
       pushMessage("settings.config.save.succeeded");
     } catch (error) {
       pushErrorMessage("settings.config.save.failed", error, "Could not save local settings.");
     } finally { setSettingsConfigSaving(false); }
-  }, [pushErrorMessage, pushMessage, refreshAdminData, refreshProfileGate, refreshReviewCore, setSettingsConfig, setSettingsConfigSaving]);
+  }, [pushErrorMessage, pushMessage, refreshAdminData, refreshProfileGate, refreshReviewCore, setClassifierModels, setSettingsConfig, setSettingsConfigSaving]);
   const handleSaveScheduler = React.useCallback(async (dailyTime: string) => {
     try {
       setSchedulerSaving(true);
@@ -134,10 +138,12 @@ export function useAdminActions(state: AppState, data: AppData) {
     }
   }, [pushErrorMessage, pushMessage, setAppControlBusy]);
 
-  const handleOnboardingSaveAndBootstrap = React.useCallback(async (fields: Record<string, SettingsConfigUpdate>, interestDescription: string) => {
+  const handleOnboardingSaveAndBootstrap = React.useCallback(async (fields: Record<string, SettingsConfigUpdate>, classifierModels: ClassifierModelsUpdate, interestDescription: string) => {
     try {
       setSettingsConfigSaving(true);
-      setSettingsConfig((await saveSettingsConfig(fields)).fields);
+      const saved = await saveSettingsConfig(fields, classifierModels);
+      setSettingsConfig(saved.fields);
+      setClassifierModels(saved.classifier_models);
       const currentProfile = await refreshProfileGate();
       await Promise.all([refreshAdminData(), currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve()]);
     } catch (error) {
@@ -150,18 +156,34 @@ export function useAdminActions(state: AppState, data: AppData) {
     } catch (error) {
       return {ok: false, tone: "warning" as const, message: `Local settings were saved, but the initial profile generation did not start: ${errorText(error, "Unknown error.")}`};
     } finally { setBusy(false); }
-  }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore, registerJob, setBusy, setSettingsConfig, setSettingsConfigSaving]);
-  const handleOnboardingSaveSettings = React.useCallback(async (fields: Record<string, SettingsConfigUpdate>) => {
+  }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore, registerJob, setBusy, setClassifierModels, setSettingsConfig, setSettingsConfigSaving]);
+  const handleOnboardingSaveSettings = React.useCallback(async (fields: Record<string, SettingsConfigUpdate>, classifierModels: ClassifierModelsUpdate) => {
     try {
       setSettingsConfigSaving(true);
-      setSettingsConfig((await saveSettingsConfig(fields)).fields);
+      const saved = await saveSettingsConfig(fields, classifierModels);
+      setSettingsConfig(saved.fields);
+      setClassifierModels(saved.classifier_models);
       const currentProfile = await refreshProfileGate();
       await Promise.all([refreshAdminData(), currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve()]);
       return {ok: true, tone: "success" as const, message: "Local settings saved."};
     } catch (error) {
       return {ok: false, tone: "danger" as const, message: errorText(error, "Could not save local settings.")};
     } finally { setSettingsConfigSaving(false); }
-  }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore, setSettingsConfig, setSettingsConfigSaving]);
+  }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore, setClassifierModels, setSettingsConfig, setSettingsConfigSaving]);
+
+  const handleTestClassifierModel = React.useCallback(async (modelId: string, apiKey?: string) => {
+    try {
+      const job = await testClassifierModel(modelId, apiKey);
+      // Connection tests are inline on both onboarding and Settings → Model;
+      // registering the job must not unexpectedly open the settings drawer.
+      registerJob(job, false);
+      pushMessage("classifier.model.test.started", {text: "Connection test queued. It uses a small amount of provider quota.", tone: "info"});
+      return job;
+    } catch (error) {
+      pushErrorMessage("classifier.model.test.failed", error, "Could not start the classifier model connection test.");
+      throw error;
+    }
+  }, [pushErrorMessage, pushMessage, registerJob]);
 
   const handleGenerateProposal = async () => {
     try { registerJob(await launchProfileProposalGeneration()); pushMessage("profile.proposal.started"); }
@@ -206,6 +228,15 @@ export function useAdminActions(state: AppState, data: AppData) {
     try { registerJob(await launchAdminJob(path, feedURLs?.length ? {feed_urls: feedURLs} : undefined)); pushMessage("job.started"); }
     catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not start the sync job."); }
   };
+  const handleStopSync = React.useCallback(async (jobID: string) => {
+    try {
+      const job = await cancelSyncJob(jobID);
+      registerJob(job, false);
+      pushMessage("sync.cancel.requested");
+    } catch (error) {
+      pushErrorMessage("sync.cancel.failed", error, "Could not stop the sync job.");
+    }
+  }, [pushErrorMessage, pushMessage, registerJob]);
   const handleStartVerification = React.useCallback(async (job: JobInfo) => {
     if (!job.verification_feed_url) return pushMessage("app.service.unavailable", {text: "Verification feed URL is missing.", tone: "danger"});
     setVerificationSubmitError(null);
@@ -234,11 +265,11 @@ export function useAdminActions(state: AppState, data: AppData) {
 
   return {
     registerJob, handleFeedChange, handleAddFeed, handleAddFeeds, handleRemoveFeed, handleSaveFeeds,
-    handleSaveConfig, handleSaveScheduler, handleSaveProfile, handleDeleteScheduler,
+    handleSaveConfig, handleSaveScheduler, handleSaveProfile, handleDeleteScheduler, handleTestClassifierModel,
     handleOpenAppTarget, handleExitApp, handleOnboardingSaveAndBootstrap,
     handleOnboardingSaveSettings, handleGenerateProposal, handleApplyProposal,
     handleRejectProposal, handleOnboardingAcceptDraft, handleOnboardingRejectProposal,
-    handleRunAdminJob, handleStartVerification, handleOpenVerificationInBrowser,
+    handleRunAdminJob, handleStopSync, handleStartVerification, handleOpenVerificationInBrowser,
     handleSubmitVerificationXML, handleReclassify,
   };
 }

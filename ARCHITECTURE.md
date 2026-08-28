@@ -10,8 +10,8 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 - `cmd/feedmedaily-tray/`: Windows tray runtime entrypoint
 - `cmd/feedmedaily-protected-verifier/`: Go native WebView2 helper for host-scoped protected-feed verification
 - `internal/api/`: HTTP API handlers, job endpoints, verification endpoints, and static asset serving
-- `internal/classifier/`: Go classifier client, prompt shaping, and thinking-fallback handling
-- `internal/config/`: settings schema, local config editing, and path resolution
+- `internal/classifier/`: Go classifier client, provider adapter, prompt shaping, and bounded retry handling
+- `internal/config/`: settings schema, fixed classifier model catalog, local config editing, and path resolution
 - `internal/feeds/`: feed fetch client, generic RSS/Atom/RDF parser, and publisher-specific extractors
 - `internal/jobs/`: sync pipeline, reclassify flows, and background job orchestration
 - `internal/llmusage/`: thread-safe per-job LLM usage collection and immutable DeepSeek pricing snapshots
@@ -50,11 +50,11 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 - structured job-progress payloads for fetch, metadata, classification, report refresh, and profile-generation status updates
 - static React asset serving and SPA fallback
 
-`Run Sync Now` is fully owned by Go end-to-end: feed fetch, ingest, conditional metadata enrichment, classification, report refresh, and background job state all run through `feedmedailyd`. The same `/api/admin/run` endpoint also accepts an optional saved-feed URL list so Dashboard can run a targeted manual sync without changing the stored subscriptions. Sync launch is single-flight across full and targeted runs: while a sync is queued, running, or waiting for verification, another launch request returns the existing job instead of starting a second pipeline. The Dashboard disables its Sync button while that active job is visible, while the backend registry remains the concurrency authority for UI, tray, and concurrent API callers.
+`Run Sync Now` is fully owned by Go end-to-end: feed fetch, ingest, conditional metadata enrichment, classification, report refresh, and background job state all run through `feedmedailyd`. The same `/api/admin/run` endpoint also accepts an optional saved-feed URL list so Dashboard can run a targeted manual sync without changing the stored subscriptions. Sync launch is single-flight across full and targeted runs: while a sync is queued, running, or waiting for verification, another launch request returns the existing job instead of starting a second pipeline. The Dashboard disables its Sync button while that active job is visible and exposes `Stop sync`; `POST /api/admin/jobs/{id}/cancel` propagates cancellation through the current feed/LLM context and verification wait, then records a terminal `cancelled` job without rolling back already persisted papers. The backend registry remains the concurrency authority for UI, tray, and concurrent API callers.
 
 The job polling endpoints expose both human-readable messages and structured progress fields so the UI can show stage-aware status such as current feed `i/N`, metadata/classification completion percentages, step-based profile generation progress, and structured latest-job summaries. Sync warning details are read from the existing job result errors and matched back to the current feed list by URL.
 
-Every LLM-backed job owns one explicit thread-safe usage collector and captures the current manual pricing settings when the job starts. Classifier batches, retries, single-paper degradation, title translation, profile generation, validation, JSON repair, and thinking fallbacks record each successful provider response exactly once, including its response timestamp. When the job reaches `completed` or `failed`, its token totals and pricing snapshot are copied into `JobInfo.llm_usage` and persisted as one `llm_usage_jobs` row. Ledger persistence failures are warnings and never change the business job outcome. Official `api.deepseek.com` requests for known models are priced in integer nano-CNY; Beijing-time peak rates apply only Monday through Friday at 9:00–12:00 and 14:00–18:00, and all other periods including weekends use off-peak rates. Jobs crossing a pricing boundary can retain multiple pricing breakdowns. Settings → Model exposes a compact Flash/Pro peak/off-peak price table; saved changes affect only later jobs because completed ledger rows keep their concrete rate snapshots. Other endpoints/models remain `unavailable` rather than receiving a fabricated amount. Existing-database migrations and narrowly scoped historical pricing repairs run when the backend starts, before Dashboard opens its read-only store. Dashboard reads the last three days through `/api/admin/llm-usage`, while SQLite retains the full history.
+Every LLM-backed job owns one explicit thread-safe usage collector and captures the current manual pricing settings when the job starts. Classifier batches, retries, single-paper degradation, title translation, profile generation, validation, JSON repair, and thinking fallbacks record each successful provider response exactly once, including its response timestamp. When the job reaches `completed`, `failed`, or `cancelled`, its token totals and pricing snapshot are copied into `JobInfo.llm_usage` and persisted as one `llm_usage_jobs` row. Ledger persistence failures are warnings and never change the business job outcome. Official DeepSeek requests use Beijing-time weekday peak/off-peak rates; official GLM-5.3-Flash requests use cached-input, ordinary-input, and output rates, with OpenAI-style cached-token details normalized by the adapter. Settings → Model exposes both providers in one compact pricing table; saved changes affect only later jobs because completed ledger rows keep their concrete rate snapshots. Unknown endpoints/models remain `unavailable`. Existing-database migrations and narrowly scoped historical DeepSeek pricing repairs run when the backend starts, before Dashboard opens its read-only store. Dashboard reads the last three days through `/api/admin/llm-usage`, while SQLite retains the full history.
 
 The API service reuses long-lived SQLite stores across requests instead of reopening the database per handler. Read-heavy endpoints and mutation endpoints are split across separate store roles so the UI can keep `/api/report/latest` responsive while feedback or read-status writes are in flight. The SQLite runtime now enables WAL plus a busy-timeout-oriented connection string, and the `/api/report/latest` read path batch-selects each paper's latest classification, latest open feedback, and latest Zotero save state with SQL windowing rather than issuing per-paper follow-up lookups. `/api/app/update` keeps a short-lived in-memory status cache for routine polling and page initialization, but also accepts a force-refresh path so manual checks can bypass that cache immediately.
 
@@ -108,19 +108,23 @@ These files are local machine state and must not be committed:
 
 There are two configurable model roles:
 
-- classifier model: paper relevance classification
+- classifier models: paper relevance classification (`deepseek-v4-flash` and `glm-5.3-flash`)
 - profile model: onboarding profile generation and feedback-driven profile revision
 
-Each role can use its own API key and base URL:
+The classifier catalog owns provider endpoints and thinking parameters. DeepSeek V4 Flash uses `https://api.deepseek.com` with `thinking.type=disabled` and no `reasoning_effort`; Zhipu GLM-5.3-Flash uses the ordinary open-platform endpoint `https://open.bigmodel.cn/api/paas/v4` with `thinking.type=enabled`, `reasoning_effort=low`, and deterministic sampling (Coding Plan endpoints are not supported). The shared adapter is used by batch classification, single-paper degradation, title translation, and connection tests. GLM never enters the disabled-thinking fallback, and no request automatically switches providers.
 
-- `SCIRSS_CLASSIFIER_API_KEY` / `SCIRSS_CLASSIFIER_BASE_URL`
-- `SCIRSS_PROFILE_API_KEY` / `SCIRSS_PROFILE_BASE_URL`
+The classifier entries use their catalog-owned base URLs and their own keys:
+
+- classifier keys: `SCIRSS_DEEPSEEK_API_KEY` and `SCIRSS_GLM_API_KEY`
+- Profile keeps its own `SCIRSS_PROFILE_API_KEY` / `SCIRSS_PROFILE_BASE_URL`
+
+`SCIRSS_CLASSIFIER_ENABLED_MODELS` and `SCIRSS_CLASSIFIER_DEFAULT_MODEL` select enabled catalog entries. Legacy `SCIRSS_CLASSIFIER_API_KEY/BASE_URL/MODEL/THINKING` values remain readable for migration and are materialized into the matching provider key on the first structured save; environment overrides stay authoritative.
 
 The code owns the prompt shell and response schema. User interest boundaries, topic taxonomy, notes, and few-shot guidance live in the profile file. The classifier prompt applies profile rules in priority order: unrelated exclusions are checked first as a veto, then direct rules, then indirect rules. The compact model response contains relevance, confidence, a concise reason, and translated title; it no longer requests `decision_trace` or `recommended_action`.
 
 The current classification path stores relevance, confidence, reason, recommended action, and translated title. Recommended action remains part of the local API/database compatibility shape but is derived deterministically by the application (`direct -> read`, `indirect -> scan`, `unrelated -> skip`) rather than generated by the model. It does not emit paper-level topic tags. Classifier requests use bounded retry handling for transient provider failures and malformed JSON responses; if a batch still fails, sync and reclassify jobs fall back to single-paper classification so successful papers can still be persisted.
 
-Both model roles can request provider thinking mode. Classifier defaults are `thinking=disabled` and batch size `5`; the profile role keeps its own settings. If a request fails with timeout, gateway-style, or reasoning-mode errors, the runtime retries once with `thinking=disabled`.
+Classifier defaults are DeepSeek V4 Flash with `thinking=disabled` and batch size `5`; GLM always keeps thinking enabled. DeepSeek and the legacy generic path retain bounded same-model retries. Each sync/reclassify/model-test job captures its resolved model, key, provider controls, batch settings, and pricing at queue time, so changing the default affects only later jobs.
 
 ### Configuration handling
 
@@ -129,7 +133,9 @@ Editable local configuration is exposed through the UI:
 - secret values are written only to local config storage
 - secrets are never echoed back to the frontend in plain text
 - each field reports whether its value comes from local config, the system environment, or a built-in default
-- first-run onboarding presents one shared LLM API key entry plus optional advanced per-role overrides for classifier and profile generation
+- first-run onboarding and Settings → Model share one classifier manager with multi-select, per-provider masked keys, connection tests, and a default restricted to enabled entries
+- onboarding keeps an independent DeepSeek V4 Pro Profile key and offers a one-time copy of a configured DeepSeek classifier key only when the Profile key is empty
+- connection tests run as `model-test` jobs, record token usage without saving unsaved keys, and warn that a small amount of provider quota is consumed
 - saving local configuration reloads the running backend settings immediately, so follow-up jobs in the same session use the new API keys and model settings
 - the active profile file path is fixed at `data/classification_profile.json` under the current runtime data directory and is not user-configurable
 

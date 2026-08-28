@@ -15,9 +15,10 @@ import (
 )
 
 func (s *Server) handleSettingsConfig(w http.ResponseWriter, r *http.Request) {
+	settings := s.snapshotSettings()
 	switch r.Method {
 	case http.MethodGet:
-		response, err := config.SettingsConfig(s.settings.RootDir)
+		response, err := config.SettingsConfig(settings.RootDir)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -29,17 +30,23 @@ func (s *Server) handleSettingsConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "Invalid JSON body.")
 			return
 		}
-		response, err := config.UpdateLocalSettings(s.settings.RootDir, payload.Fields)
+		var response config.SettingsConfigResponse
+		var err error
+		if payload.ClassifierModels != nil {
+			response, err = config.UpdateLocalSettingsWithClassifierModels(settings.RootDir, payload.Fields, *payload.ClassifierModels)
+		} else {
+			response, err = config.UpdateLocalSettings(settings.RootDir, payload.Fields)
+		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		updatedSettings, err := config.Load(s.settings.RootDir)
+		updatedSettings, err := config.Load(settings.RootDir)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		s.settings = updatedSettings
+		s.replaceSettings(updatedSettings)
 		writeJSON(w, http.StatusOK, response)
 	default:
 		w.Header().Set("Allow", "GET, PUT")
@@ -48,9 +55,10 @@ func (s *Server) handleSettingsConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSettingsFeeds(w http.ResponseWriter, r *http.Request) {
+	settings := s.snapshotSettings()
 	switch r.Method {
 	case http.MethodGet:
-		subscriptions, err := feeds.ReadSubscriptions(s.settings.FeedsPath)
+		subscriptions, err := feeds.ReadSubscriptions(settings.FeedsPath)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -62,7 +70,7 @@ func (s *Server) handleSettingsFeeds(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "Invalid JSON body.")
 			return
 		}
-		subscriptions, err := feeds.WriteSubscriptions(s.settings.FeedsPath, payload.Feeds)
+		subscriptions, err := feeds.WriteSubscriptions(settings.FeedsPath, payload.Feeds)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -75,7 +83,8 @@ func (s *Server) handleSettingsFeeds(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request) {
-	path := filepath.Join(s.settings.ConfigDir, "tray-settings.json")
+	serverSettings := s.snapshotSettings()
+	path := filepath.Join(serverSettings.ConfigDir, "tray-settings.json")
 	switch r.Method {
 	case http.MethodGet:
 		settings, err := appruntime.LoadTraySchedulerSettings(path)
@@ -83,12 +92,12 @@ func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		command, err := backendRunCommandFunc(s.settings)
+		command, err := backendRunCommandFunc(serverSettings)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, schedulerResponse(settings, s.settings.Mode, path, strings.Join(command, " ")))
+		writeJSON(w, http.StatusOK, schedulerResponse(settings, serverSettings.Mode, path, strings.Join(command, " ")))
 	case http.MethodPut:
 		var payload struct {
 			DailyTime string `json:"daily_time"`
@@ -114,12 +123,12 @@ func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		s.notifyTraySettingsChanged()
-		command, err := backendRunCommandFunc(s.settings)
+		command, err := backendRunCommandFunc(serverSettings)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, schedulerResponse(settings, s.settings.Mode, path, strings.Join(command, " ")))
+		writeJSON(w, http.StatusOK, schedulerResponse(settings, serverSettings.Mode, path, strings.Join(command, " ")))
 	case http.MethodDelete:
 		settings, err := appruntime.LoadTraySchedulerSettings(path)
 		if err != nil {
@@ -132,12 +141,12 @@ func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		s.notifyTraySettingsChanged()
-		command, err := backendRunCommandFunc(s.settings)
+		command, err := backendRunCommandFunc(serverSettings)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, schedulerResponse(settings, s.settings.Mode, path, strings.Join(command, " ")))
+		writeJSON(w, http.StatusOK, schedulerResponse(settings, serverSettings.Mode, path, strings.Join(command, " ")))
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed.")
@@ -146,17 +155,18 @@ func (s *Server) handleSettingsScheduler(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) notifyTraySettingsChanged() {
 	// Web 保存共享调度配置后，尽力通知正在运行的托盘立刻刷新内存态。
-	if err := notifyTraySettingsChangedFunc(s.settings.ConfigDir); err != nil {
-		_, _ = logging.Write(s.settings.LogsDir, logging.Event{
+	settings := s.snapshotSettings()
+	if err := notifyTraySettingsChangedFunc(settings.ConfigDir); err != nil {
+		_, _ = logging.Write(settings.LogsDir, logging.Event{
 			Level:     "warning",
 			Component: "api",
 			Action:    "tray_settings_notify_failed",
 			Message:   "Saved scheduler settings, but notifying the running tray failed.",
 			Error:     err.Error(),
 			Data: map[string]any{
-				"config_dir":         s.settings.ConfigDir,
-				"tray_instance_id":   appruntime.TrayInstanceID(s.settings.ConfigDir),
-				"tray_settings_path": filepath.Join(s.settings.ConfigDir, "tray-settings.json"),
+				"config_dir":         settings.ConfigDir,
+				"tray_instance_id":   appruntime.TrayInstanceID(settings.ConfigDir),
+				"tray_settings_path": filepath.Join(settings.ConfigDir, "tray-settings.json"),
 			},
 		})
 	}
