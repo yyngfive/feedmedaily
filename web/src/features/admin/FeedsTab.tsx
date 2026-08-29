@@ -138,7 +138,7 @@ export function FeedsTab({feeds, feedsSaving, onSaveFeeds}: {
               <div key={item.client_id ?? String(index)} className="grid gap-3 py-3 md:grid-cols-[minmax(160px,0.65fr)_minmax(240px,1fr)_auto]">
                 <TextInputField hideLabel label={`Feed name ${index + 1}`} value={item.journal} onChange={(journal) => setDraftFeeds((current) => current.map((feed, feedIndex) => feedIndex === index ? {...feed, journal} : feed))} />
                 <TextInputField hideLabel label={`Feed URL ${index + 1}`} type="url" value={item.url} onChange={(url) => setDraftFeeds((current) => current.map((feed, feedIndex) => feedIndex === index ? {...feed, url} : feed))} />
-                <Button size="sm" variant="ghost" onPress={() => setDraftFeeds((current) => current.filter((_feed, feedIndex) => feedIndex !== index))}>Remove</Button>
+                <Button size="sm" variant="danger" onPress={() => setDraftFeeds((current) => current.filter((_feed, feedIndex) => feedIndex !== index))}>Remove</Button>
               </div>
             ))}
           </div>

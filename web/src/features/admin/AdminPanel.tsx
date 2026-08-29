@@ -16,6 +16,7 @@ import type {
   SettingsConfigUpdate,
 } from "../../shared/types";
 import {AppTab} from "./AppTab";
+import {AdminDisclosure} from "./AdminDisclosure";
 import {DashboardTab} from "./DashboardTab";
 import {DeepSeekPricingEditor, type DeepSeekPricingEditorHandle} from "./DeepSeekPricingEditor";
 import {ClassifierModelsEditor, classifierModelsDraftHasRequiredKeys, classifierModelsUpdateFromDraft, createClassifierModelsDraft, type ClassifierModelsDraft} from "./ClassifierModelsEditor";
@@ -165,7 +166,7 @@ export function AdminPanel(props: AdminPanelProps) {
       className={props.open ? "fixed inset-0 z-40 flex justify-end overscroll-contain bg-slate-900/20" : "hidden"}
       onMouseDown={(event) => { if (event.target === event.currentTarget) props.onClose(); }}
     >
-      <aside ref={dialogRef} aria-labelledby="settings-title" aria-modal="true" className="h-full w-full max-w-[min(1040px,96vw)] overflow-hidden overscroll-contain border-l border-(--line) bg-(--paper) shadow-xl" role="dialog">
+      <aside ref={dialogRef} aria-labelledby="settings-title" aria-modal="true" className="h-full w-full max-w-[min(1040px,96vw)] overflow-hidden overscroll-contain border-l border-(--line) bg-(--paper-accent) shadow-xl" role="dialog">
         <header className="flex h-18 items-center justify-between gap-4 border-b border-(--line) px-5">
           <div>
             <p className="text-xs font-medium text-muted">FeedMeDaily</p>
@@ -175,7 +176,7 @@ export function AdminPanel(props: AdminPanelProps) {
         </header>
 
         <div className="grid h-[calc(100%-4.5rem)] min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[176px_minmax(0,1fr)] md:grid-rows-1">
-          <nav aria-label="Settings sections" className="overflow-x-auto border-b border-(--line) px-3 py-2 md:overflow-y-auto md:border-r md:border-b-0 md:px-3 md:py-4">
+          <nav aria-label="Settings sections" className="overflow-x-auto border-b border-(--line) bg-(--paper) px-3 py-2 md:overflow-y-auto md:border-r md:border-b-0 md:px-3 md:py-4">
             <div className="flex min-w-max gap-1 md:min-w-0 md:flex-col">
               {adminTabs.map((tab) => (
                 <Button
@@ -192,16 +193,12 @@ export function AdminPanel(props: AdminPanelProps) {
             </div>
           </nav>
 
-          <main className="min-h-0 overflow-y-auto overscroll-contain px-5 py-5 md:px-6">
+          <main className="min-h-0 overflow-y-auto overscroll-contain bg-(--paper-accent) px-5 py-5 md:px-6">
             <div hidden={props.activeTab !== "dashboard"}>
             <DashboardTab
-              appMeta={props.appMeta}
-              appUpdate={props.appUpdate}
-              appUpdateChecking={props.appUpdateChecking}
               feeds={props.feeds}
               hasFeeds={props.hasFeeds}
               jobs={props.jobs}
-              onCheckForUpdates={props.onCheckForUpdates}
               onOpenVerificationInBrowser={props.onOpenVerificationInBrowser}
               onReclassifyAll={props.onReclassifyAll}
               onReclassifyFeedback={props.onReclassifyFeedback}
@@ -248,16 +245,15 @@ export function AdminPanel(props: AdminPanelProps) {
                 <h3 className="mb-3 text-sm font-semibold text-(--ink)">Profile generator</h3>
                 <SettingsConfigEditor ref={profileModelRef} fields={primaryModelFields} hideGroupTitles saving={props.configSaving} showHeader={false} showSaveAction={false} title="Profile generator" onSave={props.onSaveConfig} />
               </section>
-              <details className="group rounded-md border border-(--line) bg-(--paper-accent)">
-                <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-(--ink)">Advanced model settings</summary>
-                <div className="border-t border-(--line) px-4 py-4">
+              <AdminDisclosure title="Advanced model settings">
+                <div>
                   <SettingsConfigEditor ref={advancedModelRef} fields={advancedModelFields} saving={props.configSaving} showHeader={false} showSaveAction={false} title="Advanced model settings" onSave={props.onSaveConfig} />
                   <DeepSeekPricingEditor ref={pricingRef} fields={pricingFields} saving={props.configSaving} showSaveAction={false} onSave={props.onSaveConfig} />
                 </div>
-              </details>
+              </AdminDisclosure>
             </div>
             <div hidden={props.activeTab !== "app"}>
-              <AppTab appMeta={props.appMeta} appUpdate={props.appUpdate} configFields={appFields} configSaving={props.configSaving} onDeleteScheduler={props.onDeleteScheduler} onSaveConfig={props.onSaveConfig} onSaveScheduler={props.onSaveScheduler} scheduler={props.scheduler} schedulerSaving={props.schedulerSaving} />
+              <AppTab appMeta={props.appMeta} appUpdate={props.appUpdate} appUpdateChecking={props.appUpdateChecking} configFields={appFields} configSaving={props.configSaving} onCheckForUpdates={props.onCheckForUpdates} onDeleteScheduler={props.onDeleteScheduler} onSaveConfig={props.onSaveConfig} onSaveScheduler={props.onSaveScheduler} scheduler={props.scheduler} schedulerSaving={props.schedulerSaving} />
             </div>
           </main>
         </div>

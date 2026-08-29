@@ -4,6 +4,7 @@ import {relevanceLabel} from "../../app/constants";
 import type {ClassificationProfile, FeedbackRecord, ProfileProposal} from "../../shared/types";
 import {ProfileProposalReview} from "../profile/ProfileProposalReview";
 import {ProfileRulesDocument} from "../profile/ProfileRulesDocument";
+import {AdminDisclosure} from "./AdminDisclosure";
 
 export function ProfileTab({
   feedback,
@@ -65,12 +66,8 @@ export function ProfileTab({
           </Card>
         )}
 
-        <details className="rounded-md border border-(--line)">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3">
-            <span className="text-sm font-semibold text-(--ink)">Feedback queue</span>
-            <span className="text-sm text-muted">{openFeedback.length} open</span>
-          </summary>
-          <div className="border-t border-(--line) p-4">
+        <AdminDisclosure meta={<span className="text-sm font-normal text-muted">{openFeedback.length} open</span>} title="Feedback queue">
+          <div>
             <div className="overflow-hidden rounded-md border border-(--line)">
               {openFeedback.length === 0 ? (
                 <p className="px-3 py-4 text-sm text-muted">No feedback submitted yet.</p>
@@ -102,7 +99,7 @@ export function ProfileTab({
               )}
             </div>
           </div>
-        </details>
+        </AdminDisclosure>
       </div>
     </div>
   );

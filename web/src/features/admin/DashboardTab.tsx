@@ -1,9 +1,10 @@
-import {Button, Card, Spinner} from "@heroui/react";
+import {Button, Chip, Spinner} from "@heroui/react";
 import React from "react";
 
 import {fetchLLMUsage} from "../../api/client";
 import {CheckboxRow, TextAreaField, TextInputField} from "../../shared/components/FormFields";
-import type {AppMeta, AppUpdate, FeedSubscription, JobInfo, LLMUsageRecord, LLMUsageSummary} from "../../shared/types";
+import type {FeedSubscription, JobInfo, LLMUsageRecord, LLMUsageSummary} from "../../shared/types";
+import {AdminDisclosure} from "./AdminDisclosure";
 
 function formatJobTime(value?: string | null) {
   if (!value || Number.isNaN(Date.parse(value))) {
@@ -47,12 +48,9 @@ function LatestJobPanel({feeds, job}: {feeds: FeedSubscription[]; job: JobInfo})
   });
 
   return (
-    <div className="mt-3 rounded-md border border-(--line) bg-(--paper) p-3 text-sm">
+    <div className="mt-3 text-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="font-semibold text-(--ink)">Latest job</p>
-          <p className="mt-1 text-muted">{job.job_type} · {job.status}</p>
-        </div>
+        <p className="font-medium text-(--ink)">{job.job_type} · {job.status}</p>
         <div className="text-left text-muted sm:text-right">
           <p>Started: {formatJobTime(job.started_at)}</p>
           <p>Finished: {formatJobTime(job.finished_at)}</p>
@@ -64,31 +62,30 @@ function LatestJobPanel({feeds, job}: {feeds: FeedSubscription[]; job: JobInfo})
         </p>
       ) : null}
       {job.job_type === "sync" ? (
-        <dl className="mt-3 grid gap-2 text-muted sm:grid-cols-5">
+        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 border-y border-(--line) py-3 text-muted sm:grid-cols-5">
           {(["fetched", "inserted", "updated", "classified"] as const).map((key) => (
-            <div key={key} className="rounded-md border border-(--line) px-3 py-2">
-              <dt className="capitalize">{key}</dt>
+            <div key={key}>
+              <dt className="text-xs capitalize">{key}</dt>
               <dd className="mt-1 font-semibold text-(--ink)">{jobResultNumber(job, key)}</dd>
             </div>
           ))}
-          <div className="rounded-md border border-(--line) px-3 py-2">
-            <dt>Warnings</dt>
+          <div>
+            <dt className="text-xs">Warnings</dt>
             <dd className="mt-1 font-semibold text-(--ink)">{job.warning_count ?? errors.length}</dd>
           </div>
         </dl>
       ) : null}
       {job.error ? <p className="mt-3 text-rose-700">{job.error}</p> : null}
       {errors.length > 0 ? (
-        <details className="mt-3 rounded-md border border-(--line)">
-          <summary className="cursor-pointer list-none px-3 py-2 font-medium text-(--ink)">Warnings ({errors.length})</summary>
-          <div className="space-y-2 border-t border-(--line) p-3">{errors.map((item, index) => (
-              <div key={`${item.url}-${index}`}>
-                <p className="font-medium text-(--ink)">{item.label}</p>
-                {item.url ? <p className="break-all text-xs text-muted">{item.url}</p> : null}
-                <p className="mt-1 leading-6 text-(--body)">{item.detail}</p>
-              </div>
+        <div className="mt-3"><AdminDisclosure title={`Warnings (${errors.length})`}>
+          <div className="space-y-3">{errors.map((item, index) => (
+            <div key={`${item.url}-${index}`}>
+              <p className="font-medium text-(--ink)">{item.label}</p>
+              {item.url ? <p className="break-all text-xs text-muted">{item.url}</p> : null}
+              <p className="mt-1 leading-6 text-(--body)">{item.detail}</p>
+            </div>
           ))}</div>
-        </details>
+        </AdminDisclosure></div>
       ) : job.message ? (
         <p className="mt-3 leading-6 text-(--body)">{job.message}</p>
       ) : null}
@@ -162,13 +159,9 @@ function VerificationPanel({
 }
 
 export function DashboardTab({
-  appMeta,
-  appUpdate,
-  appUpdateChecking,
   feeds,
   hasFeeds,
   jobs,
-  onCheckForUpdates,
   onOpenVerificationInBrowser,
   onReclassifyAll,
   onReclassifyFeedback,
@@ -180,13 +173,9 @@ export function DashboardTab({
   verificationSubmitting,
   verificationSubmitError,
 }: {
-  appMeta: AppMeta | null;
-  appUpdate: AppUpdate | null;
-  appUpdateChecking: boolean;
   feeds: FeedSubscription[];
   hasFeeds: boolean;
   jobs: JobInfo[];
-  onCheckForUpdates: () => void;
   onOpenVerificationInBrowser: (job: JobInfo) => void;
   onReclassifyAll: () => void;
   onReclassifyFeedback: () => void;
@@ -207,9 +196,6 @@ export function DashboardTab({
   const latestJob = jobs[0] ?? null;
   const activeSyncJob = jobs.find((job) => job.job_type === "sync" && ["queued", "running", "waiting_for_user"].includes(job.status)) ?? null;
   const verificationJob = jobs.find((job) => job.status === "waiting_for_user" && job.verification_required) ?? null;
-  const lastCheckedLabel = appUpdate && !Number.isNaN(Date.parse(appUpdate.checked_at))
-    ? new Date(appUpdate.checked_at).toLocaleString()
-    : null;
   const savedSyncFeedURLs = React.useMemo(() => feeds.map((feed) => feed.url.trim()).filter(Boolean), [feeds]);
   const syncFeedMatches = React.useMemo(() => {
     const query = syncFeedQuery.trim().toLowerCase();
@@ -246,8 +232,8 @@ export function DashboardTab({
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-(--line) pb-4">
-        <div><h2 className="text-xl font-semibold text-(--ink)">Dashboard</h2><p className="mt-1 text-sm text-muted">Run maintenance tasks and review recent activity.</p></div>
-        {activeSyncJob ? <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-900">Sync · {activeSyncJob.status}</span> : <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-900">Ready</span>}
+        <h2 className="text-xl font-semibold text-(--ink)">Dashboard</h2>
+        {activeSyncJob ? <Chip color="warning" size="sm" variant="soft">Sync · {activeSyncJob.status}</Chip> : <Chip color="success" size="sm" variant="soft">Ready</Chip>}
       </div>
 
       {verificationJob ? <VerificationPanel job={verificationJob} submitting={verificationSubmitting} submitError={verificationSubmitError} xml={verificationXML} onXMLChange={setVerificationXML} onOpenInBrowser={() => onOpenVerificationInBrowser(verificationJob)} onReopen={() => onStartVerification(verificationJob)} onSubmitXML={() => void onSubmitVerificationXML(verificationJob, verificationXML)} /> : null}
@@ -260,31 +246,27 @@ export function DashboardTab({
           {activeSyncJob ? <Button isDisabled={stoppingSync || Boolean(activeSyncJob.cancel_requested)} size="sm" variant="danger" onPress={stopSync}>{stoppingSync || activeSyncJob.cancel_requested ? "Stopping…" : "Stop sync"}</Button> : null}
         </div>
         {hasFeeds ? (
-          <details className="mt-4 rounded-md border border-(--line)">
-            <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-(--ink)">Target specific feeds</summary>
-            <div className="border-t border-(--line) p-3">
+          <div className="mt-4"><AdminDisclosure title="Target specific feeds">
               <div className="flex flex-wrap items-end gap-2">
                 <TextInputField hideLabel className="min-w-60 flex-1" label="Search feeds for targeted sync" placeholder="Search feeds" value={syncFeedQuery} onChange={setSyncFeedQuery} />
                 <Button size="sm" variant="outline" onPress={() => setSelectedSyncFeedURLs(savedSyncFeedURLs)}>Select all</Button>
                 <Button isDisabled={selectedSyncFeedURLs.length === 0} size="sm" variant="ghost" onPress={() => setSelectedSyncFeedURLs([])}>Clear</Button>
               </div>
-              <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
+              <div className="mt-2 max-h-52 space-y-0.5 overflow-y-auto pr-1">
                 {syncFeedMatches.length === 0 ? <p className="rounded-md border border-(--line) px-3 py-3 text-sm text-muted">No feed matches.</p> : syncFeedMatches.map((feed) => {
                   const url = feed.url.trim();
-                  return <CheckboxRow key={feed.client_id ?? url} checked={selectedSyncFeedURLs.includes(url)} className="rounded-md border border-(--line) px-3 py-2 text-sm" onChange={() => setSelectedSyncFeedURLs((current) => current.includes(url) ? current.filter((item) => item !== url) : [...current, url])}><span className="min-w-0"><span className="font-medium text-(--ink)">{feed.journal}</span><span className="mt-1 block break-all text-xs text-muted">{feed.url}</span></span></CheckboxRow>;
+                  return <CheckboxRow key={feed.client_id ?? url} checked={selectedSyncFeedURLs.includes(url)} className="rounded-md px-2 py-1 text-sm" onChange={() => setSelectedSyncFeedURLs((current) => current.includes(url) ? current.filter((item) => item !== url) : [...current, url])}><span className="font-medium text-(--ink)">{feed.journal}</span></CheckboxRow>;
                 })}
               </div>
-            </div>
-          </details>
+          </AdminDisclosure></div>
         ) : null}
-        <details className="mt-4 rounded-md border border-(--line)">
-          <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-(--ink)">Reclassify papers</summary>
-          <div className="flex flex-wrap gap-2 border-t border-(--line) p-3">
+        <div className="mt-4"><AdminDisclosure title="Reclassify papers">
+          <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onPress={onReclassifyRecent}>Recent 50</Button>
             <Button size="sm" variant="outline" onPress={onReclassifyFeedback}>Feedback papers</Button>
             <Button size="sm" variant="ghost" onPress={onReclassifyAll}>All papers</Button>
           </div>
-        </details>
+        </AdminDisclosure></div>
       </section>
 
       <section className="border-b border-(--line) pb-6">
@@ -292,28 +274,11 @@ export function DashboardTab({
         {latestJob ? <LatestJobPanel feeds={feeds} job={latestJob} /> : <p className="mt-3 text-sm text-muted">No tracked jobs yet.</p>}
       </section>
 
-      <details className="rounded-md border border-(--line)">
-        <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-(--ink)">Cost and usage · last 3 days</summary>
-        <div className="border-t border-(--line) p-4">
+      <AdminDisclosure title="Cost and usage · last 3 days">
           {llmUsageError ? <p className="text-sm text-rose-700">{llmUsageError}</p> : llmUsage.length === 0 ? <p className="text-sm text-muted">No completed LLM jobs in this window.</p> : (
             <div className="overflow-x-auto"><table className="w-full min-w-[45rem] text-left text-xs"><thead className="border-b border-(--line) text-muted"><tr><th className="py-2 pr-3 font-medium">Time</th><th className="py-2 pr-3 font-medium">Job</th><th className="py-2 pr-3 font-medium">Model</th><th className="py-2 pr-3 font-medium">Requests</th><th className="py-2 pr-3 font-medium">Tokens · hit / miss / output</th><th className="py-2 font-medium">Cost</th></tr></thead><tbody>{llmUsage.map((item) => <tr key={item.job_id} className="border-b border-(--line)/70 last:border-0"><td className="py-2 pr-3 whitespace-nowrap text-muted">{formatJobTime(item.completed_at)}</td><td className="py-2 pr-3 text-(--ink)">{item.job_type} · {item.status}</td><td className="py-2 pr-3 text-muted">{item.model || "Unknown"}</td><td className="py-2 pr-3 text-muted">{formatTokenCount(item.request_count)}</td><td className="py-2 pr-3 whitespace-nowrap text-muted">{formatTokenCount(item.prompt_cache_hit_tokens)} / {formatTokenCount(item.prompt_cache_miss_tokens)} / {formatTokenCount(item.completion_tokens)}</td><td className="py-2 whitespace-nowrap text-(--ink)">{usageCostLabel(item)}</td></tr>)}</tbody></table></div>
           )}
-        </div>
-      </details>
-
-      <details className="rounded-md border border-(--line)">
-        <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-(--ink)">Diagnostics</summary>
-        <div className="space-y-6 border-t border-(--line) p-4">
-          <section>
-            <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-semibold text-(--ink)">Runtime</h3>{appMeta ? <span className="text-sm text-muted">{appMeta.name} v{appMeta.version} · {appMeta.mode}</span> : null}</div>
-            {appMeta ? <div className="mt-3 space-y-2 text-sm leading-6 text-muted"><p className="break-all">Server: <code>{appMeta.server_url ?? "Unavailable"}</code></p><p className="break-all">Install dir: <code>{appMeta.install_dir}</code></p><p className="break-all">Static dir: <code>{appMeta.static_dir}</code></p><p className="break-all">Data: <code>{appMeta.data_dir}</code></p><p className="break-all">Logs: <code>{appMeta.logs_dir}</code></p><p className="break-all">Config: <code>{appMeta.config_dir ?? "Unavailable"}</code></p></div> : <p className="mt-3 text-sm text-muted">Release metadata is unavailable.</p>}
-          </section>
-          <section className="border-t border-(--line) pt-5">
-            <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-semibold text-(--ink)">Update check</h3><Button isDisabled={appUpdateChecking} size="sm" variant="outline" onPress={onCheckForUpdates}><span className="inline-flex items-center gap-2">{appUpdateChecking ? <Spinner color="current" size="sm" /> : null}{appUpdateChecking ? "Checking..." : "Check for updates"}</span></Button></div>
-            {appUpdate ? <div className="mt-3 text-sm leading-6 text-muted"><p>Status: {appUpdate.status}</p>{appUpdate.latest_version ? <p>Latest version: {appUpdate.latest_version}</p> : null}{lastCheckedLabel ? <p>Last checked: {lastCheckedLabel}</p> : null}{appUpdate.detail ? <p>{appUpdate.detail}</p> : null}<div className="mt-3 flex flex-wrap gap-2">{appUpdate.download_url ? <a className="rounded-md border border-(--line) px-3 py-2 text-sm text-(--ink)" href={appUpdate.download_url} rel="noreferrer" target="_blank">Download installer</a> : null}{appUpdate.release_notes_url ? <a className="rounded-md border border-(--line) px-3 py-2 text-sm text-(--ink)" href={appUpdate.release_notes_url} rel="noreferrer" target="_blank">Release notes</a> : null}</div></div> : <p className="mt-3 text-sm text-muted">Update information is unavailable.</p>}
-          </section>
-        </div>
-      </details>
+      </AdminDisclosure>
     </div>
   );
 }
