@@ -40,31 +40,21 @@ export function useAdminActions(state: AppState, data: AppData) {
     setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
     if (openAdmin) setAdminOpen(true);
   }, [setAdminOpen, setJobs]);
-  const handleFeedChange = (index: number, field: "journal" | "url", value: string) => setFeeds((current) => current.map((item, itemIndex) => itemIndex === index ? {...item, [field]: value} : item));
-  const handleAddFeed = () => setFeeds((current) => [...current, {client_id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, journal: "", url: ""}]);
-  const handleAddFeeds = (items: FeedSubscription[]) => setFeeds((current) => {
-    const seen = new Set(current.map((feed) => feed.url.trim()).filter(Boolean));
-    const nextFeeds = items
-      .map((item) => ({journal: item.journal.trim(), url: item.url.trim()}))
-      .filter((item) => {
-        if (!item.journal || !item.url || seen.has(item.url)) return false;
-        seen.add(item.url);
-        return true;
-      })
-      .map((item) => ({...item, client_id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}));
-    return nextFeeds.length ? [...current, ...nextFeeds] : current;
-  });
-  const handleRemoveFeed = (index: number) => setFeeds((current) => current.filter((_item, itemIndex) => itemIndex !== index));
-  const handleSaveFeeds = async () => {
-    const cleaned = feeds.map((item) => ({journal: item.journal.trim(), url: item.url.trim()})).filter((item) => item.journal || item.url);
-    if (cleaned.some((item) => !item.journal || !item.url)) return pushMessage("feeds.validation.failed");
+  const handleSaveFeeds = async (nextFeeds?: FeedSubscription[]) => {
+    const cleaned = (nextFeeds ?? feeds).map((item) => ({journal: item.journal.trim(), url: item.url.trim()})).filter((item) => item.journal || item.url);
+    if (cleaned.some((item) => !item.journal || !item.url)) {
+      pushMessage("feeds.validation.failed");
+      return false;
+    }
     try {
       setFeedsSaving(true);
       setFeeds(hydrateEditableFeeds(await saveFeedSubscriptions(cleaned)));
       setFeedsLoaded(true);
       pushMessage("feeds.save.succeeded");
+      return true;
     } catch (error) {
       pushErrorMessage("feeds.save.failed", error, "Could not save RSS feed settings.");
+      return false;
     } finally { setFeedsSaving(false); }
   };
 
@@ -264,7 +254,7 @@ export function useAdminActions(state: AppState, data: AppData) {
   };
 
   return {
-    registerJob, handleFeedChange, handleAddFeed, handleAddFeeds, handleRemoveFeed, handleSaveFeeds,
+    registerJob, handleSaveFeeds,
     handleSaveConfig, handleSaveScheduler, handleSaveProfile, handleDeleteScheduler, handleTestClassifierModel,
     handleOpenAppTarget, handleExitApp, handleOnboardingSaveAndBootstrap,
     handleOnboardingSaveSettings, handleGenerateProposal, handleApplyProposal,

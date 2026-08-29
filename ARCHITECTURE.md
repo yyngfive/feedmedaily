@@ -162,8 +162,8 @@ Behavioral baseline:
 - the default review view is `Unread + Last 30 days`
 - paper cards stay summary-only
 - paper actions live in the detail panel
-- the settings drawer is split into `Dashboard`, `Feeds`, `Profile`, `Model`, and `App`: Dashboard owns sync/reclassify/protected-feed interruption controls plus update/runtime status, latest-job summaries, and the three-day LLM usage table; Feeds owns RSS subscription editing with stable editable rows, Profile owns profile/proposal/feedback review with multiline rule editing, Model owns classifier/profile model settings plus manual DeepSeek pricing, and App owns Zotero, local app fields, and scheduling
-- manual update checks are exposed both in `Settings -> Dashboard -> Update check` and in the footer status bar, and both routes trigger the same force-refresh update request
+- the settings drawer uses stable sidebar navigation for `Dashboard`, `Feeds`, `Profile`, `Model`, and `App`, with a horizontal fallback on narrow screens: Dashboard prioritizes active jobs and progressively discloses targeted sync, reclassification, and usage; Feeds edits an isolated local draft and opens catalog/custom additions as a focused secondary view; Profile keeps one primary review document and a secondary feedback queue; Model keeps credentials and defaults visible while tuning and pricing stay under Advanced with one save action; App owns visible update/runtime information followed by separate Zotero, scheduled-sync, and local-app panels. All single expandable settings use the same soft-surface HeroUI Disclosure pattern instead of native `details` elements.
+- manual update checks are exposed in the upper `Settings -> App -> About and updates` section and in the footer status bar, and both routes trigger the same force-refresh update request
 - app-update, scheduler, settings, proposal, and feedback hydration are non-critical background loads and must not block the card list from appearing
 - `Mark as read` and feedback mutations commit their local UI result first and use a non-blocking report reconcile pass afterward, so the card list stays visible during background refreshes
 

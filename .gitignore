@@ -35,6 +35,7 @@ data/classification_profile.json
 data/rss_feeds.json
 data/verification-profiles/
 data/verification-sessions.json
+data/
 logs/
 reports/
 build/

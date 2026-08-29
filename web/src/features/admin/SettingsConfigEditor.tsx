@@ -63,17 +63,21 @@ export type SettingsConfigEditorHandle = {
 
 export const SettingsConfigEditor = React.forwardRef<SettingsConfigEditorHandle, {
   fields: SettingsConfigField[];
+  hideGroupTitles?: boolean;
   intro?: React.ReactNode;
   saving: boolean;
   saveLabel?: string;
+  showHeader?: boolean;
   showSaveAction?: boolean;
   title?: string;
   onSave: (fields: Record<string, SettingsConfigUpdate>) => Promise<void>;
 }>(function SettingsConfigEditor({
   fields,
+  hideGroupTitles = false,
   intro,
   saving,
   saveLabel = "Save local settings",
+  showHeader = true,
   showSaveAction = true,
   title = "Local configuration",
   onSave,
@@ -103,6 +107,7 @@ export const SettingsConfigEditor = React.forwardRef<SettingsConfigEditorHandle,
   const buildPayload = React.useCallback(() => {
     const payload: Record<string, SettingsConfigUpdate> = {};
     fields.forEach((field) => {
+      if (field.source === "environment") return;
       if (field.secret) {
         const nextSecret = secretValues[field.key]?.trim() ?? "";
         const clear = Boolean(secretClears[field.key]);
@@ -122,7 +127,7 @@ export const SettingsConfigEditor = React.forwardRef<SettingsConfigEditorHandle,
 
   return (
     <div className="space-y-4">
-      <div className="border-b border-(--line) pb-4">
+      {showHeader ? <div className="border-b border-(--line) pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-3xl space-y-2">
             <h3 className="text-sm font-semibold text-(--ink)">{title}</h3>
@@ -139,12 +144,12 @@ export const SettingsConfigEditor = React.forwardRef<SettingsConfigEditorHandle,
             </Button>
           ) : null}
         </div>
-      </div>
+      </div> : null}
 
       {groups.map((group) => (
         <section key={group.section} className="border-b border-(--line) pb-5 last:border-b-0">
-          <h3 className="text-sm font-semibold text-(--ink)">{group.section}</h3>
-          <div className="mt-3 divide-y divide-(--line)">
+          {hideGroupTitles ? null : <h3 className="text-sm font-semibold text-(--ink)">{group.section}</h3>}
+          <div className={`${hideGroupTitles ? "" : "mt-3 "}divide-y divide-(--line)`}>
             {group.fields.map((field) => {
               const value = values[field.key] ?? "";
               const secretValue = secretValues[field.key] ?? "";
@@ -161,6 +166,7 @@ export const SettingsConfigEditor = React.forwardRef<SettingsConfigEditorHandle,
                   <div className="min-w-0">
                     {field.input_type === "select" ? (
                       <SelectField
+                        disabled={field.source === "environment"}
                         hideLabel
                         id={`settings-${field.key}`}
                         label={field.label}
@@ -173,6 +179,7 @@ export const SettingsConfigEditor = React.forwardRef<SettingsConfigEditorHandle,
                     ) : field.secret ? (
                       <>
                         <TextInputField
+                          disabled={field.source === "environment"}
                           hideLabel
                           label={field.label}
                           placeholder={
@@ -211,6 +218,7 @@ export const SettingsConfigEditor = React.forwardRef<SettingsConfigEditorHandle,
                     ) : (
                       <>
                         <TextInputField
+                          disabled={field.source === "environment"}
                           hideLabel
                           inputMode={field.input_type === "number" ? "numeric" : undefined}
                           label={field.label}

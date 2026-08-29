@@ -4,6 +4,7 @@ import {relevanceLabel} from "../../app/constants";
 import type {ClassificationProfile, FeedbackRecord, ProfileProposal} from "../../shared/types";
 import {ProfileProposalReview} from "../profile/ProfileProposalReview";
 import {ProfileRulesDocument} from "../profile/ProfileRulesDocument";
+import {AdminDisclosure} from "./AdminDisclosure";
 
 export function ProfileTab({
   feedback,
@@ -32,9 +33,14 @@ export function ProfileTab({
   const openFeedback = feedback.filter((item) => item.state === "open");
 
   return (
-    <div className="mt-5 space-y-5">
-      <div className="space-y-4">
-        <div className="flex justify-end">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-(--line) pb-4">
+        <div>
+          <h2 className="text-xl font-semibold text-(--ink)">Profile</h2>
+          <p className="mt-1 text-sm text-muted">Review the rules that guide paper classification.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-muted">{openFeedback.length} {openFeedback.length === 1 ? "feedback item" : "feedback items"}</span>
           <Button isDisabled={proposalGenerating} size="sm" variant="secondary" onPress={onGenerateProposal}>
             <span className="inline-flex items-center gap-2">
               {proposalGenerating ? <Spinner color="current" size="sm" /> : null}
@@ -42,6 +48,8 @@ export function ProfileTab({
             </span>
           </Button>
         </div>
+      </div>
+      <div className="space-y-4">
         {pendingProposal ? (
           profile ? (
             <ProfileProposalReview proposal={pendingProposal} onApplySelection={onApplyProposal} onRejectProposal={onRejectProposal} />
@@ -58,12 +66,8 @@ export function ProfileTab({
           </Card>
         )}
 
-        <Card className="rounded-md border border-(--line) bg-(--paper-accent) shadow-none">
-          <Card.Header className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-(--ink)">Feedback queue</h3>
-            <span className="text-sm text-muted">{openFeedback.length} open</span>
-          </Card.Header>
-          <Card.Content>
+        <AdminDisclosure meta={<span className="text-sm font-normal text-muted">{openFeedback.length} open</span>} title="Feedback queue">
+          <div>
             <div className="overflow-hidden rounded-md border border-(--line)">
               {openFeedback.length === 0 ? (
                 <p className="px-3 py-4 text-sm text-muted">No feedback submitted yet.</p>
@@ -94,8 +98,8 @@ export function ProfileTab({
                 </table>
               )}
             </div>
-          </Card.Content>
-        </Card>
+          </div>
+        </AdminDisclosure>
       </div>
     </div>
   );
