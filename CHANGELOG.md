@@ -2,9 +2,13 @@
 
 This changelog is grouped by version number and records each version relative to the previous released version.
 
-The latest released version is `0.5.0`. The next planned release is `0.5.1`, so unreleased product changes should be added under `0.5.1` until that version ships.
+The latest released version is `0.6.0`. The next planned release is `0.6.1`, so unreleased product changes should be added under `0.6.1` until that version ships.
 
-## 0.5.1 (Unreleased)
+## 0.6.1 (Unreleased)
+
+Changes since `0.6.0`:
+
+## 0.6.0 (2026-08-30)
 
 Changes since `0.5.0`:
 
