@@ -353,8 +353,8 @@ export async function launchProfileProposalGeneration(): Promise<JobInfo> {
 export async function applyProfileProposal(
   id: number,
   selection?: {accepted_change_ids: string[]; rejected_change_ids: string[]},
-): Promise<ProfileProposal> {
-  return localJSONRequest(
+): Promise<{proposal: ProfileProposal; job?: JobInfo}> {
+  const payload = await localJSONRequest<{proposal: ProfileProposal; job?: JobInfo}>(
     `/api/profile/proposals/${id}/apply`,
     {
       method: "POST",
@@ -364,6 +364,7 @@ export async function applyProfileProposal(
     "apply the profile proposal",
     "Could not apply the profile proposal",
   );
+  return payload;
 }
 
 export async function rejectProfileProposal(id: number): Promise<ProfileProposal> {
@@ -419,8 +420,32 @@ export async function launchAdminJob(
   return payload.job;
 }
 
+export type ReclassifyScope = "today" | "feedback" | "all" | "count" | "unclassified";
+
+export type ReclassifyOptions = {
+  paper_count: number;
+  classified_paper_count: number;
+  unclassified_paper_count: number;
+  today_paper_count: number;
+  today_classified_count: number;
+  today_unclassified_count: number;
+  count_paper_count: number;
+  count_classified_count: number;
+  count_unclassified_count: number;
+};
+
+export async function fetchReclassifyOptions(limit?: number): Promise<ReclassifyOptions> {
+  const query = limit === undefined ? "" : `?limit=${limit}`;
+  return localJSONRequest(
+    `/api/admin/reclassify${query}`,
+    undefined,
+    "load reclassification options",
+    "Could not load reclassification options",
+  );
+}
+
 export async function launchReclassifyJob(input: {
-  scope: "recent" | "feedback" | "all";
+  scope: ReclassifyScope;
   limit: number;
 }): Promise<JobInfo> {
   const payload = await localJSONRequest<{job: JobInfo}>(
@@ -445,12 +470,12 @@ export async function fetchJob(id: string): Promise<JobInfo> {
   );
 }
 
-export async function cancelSyncJob(id: string): Promise<JobInfo> {
+export async function cancelAdminJob(id: string): Promise<JobInfo> {
   const payload = await localJSONRequest<{job: JobInfo}>(
     `/api/admin/jobs/${encodeURIComponent(id)}/cancel`,
     {method: "POST"},
-    "stop the sync job",
-    "Could not stop the sync job",
+    "stop the job",
+    "Could not stop the job",
   );
   return payload.job;
 }

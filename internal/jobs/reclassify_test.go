@@ -3,12 +3,14 @@ package jobs
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yyngfive/scirssagent/internal/config"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
@@ -40,6 +42,67 @@ func TestSelectPaperIDsForScopeAndRebuildReport(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(settings.ReportsDir, "latest", "index.html")); !os.IsNotExist(err) {
 		t.Fatalf("expected no static report artifact, got err=%v", err)
 	}
+}
+
+func TestSelectPaperIDsForScopeSupportsLocalTodayAndCount(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	seedJobFixture(t, settings)
+	db, err := sql.Open("sqlite", settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execJobSQL(t, db, `
+INSERT INTO papers (
+  id, source_url, feed_title, title, url, doi, journal, authors_json, abstract,
+  abstract_source, published_date, first_seen_at, read_at, raw_json
+) VALUES
+  (2, 'https://example.com/rss', 'Fixture Feed', 'Today', 'https://example.com/today', NULL, NULL, '[]', NULL, 'none', NULL, '2026-05-16T03:00:00Z', NULL, '{}'),
+  (3, 'https://example.com/rss', 'Fixture Feed', 'Tomorrow', 'https://example.com/tomorrow', NULL, NULL, '[]', NULL, 'none', NULL, '2026-05-16T16:00:00Z', NULL, '{}');
+`)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	china := time.FixedZone("CST", 8*60*60)
+	now := time.Date(2026, 5, 16, 12, 0, 0, 0, china)
+	todayIDs, err := SelectPaperIDsForScopeAt(settings, "today", 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(int64Strings(todayIDs), ",") != "2,1" {
+		t.Fatalf("today ids = %#v, want [2 1]", todayIDs)
+	}
+	todayTotal, todayClassified, err := CountTodayPapers(settings, now)
+	if err != nil || todayTotal != 2 || todayClassified != 1 {
+		t.Fatalf("today counts = total %d classified %d, err=%v", todayTotal, todayClassified, err)
+	}
+	countIDs, err := SelectPaperIDsForScopeAt(settings, "count", 2, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(int64Strings(countIDs), ",") != "3,2" {
+		t.Fatalf("count ids = %#v, want [3 2]", countIDs)
+	}
+	unclassifiedIDs, err := SelectPaperIDsForScopeAt(settings, "unclassified", 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(int64Strings(unclassifiedIDs), ",") != "3,2" {
+		t.Fatalf("unclassified ids = %#v, want [3 2]", unclassifiedIDs)
+	}
+	count, err := CountPapers(settings)
+	if err != nil || count != 3 {
+		t.Fatalf("paper count = %d, err=%v", count, err)
+	}
+}
+
+func int64Strings(values []int64) []string {
+	items := make([]string, 0, len(values))
+	for _, value := range values {
+		items = append(items, fmt.Sprintf("%d", value))
+	}
+	return items
 }
 
 func TestReclassifyPaperIDsDegradesFailedBatchToSingles(t *testing.T) {

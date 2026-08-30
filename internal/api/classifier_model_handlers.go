@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -61,7 +62,7 @@ func (s *Server) handleClassifierModelTest(w http.ResponseWriter, r *http.Reques
 		"Classifier connection test queued.",
 		"model.test.running",
 		fmt.Sprintf("Testing %s.", model.Label),
-		func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
+		func(_ context.Context, progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
 			_ = progress
 			err := testClassifierConnectionFunc(classifier.LLMConfig{
 				APIKey:                        model.APIKey,
@@ -79,6 +80,7 @@ func (s *Server) handleClassifierModelTest(w http.ResponseWriter, r *http.Reques
 			}
 			return map[string]any{"model_id": model.ID, "provider": model.Provider}, nil
 		},
+		nil,
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})
 }

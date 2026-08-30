@@ -1,6 +1,8 @@
 package jobs
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/yyngfive/scirssagent/internal/config"
 	"github.com/yyngfive/scirssagent/internal/feeds"
@@ -87,6 +92,71 @@ func TestRunSyncBuildsSummaryWithoutDiskReportArtifacts(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(settings.ReportsDir, "latest", "index.html")); !os.IsNotExist(err) {
 		t.Fatalf("expected no static report artifact, got err=%v", err)
 	}
+}
+
+func TestRunSyncCancellationKeepsCompletedBatchAndRerunSkipsIt(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	settings.ClassifierBatchSize = 2
+	writeTestProfile(t, settings)
+	stubFetchedPapers(t, 4)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	secondBatchStarted := make(chan struct{})
+	var signalSecondBatch sync.Once
+	var classifierCalls atomic.Int32
+	firstServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = classifierUserPrompt(t, r)
+		if classifierCalls.Add(1) == 2 {
+			signalSecondBatch.Do(func() { close(secondBatchStarted) })
+			<-r.Context().Done()
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Relevant.\",\"translated_title_zh\":\"论文一\"},{\"id\":\"2\",\"relevance\":\"indirect\",\"confidence\":0.8,\"reason\":\"Context.\",\"translated_title_zh\":\"论文二\"}]}"}}]}`))
+	}))
+	settings.ClassifierBaseURL = firstServer.URL
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := RunSync(settings, RunOptions{Context: ctx}, nil)
+		result <- err
+	}()
+	select {
+	case <-secondBatchStarted:
+		cancel()
+	case err := <-result:
+		t.Fatalf("sync ended before the second classification batch: %v", err)
+	case <-time.After(10 * time.Second):
+		cancel()
+		err := <-result
+		t.Fatalf("second classification batch did not start; sync ended with %v", err)
+	}
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled sync error = %v", err)
+	}
+	firstServer.Close()
+
+	assertClassificationRowsByPaper(t, settings, map[int64]int{1: 1, 2: 1, 3: 0, 4: 0})
+
+	secondServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userContent := classifierUserPrompt(t, r)
+		if strings.Contains(userContent, "Paper 1") || strings.Contains(userContent, "Paper 2") {
+			t.Fatalf("rerun sent an already classified paper: %s", userContent)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Relevant.\",\"translated_title_zh\":\"论文三\"},{\"id\":\"2\",\"relevance\":\"indirect\",\"confidence\":0.8,\"reason\":\"Context.\",\"translated_title_zh\":\"论文四\"}]}"}}]}`))
+	}))
+	defer secondServer.Close()
+	settings.ClassifierBaseURL = secondServer.URL
+
+	summary, err := RunSync(settings, RunOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Classified != 2 {
+		t.Fatalf("rerun classified = %d, want 2", summary.Classified)
+	}
+	assertClassificationRowsByPaper(t, settings, map[int64]int{1: 1, 2: 1, 3: 1, 4: 1})
 }
 
 func TestRunSyncDoesNotExpandProfileTaxonomyAndClearsTopicTags(t *testing.T) {
@@ -447,5 +517,23 @@ func assertClassificationCount(t *testing.T, settings config.Settings, total int
 	}
 	if found != expected {
 		t.Fatalf("expected %d classifications, found %d", expected, found)
+	}
+}
+
+func assertClassificationRowsByPaper(t *testing.T, settings config.Settings, expected map[int64]int) {
+	t.Helper()
+	db, err := sql.Open("sqlite", settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for paperID, want := range expected {
+		var got int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM classifications WHERE paper_id = ?`, paperID).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("paper %d classification rows = %d, want %d", paperID, got, want)
+		}
 	}
 }

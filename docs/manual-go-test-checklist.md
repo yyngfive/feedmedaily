@@ -235,9 +235,9 @@ go run .\cmd\feedmedaily-tray --root .
 5. 删除 feedback 后卡片状态和列表同步清除。
 6. Generate proposal 创建后台 job。
 7. proposal 完成后自动刷新 review 文档。
-8. Apply 只重分类该 proposal 关联的 feedback papers。
+8. Apply 只重分类该 proposal 关联的 feedback papers；重分类以后台 job 运行，可在 Dashboard 停止。
 9. Reject 保留原 feedback，不误标 used。
-10. `recent`、`feedback`、`all` 三种 reclassify scope 均可启动。
+10. Reclassify 可选择当天、feedback、全部、指定数量或未分类；指定数量范围为 0 到数据库文章总数，且五种范围都必须通过独立确认按钮才会启动。
 
 ## 10. Zotero（可选）
 

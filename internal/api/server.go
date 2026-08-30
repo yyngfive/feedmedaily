@@ -57,7 +57,7 @@ var (
 	openExternalTargetFunc                                                                                           = appruntime.OpenExternalTarget
 	lookupUpdateTXTFunc                                                                                              = net.LookupTXT
 	selectReclassifyPaperIDsFunc                                                                                     = jobruntime.SelectPaperIDsForScope
-	reclassifyPaperIDsFunc                                                                                           = jobruntime.ReclassifyPaperIDs
+	reclassifyPaperIDsContextFunc                                                                                    = jobruntime.ReclassifyPaperIDsContext
 	rebuildLatestReportFunc                                                                                          = jobruntime.RebuildLatestReport
 	runSyncFunc                                                                                                      = jobruntime.RunSync
 	bootstrapProfileFunc                                                                                             = jobruntime.GenerateInitialProfileProposal

@@ -104,9 +104,12 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
   5. feedback can generate new full-profile proposals
   6. applying a proposal reclassifies linked feedback papers only
 - Reclassification scopes currently supported:
-  - `recent`
+  - `today`
   - `feedback`
   - `all`
+  - `count` (0 through the current database paper count)
+  - `unclassified` (papers without any classification record)
+- Reclassify jobs (manual and apply-proposal launched) run as cancellable background jobs through the same cancel endpoint as sync; cancellation preserves completed batches and the partial job result.
 - `Mark wrong` writes persistent feedback records to SQLite.
 - `Save to Zotero` uses the Zotero Web API and stores save status in SQLite.
 

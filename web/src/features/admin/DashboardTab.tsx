@@ -1,7 +1,7 @@
 import {Button, Chip, Spinner} from "@heroui/react";
 import React from "react";
 
-import {fetchLLMUsage} from "../../api/client";
+import {fetchLLMUsage, fetchReclassifyOptions, type ReclassifyOptions, type ReclassifyScope} from "../../api/client";
 import {CheckboxRow, TextAreaField, TextInputField} from "../../shared/components/FormFields";
 import type {FeedSubscription, JobInfo, LLMUsageRecord, LLMUsageSummary} from "../../shared/types";
 import {AdminDisclosure} from "./AdminDisclosure";
@@ -163,11 +163,9 @@ export function DashboardTab({
   hasFeeds,
   jobs,
   onOpenVerificationInBrowser,
-  onReclassifyAll,
-  onReclassifyFeedback,
-  onReclassifyRecent,
+  onReclassify,
   onRunSync,
-  onStopSync,
+  onStopJob,
   onStartVerification,
   onSubmitVerificationXML,
   verificationSubmitting,
@@ -177,11 +175,9 @@ export function DashboardTab({
   hasFeeds: boolean;
   jobs: JobInfo[];
   onOpenVerificationInBrowser: (job: JobInfo) => void;
-  onReclassifyAll: () => void;
-  onReclassifyFeedback: () => void;
-  onReclassifyRecent: () => void;
+  onReclassify: (scope: ReclassifyScope, limit?: number) => Promise<void> | void;
   onRunSync: (feedURLs?: string[]) => void;
-  onStopSync: (jobID: string) => Promise<void> | void;
+  onStopJob: (jobID: string, jobType: "sync" | "reclassify") => Promise<void> | void;
   onStartVerification: (job: JobInfo) => void;
   onSubmitVerificationXML: (job: JobInfo, xml: string) => Promise<void> | void;
   verificationSubmitting: boolean;
@@ -193,8 +189,15 @@ export function DashboardTab({
   const [llmUsage, setLLMUsage] = React.useState<LLMUsageRecord[]>([]);
   const [llmUsageError, setLLMUsageError] = React.useState<string | null>(null);
   const [stoppingSync, setStoppingSync] = React.useState(false);
+  const [reclassifyScope, setReclassifyScope] = React.useState<ReclassifyScope>("today");
+  const [reclassifyLimit, setReclassifyLimit] = React.useState("0");
+  const [reclassifyOptions, setReclassifyOptions] = React.useState<ReclassifyOptions | null>(null);
+  const [reclassifyOptionsError, setReclassifyOptionsError] = React.useState<string | null>(null);
+  const [reclassifying, setReclassifying] = React.useState(false);
+  const [stoppingReclassify, setStoppingReclassify] = React.useState(false);
   const latestJob = jobs[0] ?? null;
   const activeSyncJob = jobs.find((job) => job.job_type === "sync" && ["queued", "running", "waiting_for_user"].includes(job.status)) ?? null;
+  const activeReclassifyJob = jobs.find((job) => job.job_type === "reclassify" && ["queued", "running"].includes(job.status)) ?? null;
   const verificationJob = jobs.find((job) => job.status === "waiting_for_user" && job.verification_required) ?? null;
   const savedSyncFeedURLs = React.useMemo(() => feeds.map((feed) => feed.url.trim()).filter(Boolean), [feeds]);
   const syncFeedMatches = React.useMemo(() => {
@@ -214,6 +217,18 @@ export function DashboardTab({
     return () => { cancelled = true; };
   }, [latestJob?.finished_at]);
   React.useEffect(() => {
+    let cancelled = false;
+    void fetchReclassifyOptions().then((options) => {
+      if (cancelled) return;
+      setReclassifyOptions(options);
+      setReclassifyOptionsError(null);
+      setReclassifyLimit((current) => String(Math.min(Number.parseInt(current, 10) || 0, options.paper_count)));
+    }).catch(() => {
+      if (!cancelled) setReclassifyOptionsError("Could not load the database paper count.");
+    });
+    return () => { cancelled = true; };
+  }, [latestJob?.finished_at]);
+  React.useEffect(() => {
     const savedURLs = new Set(savedSyncFeedURLs);
     setSelectedSyncFeedURLs((current) => current.filter((url) => savedURLs.has(url)));
   }, [savedSyncFeedURLs]);
@@ -226,7 +241,62 @@ export function DashboardTab({
   const stopSync = () => {
     if (!activeSyncJob || activeSyncJob.cancel_requested || stoppingSync) return;
     setStoppingSync(true);
-    void Promise.resolve(onStopSync(activeSyncJob.id)).catch(() => undefined).finally(() => setStoppingSync(false));
+    void Promise.resolve(onStopJob(activeSyncJob.id, "sync")).catch(() => undefined).finally(() => setStoppingSync(false));
+  };
+
+  const stopReclassify = () => {
+    if (!activeReclassifyJob || activeReclassifyJob.cancel_requested || stoppingReclassify) return;
+    setStoppingReclassify(true);
+    void Promise.resolve(onStopJob(activeReclassifyJob.id, "reclassify")).catch(() => undefined).finally(() => setStoppingReclassify(false));
+  };
+
+  const parsedReclassifyLimit = Number.parseInt(reclassifyLimit, 10);
+  const reclassifyLimitIsInteger = /^\d+$/.test(reclassifyLimit.trim());
+  const reclassifyPaperCount = reclassifyOptions?.paper_count ?? null;
+  const reclassifyLimitValid = reclassifyScope !== "count" || (
+    reclassifyPaperCount !== null
+    && reclassifyLimitIsInteger
+    && Number.isInteger(parsedReclassifyLimit)
+    && parsedReclassifyLimit >= 0
+    && parsedReclassifyLimit <= reclassifyPaperCount
+  );
+  React.useEffect(() => {
+    // 指定数量范围需要按最新入库拆分已分类/未分类，随输入防抖刷新。
+    if (reclassifyScope !== "count" || !reclassifyLimitValid) return;
+    const timer = window.setTimeout(() => {
+      fetchReclassifyOptions(parsedReclassifyLimit).then((options) => {
+        setReclassifyOptions(options);
+      }).catch(() => undefined);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [reclassifyScope, reclassifyLimitValid, parsedReclassifyLimit]);
+  const reclassifyPreview = (() => {
+    if (reclassifyScope === "feedback") {
+      return "Papers linked to your profile feedback will be reclassified.";
+    }
+    if (reclassifyOptions === null) {
+      return null;
+    }
+    if (reclassifyScope === "today") {
+      const total = reclassifyOptions.today_paper_count;
+      return `${total} papers entered today: ${reclassifyOptions.today_classified_count} classified, ${reclassifyOptions.today_unclassified_count} unclassified. This job will process all ${total}.`;
+    }
+    if (reclassifyScope === "all") {
+      const total = reclassifyOptions.paper_count;
+      return `${total} papers in the database: ${reclassifyOptions.classified_paper_count} classified, ${reclassifyOptions.unclassified_paper_count} unclassified. This job will process all ${total}.`;
+    }
+    if (reclassifyScope === "unclassified") {
+      const total = reclassifyOptions.unclassified_paper_count;
+      return `${total} papers have no classification yet. This job will process all ${total}.`;
+    }
+    const total = reclassifyOptions.count_paper_count;
+    return `${total} newest papers selected: ${reclassifyOptions.count_classified_count} classified, ${reclassifyOptions.count_unclassified_count} unclassified. This job will process all ${total}.`;
+  })();
+  const confirmReclassify = () => {
+    if (!reclassifyLimitValid || reclassifying || activeReclassifyJob) return;
+    setReclassifying(true);
+    const limit = reclassifyScope === "count" ? parsedReclassifyLimit : 0;
+    void Promise.resolve(onReclassify(reclassifyScope, limit)).finally(() => setReclassifying(false));
   };
 
   return (
@@ -242,7 +312,7 @@ export function DashboardTab({
         <h3 className="text-sm font-semibold text-(--ink)">Sync</h3>
         {!hasFeeds ? <p className="mt-2 text-sm leading-6 text-muted">Add and save at least one RSS feed before running a manual sync.</p> : null}
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button isDisabled={!hasFeeds || Boolean(activeSyncJob)} size="sm" onPress={runSync}>{activeSyncJob ? "Sync running" : "Sync now"}</Button>
+          <Button isDisabled={!hasFeeds || Boolean(activeSyncJob) || Boolean(activeReclassifyJob)} size="sm" onPress={runSync}>{activeSyncJob ? "Sync running" : activeReclassifyJob ? "Reclassification running" : "Sync now"}</Button>
           {activeSyncJob ? <Button isDisabled={stoppingSync || Boolean(activeSyncJob.cancel_requested)} size="sm" variant="danger" onPress={stopSync}>{stoppingSync || activeSyncJob.cancel_requested ? "Stopping…" : "Stop sync"}</Button> : null}
         </div>
         {hasFeeds ? (
@@ -261,10 +331,43 @@ export function DashboardTab({
           </AdminDisclosure></div>
         ) : null}
         <div className="mt-4"><AdminDisclosure title="Reclassify papers">
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onPress={onReclassifyRecent}>Recent 50</Button>
-            <Button size="sm" variant="outline" onPress={onReclassifyFeedback}>Feedback papers</Button>
-            <Button size="sm" variant="ghost" onPress={onReclassifyAll}>All papers</Button>
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Reclassification range">
+              {([
+                ["today", "Today"],
+                ["feedback", "Feedback papers"],
+                ["all", "All papers"],
+                ["count", "Specific count"],
+                ["unclassified", "Unclassified papers"],
+              ] as Array<[ReclassifyScope, string]>).map(([scope, label]) => (
+                <Button key={scope} aria-pressed={reclassifyScope === scope} size="sm" variant={reclassifyScope === scope ? "secondary" : "outline"} onPress={() => setReclassifyScope(scope)}>{label}</Button>
+              ))}
+            </div>
+            {reclassifyScope === "count" ? (
+              <TextInputField
+                className="max-w-72"
+                description={reclassifyPaperCount === null ? "Loading database paper count…" : `Enter 0–${reclassifyPaperCount}. Newest papers are selected first.`}
+                disabled={reclassifyPaperCount === null}
+                inputMode="numeric"
+                label="Number of papers"
+                type="number"
+                value={reclassifyLimit}
+                onChange={setReclassifyLimit}
+              />
+            ) : null}
+            {reclassifyOptionsError ? <p className="text-sm text-rose-700">{reclassifyOptionsError}</p> : null}
+            {!reclassifyLimitValid ? <p className="text-sm text-rose-700">Enter a whole number from 0 to {reclassifyPaperCount ?? 0}.</p> : null}
+            {reclassifyPreview ? <p className="text-sm leading-6 text-muted">{reclassifyPreview}</p> : null}
+            <div className="flex flex-wrap gap-2">
+              <Button isDisabled={!reclassifyLimitValid || reclassifying || Boolean(activeReclassifyJob) || Boolean(activeSyncJob)} size="sm" onPress={confirmReclassify}>
+                {reclassifying || activeReclassifyJob ? "Reclassifying…" : activeSyncJob ? "Sync running" : "Confirm reclassification"}
+              </Button>
+              {activeReclassifyJob ? (
+                <Button isDisabled={stoppingReclassify || Boolean(activeReclassifyJob.cancel_requested)} size="sm" variant="danger" onPress={stopReclassify}>
+                  {stoppingReclassify || activeReclassifyJob.cancel_requested ? "Stopping…" : "Stop reclassification"}
+                </Button>
+              ) : null}
+            </div>
           </div>
         </AdminDisclosure></div>
       </section>

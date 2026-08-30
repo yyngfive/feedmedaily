@@ -3,7 +3,7 @@ import React from "react";
 import {
   applyProfileProposal,
   bootstrapProfile,
-  cancelSyncJob,
+  cancelAdminJob,
   deleteSchedulerSettings,
   exitApp,
   launchAdminJob,
@@ -21,6 +21,7 @@ import {
   testClassifierModel,
 } from "../api/client";
 import type {ClassifierModelsUpdate, ClassificationProfile, FeedSubscription, JobInfo, SettingsConfigUpdate} from "../shared/types";
+import type {ReclassifyScope} from "../api/client";
 import type {AppData} from "./useAppData";
 import type {AppState} from "./useAppState";
 
@@ -182,7 +183,8 @@ export function useAdminActions(state: AppState, data: AppData) {
   const handleApplyProposal = async (id: number, selection?: {accepted_change_ids: string[]; rejected_change_ids: string[]}) => {
     try {
       setBusy(true);
-      await applyProfileProposal(id, selection);
+      const {proposal, job} = await applyProfileProposal(id, selection);
+      if (job) { registerJob(job); pushMessage("job.reclassify.started"); }
       const currentProfile = await refreshProfileGate();
       await Promise.all([refreshFeedback(), refreshProposals(), currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve()]);
       pushMessage("profile.proposal.applied");
@@ -218,13 +220,13 @@ export function useAdminActions(state: AppState, data: AppData) {
     try { registerJob(await launchAdminJob(path, feedURLs?.length ? {feed_urls: feedURLs} : undefined)); pushMessage("job.started"); }
     catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not start the sync job."); }
   };
-  const handleStopSync = React.useCallback(async (jobID: string) => {
+  const handleStopJob = React.useCallback(async (jobID: string, jobType: "sync" | "reclassify") => {
     try {
-      const job = await cancelSyncJob(jobID);
+      const job = await cancelAdminJob(jobID);
       registerJob(job, false);
-      pushMessage("sync.cancel.requested");
+      pushMessage(jobType === "reclassify" ? "reclassify.cancel.requested" : "sync.cancel.requested");
     } catch (error) {
-      pushErrorMessage("sync.cancel.failed", error, "Could not stop the sync job.");
+      pushErrorMessage("job.cancel.failed", error, "Could not stop the job.");
     }
   }, [pushErrorMessage, pushMessage, registerJob]);
   const handleStartVerification = React.useCallback(async (job: JobInfo) => {
@@ -248,8 +250,8 @@ export function useAdminActions(state: AppState, data: AppData) {
     } catch (error) { setVerificationSubmitError(errorText(error, "Could not submit protected feed XML.")); }
     finally { setVerificationSubmitting(false); }
   }, [errorText, pushMessage, setVerificationSubmitError, setVerificationSubmitting]);
-  const handleReclassify = async (scope: "recent" | "feedback" | "all") => {
-    try { registerJob(await launchReclassifyJob({scope, limit: scope === "all" ? 500 : 50})); pushMessage("job.reclassify.started"); }
+  const handleReclassify = async (scope: ReclassifyScope, limit = 0) => {
+    try { registerJob(await launchReclassifyJob({scope, limit})); pushMessage("job.reclassify.started"); }
     catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not start the reclassification job."); }
   };
 
@@ -259,7 +261,7 @@ export function useAdminActions(state: AppState, data: AppData) {
     handleOpenAppTarget, handleExitApp, handleOnboardingSaveAndBootstrap,
     handleOnboardingSaveSettings, handleGenerateProposal, handleApplyProposal,
     handleRejectProposal, handleOnboardingAcceptDraft, handleOnboardingRejectProposal,
-    handleRunAdminJob, handleStopSync, handleStartVerification, handleOpenVerificationInBrowser,
+    handleRunAdminJob, handleStopJob, handleStartVerification, handleOpenVerificationInBrowser,
     handleSubmitVerificationXML, handleReclassify,
   };
 }

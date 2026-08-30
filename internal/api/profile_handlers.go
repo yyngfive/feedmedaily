@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
@@ -91,9 +92,10 @@ func (s *Server) handleProfileBootstrap(w http.ResponseWriter, r *http.Request) 
 		"Queued initial profile generation.",
 		"profile.bootstrap.generating",
 		"Generating the initial classification profile proposal.",
-		func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
+		func(_ context.Context, progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
 			return bootstrapProfileFunc(serverSettings, payload.InterestDescription, payload.Name, progress, usage)
 		},
+		nil,
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})
 }
@@ -196,9 +198,10 @@ func (s *Server) handleProfileProposalGenerate(w http.ResponseWriter, r *http.Re
 		"",
 		"profile.proposal.collecting_feedback",
 		"Collecting feedback for profile review.",
-		func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
+		func(_ context.Context, progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
 			return generateProfileProposalFunc(serverSettings, progress, usage)
 		},
+		nil,
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})
 }
@@ -547,17 +550,32 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "Profile proposal disappeared after apply.")
 		return
 	}
+	// 关联 feedback 论文的重分类走后台 job：不阻塞 apply 响应，且可在 Dashboard 停止。
+	// 若 sync 或其他 reclassify 正在执行，job 保持 queued 并在 pipeline 锁空闲后自动开始。
+	// 锁实例在启动时捕获，等待 goroutine 稍后执行也不会误取新的锁实例。
+	var reclassifyJob *jobInfo
 	if len(paperIDs) > 0 {
-		if _, err := reclassifyPaperIDsFunc(serverSettings, paperIDs, nil); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	if _, err := rebuildLatestReportFunc(serverSettings, nil); err != nil {
+		pipelineMu := pipelineWork
+		job := launchLocalJob(
+			serverSettings,
+			"reclassify",
+			"job.started",
+			"Waiting for the active sync or reclassification to finish.",
+			"pipeline.metadata.enriching",
+			"Getting metadata for papers to reclassify.",
+			reclassifyJobRunFunc(serverSettings, "feedback", func() ([]int64, error) { return paperIDs, nil }),
+			func(ctx context.Context) (func(), error) { return lockMuBlocking(pipelineMu, ctx) },
+		)
+		reclassifyJob = &job
+	} else if _, err := rebuildLatestReportFunc(serverSettings, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, updatedProposal)
+	response := map[string]any{"proposal": updatedProposal}
+	if reclassifyJob != nil {
+		response["job"] = *reclassifyJob
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func appliedProposalFeedbackIDs(proposal *store.ProfileProposal, finalizedChanges []profile.ProposalChange) []int64 {

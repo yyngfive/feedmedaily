@@ -107,10 +107,8 @@ export function App() {
         onApplyProposal={(id, selection) => void admin.handleApplyProposal(id, selection)}
         onRejectProposal={(id) => void admin.handleRejectProposal(id)}
         onRunSync={(feedURLs) => void admin.handleRunAdminJob("/api/admin/run", feedURLs)}
-        onStopSync={admin.handleStopSync}
-        onReclassifyRecent={() => void admin.handleReclassify("recent")}
-        onReclassifyFeedback={() => void admin.handleReclassify("feedback")}
-        onReclassifyAll={() => void admin.handleReclassify("all")}
+        onStopJob={admin.handleStopJob}
+        onReclassify={admin.handleReclassify}
         onDeleteFeedback={(id) => void review.handleDeleteFeedback(id)}
         scheduler={state.scheduler}
         schedulerSaving={state.schedulerSaving}

@@ -1,6 +1,7 @@
 import {Button} from "@heroui/react";
 import React from "react";
 
+import {type ReclassifyScope} from "../../api/client";
 import type {
   AppMeta,
   AppUpdate,
@@ -58,12 +59,10 @@ export type AdminPanelProps = {
   onDeleteScheduler: () => Promise<void>;
   onGenerateProposal: () => void;
   onOpenVerificationInBrowser: (job: JobInfo) => void;
-  onReclassifyAll: () => void;
-  onReclassifyFeedback: () => void;
-  onReclassifyRecent: () => void;
+  onReclassify: (scope: ReclassifyScope, limit?: number) => Promise<void> | void;
   onRejectProposal: (id: number) => void;
   onRunSync: (feedURLs?: string[]) => void;
-  onStopSync: (jobID: string) => Promise<void> | void;
+  onStopJob: (jobID: string, jobType: "sync" | "reclassify") => Promise<void> | void;
   onSaveConfig: (fields: Record<string, SettingsConfigUpdate>, classifierModels?: ClassifierModelsUpdate) => Promise<void>;
   onTestClassifierModel: (modelID: string, apiKey?: string) => Promise<JobInfo>;
   onSaveFeeds: (feeds?: FeedSubscription[]) => Promise<boolean | void> | boolean | void;
@@ -200,11 +199,9 @@ export function AdminPanel(props: AdminPanelProps) {
               hasFeeds={props.hasFeeds}
               jobs={props.jobs}
               onOpenVerificationInBrowser={props.onOpenVerificationInBrowser}
-              onReclassifyAll={props.onReclassifyAll}
-              onReclassifyFeedback={props.onReclassifyFeedback}
-              onReclassifyRecent={props.onReclassifyRecent}
+              onReclassify={props.onReclassify}
               onRunSync={props.onRunSync}
-              onStopSync={props.onStopSync}
+              onStopJob={props.onStopJob}
               onStartVerification={props.onStartVerification}
               onSubmitVerificationXML={props.onSubmitVerificationXML}
               verificationSubmitting={props.verificationSubmitting}
