@@ -194,6 +194,75 @@ func (s *Store) RecentPaperIDs(limit int) ([]int64, error) {
 	return scanIDRows(rows, "recent paper ids")
 }
 
+func (s *Store) PaperIDsSeenBetween(start time.Time, end time.Time) ([]int64, error) {
+	rows, err := s.db.Query(`
+		SELECT id FROM papers
+		WHERE first_seen_at >= ? AND first_seen_at < ?
+		ORDER BY first_seen_at DESC
+	`, start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, fmt.Errorf("query paper ids by first-seen time: %w", err)
+	}
+	defer rows.Close()
+	return scanIDRows(rows, "paper ids by first-seen time")
+}
+
+func (s *Store) PaperCountsSeenBetween(start time.Time, end time.Time) (int, int, error) {
+	var total int
+	var classified int
+	err := s.db.QueryRow(`
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN EXISTS (
+				SELECT 1 FROM classifications c WHERE c.paper_id = p.id
+			) THEN 1 ELSE 0 END), 0)
+		FROM papers p
+		WHERE first_seen_at >= ? AND first_seen_at < ?
+	`, start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano)).Scan(&total, &classified)
+	if err != nil {
+		return 0, 0, fmt.Errorf("count papers by first-seen time: %w", err)
+	}
+	return total, classified, nil
+}
+
+func (s *Store) PaperCount() (int, error) {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM papers`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count papers: %w", err)
+	}
+	return count, nil
+}
+
+func (s *Store) ClassifiedPaperCount() (int, error) {
+	var count int
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM papers p
+		WHERE EXISTS (SELECT 1 FROM classifications c WHERE c.paper_id = p.id)
+	`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count classified papers: %w", err)
+	}
+	return count, nil
+}
+
+func (s *Store) RecentPaperClassificationCounts(limit int) (int, int, error) {
+	var total int
+	var classified int
+	err := s.db.QueryRow(`
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN EXISTS (
+				SELECT 1 FROM classifications c WHERE c.paper_id = selected.id
+			) THEN 1 ELSE 0 END), 0)
+		FROM (
+			SELECT id FROM papers ORDER BY first_seen_at DESC LIMIT ?
+		) selected
+	`, limit).Scan(&total, &classified)
+	if err != nil {
+		return 0, 0, fmt.Errorf("count recent paper classifications: %w", err)
+	}
+	return total, classified, nil
+}
+
 func (s *Store) AllPaperIDs() ([]int64, error) {
 	rows, err := s.db.Query(`SELECT id FROM papers ORDER BY first_seen_at DESC`)
 	if err != nil {
@@ -201,6 +270,19 @@ func (s *Store) AllPaperIDs() ([]int64, error) {
 	}
 	defer rows.Close()
 	return scanIDRows(rows, "all paper ids")
+}
+
+func (s *Store) UnclassifiedPaperIDs() ([]int64, error) {
+	rows, err := s.db.Query(`
+		SELECT p.id FROM papers p
+		WHERE NOT EXISTS (SELECT 1 FROM classifications c WHERE c.paper_id = p.id)
+		ORDER BY p.first_seen_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query unclassified paper ids: %w", err)
+	}
+	defer rows.Close()
+	return scanIDRows(rows, "unclassified paper ids")
 }
 
 func (s *Store) FeedbackPaperIDs() ([]int64, error) {

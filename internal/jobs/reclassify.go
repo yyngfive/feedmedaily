@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -8,13 +9,16 @@ import (
 	"github.com/yyngfive/scirssagent/internal/config"
 	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"github.com/yyngfive/scirssagent/internal/logging"
-	"github.com/yyngfive/scirssagent/internal/metadata"
 	"github.com/yyngfive/scirssagent/internal/profile"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
 
 func SelectPaperIDsForScope(settings config.Settings, scope string, limit int) ([]int64, error) {
-	// 复刻 Python reclassify scope 到 paper ids 的选择逻辑。
+	return SelectPaperIDsForScopeAt(settings, scope, limit, time.Now())
+}
+
+func SelectPaperIDsForScopeAt(settings config.Settings, scope string, limit int, now time.Time) ([]int64, error) {
+	// 将管理界面的重分类范围转换成稳定的 paper ids 列表。
 	sqliteStore, err := store.Open(settings.DatabasePath)
 	if err != nil {
 		return nil, err
@@ -22,21 +26,73 @@ func SelectPaperIDsForScope(settings config.Settings, scope string, limit int) (
 	defer sqliteStore.Close()
 
 	switch scope {
+	case "today":
+		localNow := now.In(now.Location())
+		start := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, localNow.Location())
+		return sqliteStore.PaperIDsSeenBetween(start, start.AddDate(0, 0, 1))
+	case "count":
+		return sqliteStore.RecentPaperIDs(limit)
 	case "recent":
 		return sqliteStore.RecentPaperIDs(limit)
 	case "feedback":
 		return sqliteStore.FeedbackPaperIDs()
 	case "all":
 		return sqliteStore.AllPaperIDs()
+	case "unclassified":
+		return sqliteStore.UnclassifiedPaperIDs()
 	default:
-		return nil, fmt.Errorf("scope must be recent, feedback, or all.")
+		return nil, fmt.Errorf("scope must be today, feedback, all, count, or unclassified.")
 	}
 }
 
+func CountPapers(settings config.Settings) (int, error) {
+	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
+	if err != nil {
+		return 0, err
+	}
+	defer sqliteStore.Close()
+	return sqliteStore.PaperCount()
+}
+
+func CountClassifiedPapers(settings config.Settings) (int, error) {
+	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
+	if err != nil {
+		return 0, err
+	}
+	defer sqliteStore.Close()
+	return sqliteStore.ClassifiedPaperCount()
+}
+
+func CountRecentPaperClassifications(settings config.Settings, limit int) (int, int, error) {
+	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer sqliteStore.Close()
+	return sqliteStore.RecentPaperClassificationCounts(limit)
+}
+
+func CountTodayPapers(settings config.Settings, now time.Time) (int, int, error) {
+	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer sqliteStore.Close()
+	localNow := now.In(now.Location())
+	start := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, localNow.Location())
+	return sqliteStore.PaperCountsSeenBetween(start, start.AddDate(0, 0, 1))
+}
+
 func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress ProgressFunc, collectors ...*llmusage.Collector) (int, error) {
-	// 用 Go 原生 metadata + classifier 重分类现有 papers。
+	return ReclassifyPaperIDsContext(settings, paperIDs, context.Background(), progress, collectors...)
+}
+
+func ReclassifyPaperIDsContext(settings config.Settings, paperIDs []int64, ctx context.Context, progress ProgressFunc, collectors ...*llmusage.Collector) (int, error) {
+	// 用可取消的 Go 原生 metadata + classifier 重分类现有 papers。
 	logging.SetDefaultDir(settings.LogsDir)
-	EmitProgress(progress, PercentProgress("pipeline.metadata.enriching", "metadata", 0, len(paperIDs), metadataProgressMessage(0, len(paperIDs))))
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	currentProfile, err := profile.ReadCurrent(settings.ProfilePath)
 	if err != nil {
 		return 0, err
@@ -52,89 +108,14 @@ func ReclassifyPaperIDs(settings config.Settings, paperIDs []int64, progress Pro
 	if err != nil {
 		return 0, err
 	}
+	cfg.Context = ctx
 	sqliteStore, err := store.Open(settings.DatabasePath)
 	if err != nil {
 		return 0, err
 	}
 	defer sqliteStore.Close()
-
-	enrichedPairs := make([]classificationPaperPair, 0, len(paperIDs))
-	now := time.Now().UTC()
-	for _, paperID := range paperIDs {
-		paper, err := sqliteStore.PaperByID(paperID)
-		if err != nil {
-			return 0, err
-		}
-		if paper == nil {
-			continue
-		}
-		enriched := metadata.EnrichPaper(*paper)
-		enriched.ID = paperID
-		if _, _, err := sqliteStore.UpsertPaper(enriched, now); err != nil {
-			return 0, err
-		}
-		enrichedPairs = append(enrichedPairs, classificationPaperPair{PaperID: paperID, Paper: enriched})
-		EmitProgress(progress, PercentProgress(
-			"pipeline.metadata.enriching",
-			"metadata",
-			len(enrichedPairs),
-			len(paperIDs),
-			metadataProgressMessage(len(enrichedPairs), len(paperIDs)),
-		))
-	}
-	if len(enrichedPairs) == 0 {
-		return 0, nil
-	}
-	EmitProgress(progress, PercentProgress(
-		"pipeline.classifier.classifying",
-		"classification",
-		0,
-		len(enrichedPairs),
-		classificationProgressMessage(0, len(enrichedPairs)),
-	))
-	batchSize := settings.ClassifierBatchSize
-	if batchSize < 1 {
-		batchSize = config.DefaultClassifierBatchSize
-	}
-	classified := 0
-	classificationWarnings := []string{}
-	for start := 0; start < len(enrichedPairs); start += batchSize {
-		end := min(start+batchSize, len(enrichedPairs))
-		batch := enrichedPairs[start:end]
-		batchNumber := start/batchSize + 1
-		totalBatches := (len(enrichedPairs) + batchSize - 1) / batchSize
-		_, _ = logging.WriteDefault(logging.Event{
-			Level:     "info",
-			Component: "jobs.reclassify",
-			Action:    "batch_started",
-			Message:   fmt.Sprintf("Classifying batch %d/%d (%d paper(s))", batchNumber, totalBatches, len(batch)),
-			Data:      map[string]any{"batch": batchNumber, "total_batches": totalBatches, "batch_size": len(batch)},
-		})
-		batchClassified, batchWarnings, err := classifyAndSaveBatch(sqliteStore, "jobs.reclassify", batch, currentProfile, cfg)
-		if err != nil {
-			return 0, err
-		}
-		classified += batchClassified
-		classificationWarnings = append(classificationWarnings, batchWarnings...)
-		EmitProgress(progress, PercentProgress(
-			"pipeline.classifier.classifying",
-			"classification",
-			classified,
-			len(enrichedPairs),
-			classificationProgressMessage(classified, len(enrichedPairs)),
-		))
-		_, _ = logging.WriteDefault(logging.Event{
-			Level:     "info",
-			Component: "jobs.reclassify",
-			Action:    "batch_completed",
-			Message:   fmt.Sprintf("Finished batch %d/%d", batchNumber, totalBatches),
-			Data:      map[string]any{"batch": batchNumber, "total_batches": totalBatches, "classified_running": classified},
-		})
-	}
-	if classified == 0 && len(classificationWarnings) > 0 {
-		return classified, fmt.Errorf("all classification attempts failed: %s", summarizeClassificationWarnings(classificationWarnings))
-	}
-	return classified, nil
+	classified, _, err := reclassifyExistingPapersContext(sqliteStore, settings, currentProfile, cfg, paperIDs, ctx, progress)
+	return classified, err
 }
 
 func RebuildLatestReport(settings config.Settings, progress ProgressFunc) (int, error) {

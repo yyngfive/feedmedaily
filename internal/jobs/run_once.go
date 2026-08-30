@@ -83,8 +83,9 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 	if err != nil {
 		return RunSummary{}, err
 	}
+	summary := RunSummary{Fetched: fetchResult.Fetched, Errors: append([]string(nil), fetchResult.Errors...)}
 	if err := ctx.Err(); err != nil {
-		return RunSummary{}, err
+		return summary, err
 	}
 	if len(fetchResult.VerificationRequests) > 0 {
 		return RunSummary{}, &VerificationRequiredError{Requests: fetchResult.VerificationRequests}
@@ -121,7 +122,7 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 	updated := 0
 	for _, paper := range fetchResult.Papers {
 		if err := ctx.Err(); err != nil {
-			return RunSummary{}, err
+			return summary, err
 		}
 		paperID, isNew, err := sqliteStore.UpsertPaper(paper, now)
 		if err != nil {
@@ -133,9 +134,11 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 		} else {
 			updated++
 		}
+		summary.Inserted = inserted
+		summary.Updated = updated
 	}
 	if err := ctx.Err(); err != nil {
-		return RunSummary{}, err
+		return summary, err
 	}
 
 	pendingIDs := touchedIDs
@@ -159,24 +162,20 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 		},
 	})
 	classified, classificationWarnings, err := reclassifyExistingPapersContext(sqliteStore, settings, currentProfile, cfg, pendingIDs, ctx, progress)
+	summary.Classified = classified
+	summary.Errors = append(summary.Errors, classificationWarnings...)
 	if err != nil {
-		return RunSummary{}, err
+		return summary, err
 	}
 	if err := ctx.Err(); err != nil {
-		return RunSummary{}, err
+		return summary, err
 	}
 	reportCount, err := rebuildLatestReportSummary(settings, progress)
 	if err != nil {
 		return RunSummary{}, err
 	}
 	_ = reportCount
-	return RunSummary{
-		Fetched:    fetchResult.Fetched,
-		Inserted:   inserted,
-		Updated:    updated,
-		Classified: classified,
-		Errors:     append(fetchResult.Errors, classificationWarnings...),
-	}, nil
+	return summary, nil
 }
 
 func filterNonSkippedErrors(errors []string, skippedFeeds map[string]string) []string {
@@ -257,7 +256,7 @@ func reclassifyExistingPapersContext(sqliteStore *store.Store, settings config.S
 	classificationWarnings := []string{}
 	for start := 0; start < len(enrichedPairs); start += batchSize {
 		if err := ctx.Err(); err != nil {
-			return 0, classificationWarnings, err
+			return classified, classificationWarnings, err
 		}
 		end := min(start+batchSize, len(enrichedPairs))
 		batch := enrichedPairs[start:end]
@@ -275,11 +274,11 @@ func reclassifyExistingPapersContext(sqliteStore *store.Store, settings config.S
 			},
 		})
 		batchClassified, batchWarnings, err := classifyAndSaveBatch(sqliteStore, "jobs.classifier", batch, currentProfile, cfg)
-		if err != nil {
-			return 0, classificationWarnings, err
-		}
 		classified += batchClassified
 		classificationWarnings = append(classificationWarnings, batchWarnings...)
+		if err != nil {
+			return classified, classificationWarnings, err
+		}
 		EmitProgress(progress, PercentProgress(
 			"pipeline.classifier.classifying",
 			"classification",
