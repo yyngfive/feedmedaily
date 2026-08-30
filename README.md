@@ -24,16 +24,31 @@ FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载
 
 - 分类模型目前固定提供 `DeepSeek V4 Flash (deepseek-v4-flash)`、`GLM-5.3-Flash (glm-5.3-flash)`、`Qwen3.8-Flash (qwen3.8-flash)` 和 `MiMo-V2.5 (mimo-v2.5)`；配置对应 key 即启用模型，默认模型菜单只显示已有 key 的模型，每个 sync/reclassify job 只使用入队时的默认模型。
 
-### DeepSeek 设置
+### 模型设置
+
+分类模型均使用各供应商官方的 OpenAI 兼容 API。在 `Settings → Model`（或首次引导）中录入对应 API Key 即可启用对应模型；源码模式下也可以通过 `.env` 中的 `SCIRSS_DEEPSEEK_API_KEY`、`SCIRSS_GLM_API_KEY`、`QWEN_API_KEY`、`MIMO_API_KEY` 提供。各模型 API Key 的获取方式：
+
+#### DeepSeek V4 Flash
 
 1. 在 [DeepSeek Platform](https://platform.deepseek.com/) 注册并登录
 2. 在 [API Keys](https://platform.deepseek.com/api_keys) 页面创建 API Key
 
-默认分类配置使用 `deepseek-v4-flash`、关闭 thinking 和 batch size `5`。`Settings → Model → Advanced model settings` 可以为支持的分类模型开启思考；应用只使用各供应商最低档位：DeepSeek 与 Qwen 为 `low`，MiMo 使用其 Chat API 可表达的最低 `enabled`，GLM 始终固定为 `low`、不能关闭。DeepSeek 或 MiMo 开启思考后，分类和连接测试使用至少 4096 completion tokens，避免 reasoning 用尽原有 600/1100 Token 预算而没有最终 JSON；较大批次原本需要的更高上限不会被降低。标题翻译仍关闭思考。分类请求保留简短 `reason`，不要求模型生成内部决策轨迹或阅读动作；阅读动作由应用根据相关性标签确定。Profile 生成仍独立使用 DeepSeek V4 Pro key。
+#### GLM-5.3-Flash
 
-连接测试会在后台发送一个最小 JSON 请求，会消耗少量对应提供商额度；测试 key 不会被保存。停用模型不会删除其 key，必须单独点击 `Clear key` 才会删除。
+1. 在 [智谱 BigModel 开放平台](https://open.bigmodel.cn/) 注册并登录
+2. 在 [API Keys](https://bigmodel.cn/usercenter/proj-mgmt/apikeys) 页面创建 API Key
 
-### Zotero 设置
+#### Qwen3.8-Flash
+
+1. 在 [阿里云百炼控制台](https://bailian.console.aliyun.com/) 注册并登录
+2. 按照[获取与配置 API Key](https://help.aliyun.com/zh/model-studio/get-api-key/)的指引创建 API Key；本应用固定使用中国大陆百炼端点，国际版 Key 无法使用
+
+#### MiMo-V2.5
+
+1. 在 [小米 MiMo API 开放平台](https://mimo.mi.com/) 注册并登录
+2. 在控制台的 API Keys 页面申请按量付费 API Key；Token Plan 套餐专属 Key（`tp-` 开头）与本应用的按量付费端点不通用
+
+## Zotero 设置
 
 - 个人库：`ZOTERO_LIBRARY_TYPE=user`，`ZOTERO_LIBRARY_ID` 填写 Zotero `userID`
 - 群组库：`ZOTERO_LIBRARY_TYPE=group`，`ZOTERO_LIBRARY_ID` 填对应 `groupID`
@@ -82,10 +97,6 @@ go run ./cmd/feedmedailyd --root . --host 127.0.0.1 --port 8000
 当前应用内定时更新功能依赖托盘程序，目前只支持Windows。Linux 上推荐使用 `cron` 调用辅助脚本：
 
 Windows 托盘首次启用定时同步时默认使用本地时间 `12:30`；在中国标准时间下，它位于 DeepSeek 当前的午间空闲计费窗口。已保存的用户自定义时间不会被覆盖，其他时区用户应按北京时间峰谷窗口自行调整。
-
-手动同步采用单任务保护：已有 sync 处于排队、执行或等待订阅源验证状态时，再次点击 Dashboard 的 Sync 或从托盘/API 触发同步只会复用现有任务，不会重复抓取和分类。
-
-Settings → Dashboard 会显示每个 sync、reclassify、首次 Profile 生成和 Profile proposal job 的 DeepSeek token 用量与估算人民币费用，并保留最近 3 天的明细视图。费用使用 API 返回的缓存命中、缓存未命中和输出 token 乘以调用时价格快照计算；北京时间周一至周五 9:00–12:00、14:00–18:00 使用高峰价，其余时间（包括周末）使用空闲价。Settings → Model 可以手动调整 Flash/Pro 的峰谷单价；保存后的价格只用于之后启动的 job，不回算历史记录。未知模型、非官方 endpoint 或缺少精确 usage 时只显示 token，不推测金额。
 
 ```cron
 0 8 * * * cd /path/to/feedmedaily && bash /path/to/feedmedaily/tools/feedmedaily.sh sync >> /path/to/feedmedaily/logs/cron.log 2>&1
@@ -147,4 +158,3 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 ```powershell
 .\tools\build_release.ps1 -SkipInstaller
 ```
-
