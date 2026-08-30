@@ -50,7 +50,7 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 - structured job-progress payloads for fetch, metadata, classification, report refresh, and profile-generation status updates
 - static React asset serving and SPA fallback
 
-`Run Sync Now` is fully owned by Go end-to-end: feed fetch, ingest, conditional metadata enrichment, classification, report refresh, and background job state all run through `feedmedailyd`. The same `/api/admin/run` endpoint also accepts an optional saved-feed URL list so Dashboard can run a targeted manual sync without changing the stored subscriptions. Sync launch is single-flight across full and targeted runs: while a sync is queued, running, or waiting for verification, another launch request returns the existing job instead of starting a second pipeline. The Dashboard disables its Sync button while that active job is visible and exposes `Stop sync`; `POST /api/admin/jobs/{id}/cancel` propagates cancellation through the current feed/LLM context and verification wait, then records a terminal `cancelled` job without rolling back already persisted papers. The backend registry remains the concurrency authority for UI, tray, and concurrent API callers.
+`Run Sync Now` is fully owned by Go end-to-end: feed fetch, ingest, conditional metadata enrichment, classification, report refresh, and background job state all run through `feedmedailyd`. The same `/api/admin/run` endpoint also accepts an optional saved-feed URL list so Dashboard can run a targeted manual sync without changing the stored subscriptions. Sync launch is single-flight across full and targeted runs: while a sync is queued, running, or waiting for verification, another launch request returns the existing job instead of starting a second pipeline. The Dashboard disables its Sync button while that active job is visible and exposes `Stop sync`; `POST /api/admin/jobs/{id}/cancel` propagates cancellation through the current feed/LLM context and verification wait, then records a terminal `cancelled` job without rolling back already persisted papers or completed classification batches. A later sync asks SQLite for papers without a classification, so it skips completed batches and resumes work from the remaining papers. The backend registry remains the concurrency authority for UI, tray, and concurrent API callers.
 
 The job polling endpoints expose both human-readable messages and structured progress fields so the UI can show stage-aware status such as current feed `i/N`, metadata/classification completion percentages, step-based profile generation progress, and structured latest-job summaries. Sync warning details are read from the existing job result errors and matched back to the current feed list by URL.
 
@@ -183,13 +183,17 @@ Behavioral baseline:
 4. Accepting onboarding first applies the pending proposal and then saves the edited draft as the current profile.
 5. Future classifications use that profile.
 6. User feedback can generate new full-profile proposals.
-7. Applying a proposal reclassifies only papers linked to that proposal feedback.
+7. Applying a proposal reclassifies only papers linked to that proposal feedback. This reclassification runs as a cancellable background job instead of blocking the apply request; with no linked papers the apply response only rebuilds the report synchronously.
 
 Supported admin reclassification scopes:
 
-- `recent`
+- `today`, using the server's local calendar day and paper `first_seen_at`
 - `feedback`
 - `all`
+- `count`, selecting the requested number of newest papers from `0` through the current database paper count
+- `unclassified`, selecting papers without any classification record so cancelled or failed batches can be backfilled without re-sending classified papers
+
+Dashboard presents these as an explicit range selection followed by a separate confirmation action. `GET /api/admin/reclassify` supplies the current database paper count used to bound the custom quantity, plus per-range classified/unclassified breakdowns that the Dashboard previews before confirming. Sync and reclassification are mutually exclusive: a process-wide pipeline lock guarantees at most one of them classifies at a time. Manual launches reject with `409` while the lock is held, the Dashboard cross-disables both actions, and a reclassification launched by applying a proposal waits in `queued` status until the lock frees, then starts automatically. Queued and running reclassify jobs can be cancelled like sync jobs; a cancelled job keeps its partial result and completed classification batches, and a later run skips papers that already have a classification.
 
 ## Reporting
 

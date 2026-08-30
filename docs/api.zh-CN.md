@@ -598,15 +598,21 @@ Linux source mode 只保存设置，不由 Web UI 自动执行；响应会给出
 }
 ```
 
-成功响应：更新后的 `ProfileProposal`。
+成功响应：
+
+```json
+{"proposal": {"id": 1, "state": "applied"}, "job": {"id": "...", "job_type": "reclassify", "status": "queued"}}
+```
+
+`proposal` 为更新后的 `ProfileProposal`；`job` 仅在本次 apply 关联了需要重分类的 feedback 论文时出现，为对应的后台重分类任务。
 
 副作用：
 
 - 写入当前 Profile。
 - proposal 标记为 applied。
 - 关联 feedback 标记为 used。
-- 重分类关联反馈论文。
-- 重建最新报告。
+- 如有关联 feedback 论文，启动后台 reclassify job（与 sync/手动 reclassify 共用 pipeline 互斥锁；若当前有任务在分类，job 保持 `queued` 排队，锁空闲后自动开始；可通过 cancel 接口停止），job 完成时重建最新报告。
+- 如无关联论文，同步重建最新报告。
 
 常见错误：
 
@@ -753,7 +759,7 @@ Linux source mode 只保存设置，不由 Web UI 自动执行；响应会给出
 {"job": {"id":"...","job_type":"sync","status":"queued"}, "reused": false}
 ```
 
-sync 启动采用 single-flight 语义。已有 sync 处于 `queued`、`running` 或 `waiting_for_user` 时，重复请求返回 `200`、同一个 `job`，并设置 `reused: true`；不会启动第二次完整或定向同步。任务进入 `completed`、`failed` 或 `cancelled` 后可以再次启动。
+sync 启动采用 single-flight 语义。已有 sync 处于 `queued`、`running` 或 `waiting_for_user` 时，重复请求返回 `200`、同一个 `job`，并设置 `reused: true`；不会启动第二次完整或定向同步。任务进入 `completed`、`failed` 或 `cancelled` 后可以再次启动。sync 与 reclassify 共用 pipeline 互斥锁：有 reclassify 正在分类时启动 sync 返回 `409`。
 
 job result 典型字段：
 
@@ -774,6 +780,28 @@ job result 典型字段：
 
 前端入口：`launchAdminJob("/api/admin/run")`。
 
+### `GET /api/admin/reclassify`
+
+用途：读取重分类范围预览：当前数据库文章总数及各范围按"已有分类/尚未分类"的拆分，供指定数量控件设置合法上限并在确认前展示实际工作量。
+
+可选查询参数：`limit`（0 到当前数据库文章总数），用于计算指定数量范围的拆分；省略时 `count_*` 字段按 0 计算。
+
+成功响应：
+
+```json
+{
+  "paper_count": 1234,
+  "classified_paper_count": 1100,
+  "unclassified_paper_count": 134,
+  "today_paper_count": 130,
+  "today_classified_count": 28,
+  "today_unclassified_count": 102,
+  "count_paper_count": 50,
+  "count_classified_count": 40,
+  "count_unclassified_count": 10
+}
+```
+
 ### `POST /api/admin/reclassify`
 
 用途：按 scope 启动重分类 job。
@@ -781,16 +809,18 @@ job result 典型字段：
 请求体：
 
 ```json
-{"scope":"recent","limit":50}
+{"scope":"count","limit":50}
 ```
 
 `scope` 可选：
 
-- `recent`
+- `today`：按服务所在机器的本地自然日选择当天入库的文章
 - `feedback`
 - `all`
+- `count`：按入库时间倒序选择指定数量
+- `unclassified`：选择尚无分类记录的文章，用于补跑被取消或失败的批次
 
-`limit` 默认 50，合法范围 1 到 500。
+只有 `count` 使用 `limit`；合法范围为 0 到当前数据库文章总数。其他 scope 会忽略并归零 `limit`。
 
 成功响应：
 
@@ -798,9 +828,12 @@ job result 典型字段：
 {"job": {"id":"...","job_type":"reclassify","status":"queued"}}
 ```
 
+reclassify 与 sync 共用 pipeline 互斥锁，同一时刻只允许一个分类任务执行。有 sync 或 reclassify 正在分类时启动返回 `409`；排队中的 reclassify（如 apply proposal 触发的 feedback 重分类）不算冲突，会等锁空闲后自动开始。
+
 常见错误：
 
 - 400：scope 非法、limit 超出范围或 JSON 无效。
+- 409：sync 或 reclassify 正在执行分类工作。
 
 前端入口：`launchReclassifyJob(input)`。
 
@@ -830,17 +863,17 @@ LLM job 在完成或失败后包含可选 `llm_usage`：请求数、三类 token
 
 ### `POST /api/admin/jobs/{id}/cancel`
 
-用途：停止当前正在执行的 sync job。停止请求会取消网络/LLM 请求和重试等待；如果任务正在等待受保护 feed 验证，也会关闭该次等待。已写入数据库的内容不会回滚。
+用途：停止当前正在执行的 sync 或 reclassify job。停止请求会取消网络/LLM 请求和重试等待；如果 sync 正在等待受保护 feed 验证，也会关闭该次等待。已写入数据库的内容和已完成的分类批次不会回滚；取消的任务保留阶段性 result（fetched/inserted/updated/classified、warnings 等），Activity 面板据此显示已完成的数量与警告。
 
-仅 `sync` 且状态为 `queued`、`running` 或 `waiting_for_user` 的任务可停止。成功接受停止请求返回 `202`：
+仅 `sync` 与 `reclassify` 且状态为 `queued`、`running` 或 `waiting_for_user` 的任务可停止。成功接受停止请求返回 `202`：
 
 ```json
 {"job":{"id":"...","job_type":"sync","status":"running","cancel_requested":true},"cancel_requested":true}
 ```
 
-任务最终状态为 `cancelled`；重复停止已结束任务返回 `200` 并设置 `already_terminal: true`。非 sync 任务返回 400，未知 job 返回 404。
+任务最终状态为 `cancelled`；重复停止已结束任务返回 `200` 并设置 `already_terminal: true`。其他类型任务返回 400，未知 job 返回 404。
 
-前端入口：`cancelSyncJob(id)`。
+前端入口：`cancelAdminJob(id)`。
 
 ### `GET /api/admin/llm-usage?since=<RFC3339>`
 
