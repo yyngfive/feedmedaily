@@ -146,7 +146,7 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 
 `.env.example` 是推荐配置模板，配置变更时应与 README 和设置 UI 同步。主要配置组：
 
-- 分类器模型：固定目录 `deepseek-v4-flash`（DeepSeek V4 Flash）和 `glm-5.3-flash`（Zhipu GLM-5.3-Flash）；UI 以已配置 key 推导启用集合和默认模型候选，存储层仍用 `SCIRSS_CLASSIFIER_ENABLED_MODELS`、`SCIRSS_CLASSIFIER_DEFAULT_MODEL`、`SCIRSS_DEEPSEEK_API_KEY`、`SCIRSS_GLM_API_KEY`。batch size 为 `SCIRSS_CLASSIFIER_BATCH_SIZE`（默认 `5`）。DeepSeek 自动关闭 thinking，GLM 自动启用 thinking、`reasoning_effort=low` 并使用确定性采样。
+- 分类器模型：固定目录包含 `deepseek-v4-flash`、`glm-5.3-flash`、`qwen3.8-flash` 和 `mimo-v2.5`；UI 以已配置 key 推导启用集合和默认模型候选。batch size 为 `SCIRSS_CLASSIFIER_BATCH_SIZE`（默认 `5`），`SCIRSS_CLASSIFIER_THINKING` 在高级设置中控制最低思考档。GLM 始终为 low；DeepSeek/Qwen 开启时为 low；MiMo 开启时为其 Chat API 的 enabled。DeepSeek/MiMo 开启时使用至少 4096 completion tokens。
 - 旧分类变量 `SCIRSS_CLASSIFIER_API_KEY/BASE_URL/MODEL/THINKING` 仅用于兼容迁移；首次在 UI 保存结构化模型设置时会迁移可控的本地值，系统环境覆盖仍优先且显示 warning。
 - Profile 模型：`SCIRSS_PROFILE_API_KEY`、`SCIRSS_PROFILE_BASE_URL`、`SCIRSS_PROFILE_MODEL`、`SCIRSS_PROFILE_THINKING`
 - DeepSeek 计价：Settings → Model 维护 Flash/Pro 的缓存命中、缓存未命中和输出峰谷单价，对应 `SCIRSS_DEEPSEEK_*_CNY_PER_MILLION` 配置；默认值与当前官方人民币价格一致
@@ -197,7 +197,7 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 4. 如果变更影响用户理解分类结果，更新 README 或维护文档。
 5. 如果变更影响 proposal 审阅流程，更新 `ARCHITECTURE.md`。
 6. 新增 LLM 调用时显式传递 job collector，并确保成功响应只记录一次且带响应时间；collector 在 job 启动时锁定当前手动价格设置。DeepSeek 高峰价只适用于北京时间周一至周五 9:00–12:00、14:00–18:00，周末和其余时段使用空闲价；已完成 ledger 保存具体费率，后续调价不得回算历史。usage ledger 写入失败只能记录 warning，不能反向让业务 job 失败。
-7. 分类请求必须通过 `internal/classifier` 的 provider adapter：DeepSeek V4 Flash 固定 `thinking.type=disabled` 且不发送 `reasoning_effort`；GLM-5.3-Flash 固定 `thinking.type=enabled` + `reasoning_effort=low`，不能走 disabled-thinking fallback，也不能自动跨 provider。
+7. 分类请求必须通过 `internal/classifier` 的 provider adapter：运行时只允许各 provider 的最低 thinking 档位，GLM-5.3-Flash 固定 `thinking.type=enabled` + `reasoning_effort=low`；DeepSeek/Qwen 映射 low，MiMo 映射 enabled。DeepSeek/MiMo 开启时使用 4096 completion-token 下限。托管 provider 不能自动跨 provider。
 8. `/api/settings/classifier-models/test` 是后台 `model-test` 作业；临时 key 只在内存闭包中使用，不能进入日志或设置文件。
 
 ### 改 UI

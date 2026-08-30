@@ -134,6 +134,31 @@ func TestCollectorPricesOfficialGLM53FlashUsage(t *testing.T) {
 	}
 }
 
+func TestCollectorPricesQwenAndMiMoOfficialMainlandRates(t *testing.T) {
+	tests := []struct {
+		name, baseURL, model, snapshot, cost string
+	}{
+		{"qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen3.8-flash", llmusage.PricingSnapshotQwen38FlashCNY, "3.600000"},
+		{"mimo", "https://api.xiaomimimo.com/v1", "mimo-v2.5", llmusage.PricingSnapshotMiMoV25CNY, "3.020000"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			collector := llmusage.NewCollector()
+			collector.Record(llmusage.Event{BaseURL: test.baseURL, Model: test.model, Usage: llmusage.ResponseUsage{
+				PromptTokens: 2_000_000, PromptCacheHitTokens: 1_000_000, PromptCacheMissTokens: 1_000_000,
+				CompletionTokens: 1_000_000, CacheBreakdownPresent: true,
+			}})
+			summary := collector.Summary()
+			if summary.EstimatedCostCNY == nil || *summary.EstimatedCostCNY != test.cost {
+				t.Fatalf("cost = %#v, want %s", summary.EstimatedCostCNY, test.cost)
+			}
+			if len(summary.Pricing) != 1 || summary.Pricing[0].Snapshot != test.snapshot {
+				t.Fatalf("pricing = %#v", summary.Pricing)
+			}
+		})
+	}
+}
+
 func TestCollectorDoesNotPriceUnknownProviderOrModel(t *testing.T) {
 	for name, event := range map[string]llmusage.Event{
 		"proxy": {

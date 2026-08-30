@@ -147,13 +147,19 @@ func classifierConfig(settings config.Settings, usage *llmusage.Collector) (clas
 	if model.APIKey == "" {
 		return classifier.LLMConfig{}, fmt.Errorf("API key is required for classifier model %s.", settings.EffectiveClassifierModelName())
 	}
+	minMaxTokens := 0
+	if model.Thinking == "enabled" && (model.Provider == "deepseek" || model.Provider == "mimo") {
+		minMaxTokens = classifier.ThinkingMaxTokensFloor
+	}
 	return classifier.LLMConfig{
-		APIKey:          model.APIKey,
-		Model:           model.ID,
-		BaseURL:         model.BaseURL,
-		Provider:        model.Provider,
-		Thinking:        model.Thinking,
-		ReasoningEffort: model.ReasoningEffort,
-		Usage:           usage,
+		APIKey:                        model.APIKey,
+		Model:                         model.ID,
+		BaseURL:                       model.BaseURL,
+		Provider:                      model.Provider,
+		Thinking:                      model.Thinking,
+		ReasoningEffort:               model.ReasoningEffort,
+		UseConfiguredProviderControls: true,
+		MinMaxTokens:                  minMaxTokens,
+		Usage:                         usage,
 	}, nil
 }

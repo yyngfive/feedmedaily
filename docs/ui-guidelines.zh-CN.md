@@ -111,6 +111,7 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 - Feeds 使用独立本地草稿；取消必须恢复已保存值，未保存修改不能污染阅读状态。
 - Profile 使用一个主要审阅文档；反馈队列位于下方作为次级区域。
 - Model 常显连接与默认模型，低频调优和价格进入 Advanced，并使用一个统一保存动作。
+- Model Advanced 中的分类思考只提供全局启用/关闭选择；启用后由后端映射到各供应商最低档，GLM 的说明必须明确其始终为 low、不能关闭。
 - App 顶部常显 About、更新和运行信息；Zotero、Scheduled sync、Local app 使用相同的独立 Disclosure。
 - Zotero 使用 Web API 和应用内 collection picker，不依赖浏览器 connector。
 

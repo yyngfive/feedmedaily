@@ -93,6 +93,35 @@ func TestClassifierModelsConfigAPI(t *testing.T) {
 	}
 }
 
+func TestClassifierThinkingSettingSurvivesStructuredModelUpdate(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "web", "package.json"), `{"version":"1.2.3"}`)
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
+	writeFile(t, filepath.Join(root, ".env"), "SCIRSS_DEEPSEEK_API_KEY=deepseek-key\n")
+	handler := newTestHandler(t, testSettings(root))
+
+	body := strings.NewReader(`{"fields":{"SCIRSS_CLASSIFIER_THINKING":{"value":"enabled"}},"classifier_models":{"enabled_model_ids":["deepseek-v4-flash"],"default_model_id":"deepseek-v4-flash","credentials":{}}}`)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/api/settings/config", body))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("thinking update status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	settings, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.ClassifierThinking != "enabled" {
+		t.Fatalf("classifier thinking = %q, want enabled", settings.ClassifierThinking)
+	}
+	envText, err := os.ReadFile(filepath.Join(root, ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(envText), "SCIRSS_CLASSIFIER_THINKING='enabled'") {
+		t.Fatalf("thinking setting was not retained: %s", envText)
+	}
+}
+
 func TestClassifierDefaultChangeOnlyAffectsLaterJobs(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "web", "package.json"), `{"version":"1.2.3"}`)

@@ -35,7 +35,7 @@ const adminTabs: Array<{id: AdminTab; label: string}> = [
 ];
 
 const modelSections = new Set(["Classifier tuning", "Profile model"]);
-const pricingSections = new Set(["DeepSeek pricing", "GLM pricing"]);
+const pricingSections = new Set(["DeepSeek pricing", "GLM pricing", "Qwen pricing", "MiMo pricing"]);
 const appSections = new Set(["Zotero", "Local app"]);
 
 export type AdminPanelProps = {
