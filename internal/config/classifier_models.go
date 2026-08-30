@@ -12,11 +12,15 @@ import (
 const (
 	ClassifierModelDeepSeekV4Flash = "deepseek-v4-flash"
 	ClassifierModelGLM53Flash      = "glm-5.3-flash"
+	ClassifierModelQwen38Flash     = "qwen3.8-flash"
+	ClassifierModelMiMoV25         = "mimo-v2.5"
 
 	classifierEnabledModelsKey = "SCIRSS_CLASSIFIER_ENABLED_MODELS"
 	classifierDefaultModelKey  = "SCIRSS_CLASSIFIER_DEFAULT_MODEL"
 	classifierDeepSeekAPIKey   = "SCIRSS_DEEPSEEK_API_KEY"
 	classifierGLMAPIKey        = "SCIRSS_GLM_API_KEY"
+	classifierQwenAPIKey       = "QWEN_API_KEY"
+	classifierMiMoAPIKey       = "MIMO_API_KEY"
 )
 
 // ClassifierModelSpec is the fixed provider contract used by every classifier request.
@@ -92,6 +96,22 @@ var classifierModelCatalog = []ClassifierModelSpec{
 		Thinking:        "enabled",
 		ReasoningEffort: "low",
 	},
+	{
+		ID:              ClassifierModelQwen38Flash,
+		Provider:        "qwen",
+		Label:           "Qwen3.8-Flash",
+		BaseURL:         "https://dashscope.aliyuncs.com/compatible-mode/v1",
+		Thinking:        "disabled",
+		ReasoningEffort: "none",
+	},
+	{
+		ID:              ClassifierModelMiMoV25,
+		Provider:        "mimo",
+		Label:           "MiMo-V2.5",
+		BaseURL:         "https://api.xiaomimimo.com/v1",
+		Thinking:        "disabled",
+		ReasoningEffort: "",
+	},
 }
 
 func classifierModelSpec(modelID string) (ClassifierModelSpec, bool) {
@@ -111,16 +131,16 @@ func ClassifierModelCatalog() []ClassifierModelSpec {
 // EffectiveClassifierModel resolves the selected model while preserving old test/config callers.
 func (s Settings) EffectiveClassifierModel() ClassifierModelConfig {
 	if model, ok := s.ClassifierModels.Models[s.ClassifierModels.DefaultModelID]; ok {
-		return model
+		return classifierModelWithThinkingPreference(model, s.ClassifierThinking)
 	}
 	if spec, ok := classifierModelSpec(s.ClassifierModels.DefaultModelID); ok {
-		return ClassifierModelConfig{ClassifierModelSpec: spec, APIKey: s.ClassifierAPIKey}
+		return classifierModelWithThinkingPreference(ClassifierModelConfig{ClassifierModelSpec: spec, APIKey: s.ClassifierAPIKey}, s.ClassifierThinking)
 	}
 	if model, ok := s.ClassifierModels.Models[s.ClassifierModel]; ok {
-		return model
+		return classifierModelWithThinkingPreference(model, s.ClassifierThinking)
 	}
 	if spec, ok := classifierModelSpec(s.ClassifierModel); ok {
-		return ClassifierModelConfig{ClassifierModelSpec: spec, APIKey: s.ClassifierAPIKey}
+		return classifierModelWithThinkingPreference(ClassifierModelConfig{ClassifierModelSpec: spec, APIKey: s.ClassifierAPIKey}, s.ClassifierThinking)
 	}
 	return ClassifierModelConfig{
 		ClassifierModelSpec: ClassifierModelSpec{
@@ -130,6 +150,39 @@ func (s Settings) EffectiveClassifierModel() ClassifierModelConfig {
 		},
 		APIKey: s.ClassifierAPIKey,
 	}
+}
+
+func classifierModelWithThinkingPreference(model ClassifierModelConfig, preference string) ClassifierModelConfig {
+	enabled := strings.EqualFold(strings.TrimSpace(preference), "enabled")
+	switch model.Provider {
+	case "zhipu":
+		model.Thinking = "enabled"
+		model.ReasoningEffort = "low"
+	case "deepseek":
+		if enabled {
+			model.Thinking = "enabled"
+			model.ReasoningEffort = "low"
+		} else {
+			model.Thinking = "disabled"
+			model.ReasoningEffort = ""
+		}
+	case "qwen":
+		if enabled {
+			model.Thinking = "enabled"
+			model.ReasoningEffort = "low"
+		} else {
+			model.Thinking = "disabled"
+			model.ReasoningEffort = "none"
+		}
+	case "mimo":
+		if enabled {
+			model.Thinking = "enabled"
+		} else {
+			model.Thinking = "disabled"
+		}
+		model.ReasoningEffort = ""
+	}
+	return model
 }
 
 // EffectiveClassifierModelName is used by usage summaries without exposing registry internals.
@@ -184,28 +237,36 @@ func classifierModelsFromResolvedValues(values []ResolvedValue) ClassifierModels
 	legacyModel := valueOrDefault(strings.TrimSpace(byKey["SCIRSS_CLASSIFIER_MODEL"].Value), ClassifierModelDeepSeekV4Flash)
 	legacyBaseURL := valueOrDefault(strings.TrimSpace(byKey["SCIRSS_CLASSIFIER_BASE_URL"].Value), "https://api.deepseek.com")
 	legacyKey := byKey["SCIRSS_CLASSIFIER_API_KEY"]
-	legacyConfigured := isNonDefaultResolvedValue(legacyKey) || isNonDefaultResolvedValue(byKey["SCIRSS_CLASSIFIER_MODEL"]) || isNonDefaultResolvedValue(byKey["SCIRSS_CLASSIFIER_BASE_URL"]) || isNonDefaultResolvedValue(byKey["SCIRSS_CLASSIFIER_THINKING"])
+	legacyConfigured := isNonDefaultResolvedValue(legacyKey) || isNonDefaultResolvedValue(byKey["SCIRSS_CLASSIFIER_MODEL"]) || isNonDefaultResolvedValue(byKey["SCIRSS_CLASSIFIER_BASE_URL"])
 	legacyID := classifierModelIDFromLegacy(legacyModel, legacyBaseURL)
 	legacySelectionPriority := strongestResolvedValuePriority(
 		legacyKey,
 		byKey["SCIRSS_CLASSIFIER_MODEL"],
 		byKey["SCIRSS_CLASSIFIER_BASE_URL"],
-		byKey["SCIRSS_CLASSIFIER_THINKING"],
 	)
 
 	newEnabled := byKey[classifierEnabledModelsKey]
 	newDefault := byKey[classifierDefaultModelKey]
-	newDeepSeekKey := byKey[classifierDeepSeekAPIKey]
-	newGLMKey := byKey[classifierGLMAPIKey]
-	newConfigured := isNonDefaultResolvedValue(newEnabled) || isNonDefaultResolvedValue(newDefault) || isNonDefaultResolvedValue(newDeepSeekKey) || isNonDefaultResolvedValue(newGLMKey)
-	newSelectionPriority := strongestResolvedValuePriority(newEnabled, newDefault, newDeepSeekKey, newGLMKey)
+	newCredentials := make(map[string]ResolvedValue, len(classifierModelCatalog))
+	selectionValues := []ResolvedValue{newEnabled, newDefault}
+	for _, spec := range classifierModelCatalog {
+		key, _ := classifierCredentialKey(spec.ID)
+		credential := byKey[key]
+		newCredentials[spec.ID] = credential
+		selectionValues = append(selectionValues, credential)
+	}
+	newConfigured := false
+	for _, value := range selectionValues {
+		if isNonDefaultResolvedValue(value) {
+			newConfigured = true
+			break
+		}
+	}
+	newSelectionPriority := strongestResolvedValuePriority(selectionValues...)
 
 	models := make(map[string]ClassifierModelConfig, len(classifierModelCatalog))
 	for _, spec := range classifierModelCatalog {
-		key := newDeepSeekKey
-		if spec.ID == ClassifierModelGLM53Flash {
-			key = newGLMKey
-		}
+		key := newCredentials[spec.ID]
 		if legacyConfigured && legacyID == spec.ID {
 			// Resolve aliases with the same environment > local > default order as
 			// ordinary settings. A same-level new provider key wins over the old
@@ -352,6 +413,12 @@ func classifierModelIDFromLegacy(model string, baseURL string) string {
 	if normalizedModel == ClassifierModelGLM53Flash || strings.Contains(normalizedModel, "glm-5.3-flash") || strings.Contains(strings.ToLower(baseURL), "bigmodel.cn") {
 		return ClassifierModelGLM53Flash
 	}
+	if normalizedModel == ClassifierModelQwen38Flash || strings.Contains(normalizedModel, "qwen3.8-flash") || strings.Contains(strings.ToLower(baseURL), "dashscope.aliyuncs.com") {
+		return ClassifierModelQwen38Flash
+	}
+	if normalizedModel == ClassifierModelMiMoV25 || strings.Contains(normalizedModel, "mimo-v2.5") || strings.Contains(strings.ToLower(baseURL), "xiaomimimo.com") {
+		return ClassifierModelMiMoV25
+	}
 	// Unknown legacy OpenAI-compatible classifier models cannot be represented by
 	// the managed catalog; keep the migration deterministic by selecting DeepSeek.
 	return ClassifierModelDeepSeekV4Flash
@@ -441,6 +508,10 @@ func classifierCredentialKey(modelID string) (string, bool) {
 		return classifierDeepSeekAPIKey, true
 	case ClassifierModelGLM53Flash:
 		return classifierGLMAPIKey, true
+	case ClassifierModelQwen38Flash:
+		return classifierQwenAPIKey, true
+	case ClassifierModelMiMoV25:
+		return classifierMiMoAPIKey, true
 	default:
 		return "", false
 	}
@@ -467,7 +538,7 @@ func removeLegacyClassifierLocalValues(root string) error {
 	if appruntime.DetectMode(appRoot) == appruntime.ModeSource {
 		path := filepath.Join(appRoot, ".env")
 		values := readDotEnv(path)
-		for _, key := range []string{"SCIRSS_CLASSIFIER_API_KEY", "SCIRSS_CLASSIFIER_BASE_URL", "SCIRSS_CLASSIFIER_MODEL", "SCIRSS_CLASSIFIER_THINKING"} {
+		for _, key := range []string{"SCIRSS_CLASSIFIER_API_KEY", "SCIRSS_CLASSIFIER_BASE_URL", "SCIRSS_CLASSIFIER_MODEL"} {
 			delete(values, key)
 		}
 		return writeDotEnv(path, values)
@@ -479,7 +550,7 @@ func removeLegacyClassifierLocalValues(root string) error {
 		return err
 	}
 	delete(secrets, "SCIRSS_CLASSIFIER_API_KEY")
-	for _, key := range []string{"SCIRSS_CLASSIFIER_BASE_URL", "SCIRSS_CLASSIFIER_MODEL", "SCIRSS_CLASSIFIER_THINKING"} {
+	for _, key := range []string{"SCIRSS_CLASSIFIER_BASE_URL", "SCIRSS_CLASSIFIER_MODEL"} {
 		delete(settings, key)
 	}
 	if err := writeReleaseSettings(filepath.Join(appruntime.DefaultUserDataDir(), "config", "settings.json"), settings); err != nil {
@@ -538,7 +609,7 @@ func ClassifierModelConfigForID(settings Settings, modelID string) (ClassifierMo
 	if strings.TrimSpace(model.APIKey) == "" && settings.EffectiveClassifierModelName() == spec.ID {
 		model.APIKey = settings.ClassifierAPIKey
 	}
-	return model, nil
+	return classifierModelWithThinkingPreference(model, settings.ClassifierThinking), nil
 }
 
 // ClassifierModelStorageKey is exposed only to keep tests and adapters from duplicating key rules.

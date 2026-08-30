@@ -14,6 +14,10 @@ const (
 	PricingSnapshotDeepSeekManual = "deepseek-cny-manual"
 	PricingSnapshotGLM53FlashCNY  = "zhipu-glm-5.3-flash-cny-2026-08-28-promo"
 	PricingSnapshotGLMManual      = "zhipu-glm-cny-manual"
+	PricingSnapshotQwen38FlashCNY = "aliyun-qwen3.8-flash-cny-2026-08-29"
+	PricingSnapshotQwenManual     = "aliyun-qwen-cny-manual"
+	PricingSnapshotMiMoV25CNY     = "xiaomi-mimo-v2.5-cny-2026-08-29"
+	PricingSnapshotMiMoManual     = "xiaomi-mimo-cny-manual"
 )
 
 const (
@@ -61,11 +65,15 @@ type TieredRates struct {
 }
 
 type PricingCatalog struct {
-	Snapshot           string
-	Flash              TieredRates
-	Pro                TieredRates
-	GLM53Flash         TokenRates
-	GLM53FlashSnapshot string
+	Snapshot            string
+	Flash               TieredRates
+	Pro                 TieredRates
+	GLM53Flash          TokenRates
+	GLM53FlashSnapshot  string
+	Qwen38Flash         TokenRates
+	Qwen38FlashSnapshot string
+	MiMoV25             TokenRates
+	MiMoV25Snapshot     string
 }
 
 type Summary struct {
@@ -99,8 +107,12 @@ func DefaultPricing() PricingCatalog {
 			OffPeak: TokenRates{CacheHitNanoCNYPerToken: 150, CacheMissNanoCNYPerToken: 4_500, CompletionNanoCNYPerToken: 13_500},
 			Peak:    TokenRates{CacheHitNanoCNYPerToken: 300, CacheMissNanoCNYPerToken: 9_000, CompletionNanoCNYPerToken: 27_000},
 		},
-		GLM53Flash:         TokenRates{CacheHitNanoCNYPerToken: 115, CacheMissNanoCNYPerToken: 400, CompletionNanoCNYPerToken: 1_400},
-		GLM53FlashSnapshot: PricingSnapshotGLM53FlashCNY,
+		GLM53Flash:          TokenRates{CacheHitNanoCNYPerToken: 115, CacheMissNanoCNYPerToken: 400, CompletionNanoCNYPerToken: 1_400},
+		GLM53FlashSnapshot:  PricingSnapshotGLM53FlashCNY,
+		Qwen38Flash:         TokenRates{CacheHitNanoCNYPerToken: 100, CacheMissNanoCNYPerToken: 800, CompletionNanoCNYPerToken: 2_700},
+		Qwen38FlashSnapshot: PricingSnapshotQwen38FlashCNY,
+		MiMoV25:             TokenRates{CacheHitNanoCNYPerToken: 20, CacheMissNanoCNYPerToken: 1_000, CompletionNanoCNYPerToken: 2_000},
+		MiMoV25Snapshot:     PricingSnapshotMiMoV25CNY,
 	}
 }
 
@@ -190,6 +202,12 @@ func providerRates(baseURL string, model string, occurredAt time.Time, pricing P
 			CompletionNanoCNYPerToken: pricing.GLM53Flash.CompletionNanoCNYPerToken,
 		}, true
 	}
+	if strings.EqualFold(parsed.Hostname(), "dashscope.aliyuncs.com") && strings.EqualFold(strings.TrimSpace(model), "qwen3.8-flash") {
+		return standardBreakdown(model, pricing.Qwen38FlashSnapshot, pricing.Qwen38Flash), true
+	}
+	if strings.EqualFold(parsed.Hostname(), "api.xiaomimimo.com") && strings.EqualFold(strings.TrimSpace(model), "mimo-v2.5") {
+		return standardBreakdown(model, pricing.MiMoV25Snapshot, pricing.MiMoV25), true
+	}
 	if !strings.EqualFold(parsed.Hostname(), "api.deepseek.com") {
 		return PricingBreakdown{}, false
 	}
@@ -221,6 +239,15 @@ func providerRates(baseURL string, model string, occurredAt time.Time, pricing P
 		return breakdown(selectedRates(pricing.Pro)), true
 	default:
 		return PricingBreakdown{}, false
+	}
+}
+
+func standardBreakdown(model string, snapshot string, rates TokenRates) PricingBreakdown {
+	return PricingBreakdown{
+		Model: model, Snapshot: snapshot, Tier: "standard",
+		CacheHitNanoCNYPerToken:   rates.CacheHitNanoCNYPerToken,
+		CacheMissNanoCNYPerToken:  rates.CacheMissNanoCNYPerToken,
+		CompletionNanoCNYPerToken: rates.CompletionNanoCNYPerToken,
 	}
 }
 

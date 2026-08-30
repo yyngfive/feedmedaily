@@ -17,7 +17,7 @@ import (
 func TestClassifierModelTestAPIUsesUnsavedKeyWithoutChangingSettings(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
-	writeFile(t, filepath.Join(root, ".env"), "SCIRSS_CLASSIFIER_ENABLED_MODELS=deepseek-v4-flash,glm-5.3-flash\nSCIRSS_CLASSIFIER_DEFAULT_MODEL=deepseek-v4-flash\nSCIRSS_DEEPSEEK_API_KEY=deepseek-saved\nSCIRSS_GLM_API_KEY=glm-saved\n")
+	writeFile(t, filepath.Join(root, ".env"), "SCIRSS_CLASSIFIER_ENABLED_MODELS=deepseek-v4-flash,glm-5.3-flash\nSCIRSS_CLASSIFIER_DEFAULT_MODEL=deepseek-v4-flash\nSCIRSS_CLASSIFIER_THINKING=enabled\nSCIRSS_DEEPSEEK_API_KEY=deepseek-saved\nSCIRSS_GLM_API_KEY=glm-saved\n")
 	restore := stubAPIGlobals(t)
 	defer restore()
 
@@ -49,8 +49,24 @@ func TestClassifierModelTestAPIUsesUnsavedKeyWithoutChangingSettings(t *testing.
 	if job.Status != "completed" {
 		t.Fatalf("connection test job status = %s: %s", job.Status, job.Error)
 	}
-	if captured.APIKey != temporaryKey || captured.Model != config.ClassifierModelGLM53Flash || captured.Provider != "zhipu" || captured.Thinking != "enabled" || captured.ReasoningEffort != "low" {
+	if captured.APIKey != temporaryKey || captured.Model != config.ClassifierModelGLM53Flash || captured.Provider != "zhipu" || captured.Thinking != "enabled" || captured.ReasoningEffort != "low" || !captured.UseConfiguredProviderControls || captured.MinMaxTokens != 0 {
 		t.Fatalf("captured GLM config = %#v", captured)
+	}
+
+	deepSeekRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(deepSeekRecorder, httptest.NewRequest(http.MethodPost, "/api/settings/classifier-models/test", strings.NewReader(`{"model_id":"deepseek-v4-flash"}`)))
+	if deepSeekRecorder.Code != http.StatusOK {
+		t.Fatalf("DeepSeek test endpoint status = %d: %s", deepSeekRecorder.Code, deepSeekRecorder.Body.String())
+	}
+	if err := json.Unmarshal(deepSeekRecorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	job = waitForJobTerminalStatus(t, payload.Job.ID)
+	if job.Status != "completed" {
+		t.Fatalf("DeepSeek connection test job status = %s: %s", job.Status, job.Error)
+	}
+	if captured.Model != config.ClassifierModelDeepSeekV4Flash || captured.Thinking != "enabled" || captured.ReasoningEffort != "low" || captured.MinMaxTokens != classifier.ThinkingMaxTokensFloor {
+		t.Fatalf("captured DeepSeek config = %#v", captured)
 	}
 	if got := server.snapshotSettings().ClassifierModels.DefaultModelID; got != config.ClassifierModelDeepSeekV4Flash {
 		t.Fatalf("connection test changed default model to %q", got)

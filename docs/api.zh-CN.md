@@ -337,7 +337,7 @@ Query：
 
 secret 字段和 `classifier_models` 中的 key 均不以明文返回。`source=environment` 且 `environment_override=true` 表示系统环境变量覆盖了本地值。
 
-当前固定分类目录为 DeepSeek V4 Flash 和 Zhipu GLM-5.3-Flash。DeepSeek 自动使用 `thinking.type=disabled` 且不发送 `reasoning_effort`；GLM 自动使用 `thinking.type=enabled`、`reasoning_effort=low` 和确定性采样。分类器默认 batch size 为 `5`。模型响应不要求 `decision_trace` 或 `recommended_action`；报告 API 中保留的 `recommended_action` 由后端按 relevance 确定。
+当前固定分类目录为 DeepSeek V4 Flash、Zhipu GLM-5.3-Flash、Qwen3.8-Flash 和 MiMo-V2.5。`SCIRSS_CLASSIFIER_THINKING` 只控制最低思考档：GLM 始终为 low；DeepSeek/Qwen 开启时为 low；MiMo 开启时为 enabled。DeepSeek/MiMo 开启时使用至少 4096 completion tokens。分类器默认 batch size 为 `5`。模型响应不要求 `decision_trace` 或 `recommended_action`；报告 API 中保留的 `recommended_action` 由后端按 relevance 确定。
 
 `DeepSeek pricing` section 提供 Flash/Pro 各自的 off-peak/peak 价格；`GLM pricing` 提供 GLM-5.3-Flash 的缓存命中、普通输入和输出价格。单位均为 CNY / 1M tokens，价格允许 0 或最多三位小数。GLM 默认值为 2026-08-28 官方页面展示的限时 5 折价：`0.115 / 0.4 / 1.4`，促销结束后可在 UI 或 `SCIRSS_GLM_53_FLASH_<CACHE_HIT|CACHE_MISS|OUTPUT>_CNY_PER_MILLION` 更新。
 

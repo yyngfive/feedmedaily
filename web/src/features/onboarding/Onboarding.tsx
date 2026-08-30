@@ -17,6 +17,7 @@ import {ClassifierModelsEditor, classifierModelsDraftHasRequiredKeys, classifier
 
 const aiAdvancedKeys = [
   "SCIRSS_CLASSIFIER_BATCH_SIZE",
+  "SCIRSS_CLASSIFIER_THINKING",
   "SCIRSS_PROFILE_BASE_URL",
   "SCIRSS_PROFILE_MODEL",
   "SCIRSS_PROFILE_THINKING",

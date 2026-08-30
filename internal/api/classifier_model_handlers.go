@@ -49,6 +49,10 @@ func (s *Server) handleClassifierModelTest(w http.ResponseWriter, r *http.Reques
 	jobSettings.ClassifierModel = model.ID
 	jobSettings.ClassifierBaseURL = model.BaseURL
 	jobSettings.ClassifierThinking = model.Thinking
+	minMaxTokens := 0
+	if model.Thinking == "enabled" && (model.Provider == "deepseek" || model.Provider == "mimo") {
+		minMaxTokens = classifier.ThinkingMaxTokensFloor
+	}
 
 	job := launchLocalJob(
 		jobSettings,
@@ -60,13 +64,15 @@ func (s *Server) handleClassifierModelTest(w http.ResponseWriter, r *http.Reques
 		func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
 			_ = progress
 			err := testClassifierConnectionFunc(classifier.LLMConfig{
-				APIKey:          model.APIKey,
-				Model:           model.ID,
-				BaseURL:         model.BaseURL,
-				Provider:        model.Provider,
-				Thinking:        model.Thinking,
-				ReasoningEffort: model.ReasoningEffort,
-				Usage:           usage,
+				APIKey:                        model.APIKey,
+				Model:                         model.ID,
+				BaseURL:                       model.BaseURL,
+				Provider:                      model.Provider,
+				Thinking:                      model.Thinking,
+				ReasoningEffort:               model.ReasoningEffort,
+				UseConfiguredProviderControls: true,
+				MinMaxTokens:                  minMaxTokens,
+				Usage:                         usage,
 			})
 			if err != nil {
 				return nil, err

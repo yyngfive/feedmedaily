@@ -14,6 +14,8 @@ const pricingRows = [
   {model: "V4 Pro", tier: "Off-peak", prefix: "SCIRSS_DEEPSEEK_PRO_OFF_PEAK"},
   {model: "V4 Pro", tier: "Peak", prefix: "SCIRSS_DEEPSEEK_PRO_PEAK"},
   {model: "GLM-5.3-Flash", tier: "Current promotion", prefix: "SCIRSS_GLM_53_FLASH"},
+  {model: "Qwen3.8-Flash", tier: "Standard", prefix: "SCIRSS_QWEN_38_FLASH"},
+  {model: "MiMo-V2.5", tier: "Standard", prefix: "SCIRSS_MIMO_V25"},
 ] as const;
 
 const priceColumns = [
@@ -61,7 +63,7 @@ export const DeepSeekPricingEditor = React.forwardRef<DeepSeekPricingEditorHandl
           <h3 className="text-sm font-semibold text-(--ink)">Token pricing</h3>
           <p className="text-sm leading-6 text-muted">
             CNY per 1M tokens. DeepSeek uses Beijing-time peak/off-peak rates. GLM defaults to
-            the current 50% promotional rates (cache hit 0.115, input 0.4, output 1.4); update them here when the promotion ends.
+            its current promotion; Qwen and MiMo use mainland-China standard pay-as-you-go rates.
           </p>
           <p className="text-xs leading-5 text-muted">
             Changes apply only to jobs started after saving. Existing usage records keep their saved price snapshots.

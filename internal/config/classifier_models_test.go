@@ -35,7 +35,7 @@ func TestClassifierModelsStructuredSourceConfigKeepsDisabledKeys(t *testing.T) {
 	if settings.ClassifierModel != ClassifierModelGLM53Flash || settings.ClassifierAPIKey != glmKey {
 		t.Fatalf("effective classifier = %q/%q", settings.ClassifierModel, settings.ClassifierAPIKey)
 	}
-	if settings.ClassifierThinking != "enabled" || settings.ClassifierBaseURL != "https://open.bigmodel.cn/api/paas/v4" {
+	if settings.ClassifierThinking != "disabled" || settings.ClassifierBaseURL != "https://open.bigmodel.cn/api/paas/v4" || settings.EffectiveClassifierModel().Thinking != "enabled" || settings.EffectiveClassifierModel().ReasoningEffort != "low" {
 		t.Fatalf("GLM provider contract not resolved: %#v", settings.EffectiveClassifierModel())
 	}
 	envText, err := os.ReadFile(filepath.Join(root, ".env"))
@@ -81,6 +81,59 @@ func TestClassifierModelsStructuredSourceConfigKeepsDisabledKeys(t *testing.T) {
 	}
 	if settings.ClassifierModels.Models[ClassifierModelGLM53Flash].APIKey != "" {
 		t.Fatal("explicit clear must remove the disabled model key")
+	}
+}
+
+func TestClassifierModelsResolveQwenAndMiMoEnvironmentKeys(t *testing.T) {
+	root := t.TempDir()
+	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
+	writeConfigTestFile(t, filepath.Join(root, ".env"), "QWEN_API_KEY=qwen-key\nMIMO_API_KEY=mimo-key\n")
+
+	settings, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsClassifierModel(settings.ClassifierModels.EnabledModelIDs, ClassifierModelQwen38Flash) || !containsClassifierModel(settings.ClassifierModels.EnabledModelIDs, ClassifierModelMiMoV25) {
+		t.Fatalf("configured models were not enabled: %#v", settings.ClassifierModels.EnabledModelIDs)
+	}
+	qwen := settings.ClassifierModels.Models[ClassifierModelQwen38Flash]
+	if qwen.APIKey != "qwen-key" || qwen.BaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1" || qwen.Thinking != "disabled" || qwen.ReasoningEffort != "none" {
+		t.Fatalf("Qwen provider contract not resolved: %#v", qwen)
+	}
+	mimo := settings.ClassifierModels.Models[ClassifierModelMiMoV25]
+	if mimo.APIKey != "mimo-key" || mimo.BaseURL != "https://api.xiaomimimo.com/v1" || mimo.Thinking != "disabled" || mimo.ReasoningEffort != "" {
+		t.Fatalf("MiMo provider contract not resolved: %#v", mimo)
+	}
+	if ClassifierModelStorageKey(ClassifierModelQwen38Flash) != "QWEN_API_KEY" || ClassifierModelStorageKey(ClassifierModelMiMoV25) != "MIMO_API_KEY" {
+		t.Fatal("Qwen and MiMo storage keys must match their existing environment variable names")
+	}
+}
+
+func TestClassifierModelConfigForIDAppliesGlobalThinkingPreference(t *testing.T) {
+	settings := Settings{ClassifierThinking: "disabled", ClassifierModels: ClassifierModels{Models: map[string]ClassifierModelConfig{}}}
+	glm, err := ClassifierModelConfigForID(settings, ClassifierModelGLM53Flash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if glm.Thinking != "enabled" || glm.ReasoningEffort != "low" {
+		t.Fatalf("GLM must remain at low when the global switch is disabled: %#v", glm)
+	}
+
+	settings.ClassifierThinking = "enabled"
+	for _, test := range []struct {
+		id, thinking, effort string
+	}{
+		{ClassifierModelDeepSeekV4Flash, "enabled", "low"},
+		{ClassifierModelQwen38Flash, "enabled", "low"},
+		{ClassifierModelMiMoV25, "enabled", ""},
+	} {
+		model, err := ClassifierModelConfigForID(settings, test.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if model.Thinking != test.thinking || model.ReasoningEffort != test.effort {
+			t.Fatalf("runtime controls for %s = %#v", test.id, model)
+		}
 	}
 }
 

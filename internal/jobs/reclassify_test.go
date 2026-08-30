@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -84,6 +85,49 @@ INSERT INTO papers (
 		t.Fatalf("expected 2 classifications, got %d", classified)
 	}
 	assertClassificationCount(t, settings, 2, 2)
+}
+
+func TestReclassifyUsesSavedThinkingPreferenceAndSafeTokenFloor(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	settings.ClassifierThinking = "enabled"
+	settings.ClassifierBatchSize = 1
+	seedJobFixture(t, settings)
+
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Relevant.\",\"translated_title_zh\":\"重分类论文\"}]}"}}]}`))
+	}))
+	defer server.Close()
+	settings.ClassifierModels = config.ClassifierModels{
+		EnabledModelIDs: []string{config.ClassifierModelDeepSeekV4Flash},
+		DefaultModelID:  config.ClassifierModelDeepSeekV4Flash,
+		Models: map[string]config.ClassifierModelConfig{
+			config.ClassifierModelDeepSeekV4Flash: {
+				ClassifierModelSpec: config.ClassifierModelSpec{ID: config.ClassifierModelDeepSeekV4Flash, Provider: "deepseek", BaseURL: server.URL},
+				APIKey:              "deepseek-key",
+			},
+		},
+	}
+
+	classified, err := ReclassifyPaperIDs(settings, []int64{1}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if classified != 1 {
+		t.Fatalf("classified = %d", classified)
+	}
+	thinking := request["thinking"].(map[string]any)
+	if thinking["type"] != "enabled" || request["reasoning_effort"] != "low" {
+		t.Fatalf("runtime thinking controls = %#v", request)
+	}
+	if request["max_tokens"] != float64(4096) {
+		t.Fatalf("max_tokens = %#v, want 4096", request["max_tokens"])
+	}
 }
 
 func testJobSettings(root string) config.Settings {

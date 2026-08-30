@@ -147,6 +147,22 @@ var Options = []Option{
 		Secret:      true,
 	},
 	{
+		Key:         classifierQwenAPIKey,
+		Label:       "Qwen classifier API key",
+		Description: "Used for qwen3.8-flash classification requests.",
+		Section:     "Managed classifier models",
+		InputType:   "password",
+		Secret:      true,
+	},
+	{
+		Key:         classifierMiMoAPIKey,
+		Label:       "MiMo classifier API key",
+		Description: "Used for mimo-v2.5 classification requests.",
+		Section:     "Managed classifier models",
+		InputType:   "password",
+		Secret:      true,
+	},
+	{
 		Key:         "SCIRSS_CLASSIFIER_API_KEY",
 		Label:       "Classifier API key",
 		Description: "Used only for paper classification requests.",
@@ -172,9 +188,9 @@ var Options = []Option{
 	},
 	{
 		Key:         "SCIRSS_CLASSIFIER_THINKING",
-		Label:       "Classifier thinking",
-		Description: "Whether the classifier role requests provider reasoning mode.",
-		Section:     "Legacy classifier model",
+		Label:       "Enable classifier thinking",
+		Description: "Use each supported classifier's lowest reasoning level. GLM always remains enabled at low.",
+		Section:     "Classifier tuning",
 		InputType:   "select",
 		Default:     "disabled",
 		Options: []SettingOption{
@@ -286,6 +302,12 @@ var Options = []Option{
 		Key: "SCIRSS_GLM_53_FLASH_OUTPUT_CNY_PER_MILLION", Label: "GLM-5.3-Flash output", Description: "Promotional CNY per million output tokens.",
 		Section: "GLM pricing", InputType: "decimal", Default: "1.4",
 	},
+	{Key: "SCIRSS_QWEN_38_FLASH_CACHE_HIT_CNY_PER_MILLION", Label: "Qwen3.8-Flash cache hit", Description: "CNY per million cached input tokens.", Section: "Qwen pricing", InputType: "decimal", Default: "0.1"},
+	{Key: "SCIRSS_QWEN_38_FLASH_CACHE_MISS_CNY_PER_MILLION", Label: "Qwen3.8-Flash input", Description: "CNY per million uncached input tokens.", Section: "Qwen pricing", InputType: "decimal", Default: "0.8"},
+	{Key: "SCIRSS_QWEN_38_FLASH_OUTPUT_CNY_PER_MILLION", Label: "Qwen3.8-Flash output", Description: "CNY per million output tokens, including thinking tokens.", Section: "Qwen pricing", InputType: "decimal", Default: "2.7"},
+	{Key: "SCIRSS_MIMO_V25_CACHE_HIT_CNY_PER_MILLION", Label: "MiMo-V2.5 cache hit", Description: "CNY per million cached input tokens.", Section: "MiMo pricing", InputType: "decimal", Default: "0.02"},
+	{Key: "SCIRSS_MIMO_V25_CACHE_MISS_CNY_PER_MILLION", Label: "MiMo-V2.5 input", Description: "CNY per million uncached input tokens.", Section: "MiMo pricing", InputType: "decimal", Default: "1"},
+	{Key: "SCIRSS_MIMO_V25_OUTPUT_CNY_PER_MILLION", Label: "MiMo-V2.5 output", Description: "CNY per million output tokens, including thinking tokens.", Section: "MiMo pricing", InputType: "decimal", Default: "2"},
 	{
 		Key:         "SCIRSS_ZOTERO_API_KEY",
 		Label:       "Zotero API key",
@@ -393,7 +415,6 @@ func Load(root string) (Settings, error) {
 	settings.ClassifierAPIKey = effectiveClassifier.APIKey
 	settings.ClassifierBaseURL = effectiveClassifier.BaseURL
 	settings.ClassifierModel = effectiveClassifier.ID
-	settings.ClassifierThinking = effectiveClassifier.Thinking
 	settings.ClassifierBatchSize = positiveInt(valueMap["SCIRSS_CLASSIFIER_BATCH_SIZE"], DefaultClassifierBatchSize)
 	settings.ProfileAPIKey = optionalValue(valueMap["SCIRSS_PROFILE_API_KEY"])
 	settings.ProfileBaseURL = valueOrDefault(valueMap["SCIRSS_PROFILE_BASE_URL"], "https://api.deepseek.com")
@@ -808,9 +829,23 @@ func pricingFromValues(values []ResolvedValue, valueMap map[string]string) llmus
 	pricing.Pro.OffPeak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_PRO_OFF_PEAK", pricing.Pro.OffPeak)
 	pricing.Pro.Peak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_PRO_PEAK", pricing.Pro.Peak)
 	pricing.GLM53Flash = tokenRatesFromValues(valueMap, "SCIRSS_GLM_53_FLASH", pricing.GLM53Flash)
+	pricing.Qwen38Flash = tokenRatesFromValues(valueMap, "SCIRSS_QWEN_38_FLASH", pricing.Qwen38Flash)
+	pricing.MiMoV25 = tokenRatesFromValues(valueMap, "SCIRSS_MIMO_V25", pricing.MiMoV25)
 	for _, value := range values {
 		if value.Option.Section == "GLM pricing" && value.Source != "default" {
 			pricing.GLM53FlashSnapshot = llmusage.PricingSnapshotGLMManual
+			break
+		}
+	}
+	for _, value := range values {
+		if value.Option.Section == "Qwen pricing" && value.Source != "default" {
+			pricing.Qwen38FlashSnapshot = llmusage.PricingSnapshotQwenManual
+			break
+		}
+	}
+	for _, value := range values {
+		if value.Option.Section == "MiMo pricing" && value.Source != "default" {
+			pricing.MiMoV25Snapshot = llmusage.PricingSnapshotMiMoManual
 			break
 		}
 	}

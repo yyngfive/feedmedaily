@@ -22,14 +22,14 @@ FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载
 
 说明：
 
-- 分类模型目前固定为 `DeepSeek V4 Flash (deepseek-v4-flash)` 和 `GLM-5.3-Flash (glm-5.3-flash)`；配置 key 即启用对应模型，默认模型菜单只显示已有 key 的模型，每个 sync/reclassify job 只使用入队时的默认模型。
+- 分类模型目前固定提供 `DeepSeek V4 Flash (deepseek-v4-flash)`、`GLM-5.3-Flash (glm-5.3-flash)`、`Qwen3.8-Flash (qwen3.8-flash)` 和 `MiMo-V2.5 (mimo-v2.5)`；配置对应 key 即启用模型，默认模型菜单只显示已有 key 的模型，每个 sync/reclassify job 只使用入队时的默认模型。
 
 ### DeepSeek 设置
 
 1. 在 [DeepSeek Platform](https://platform.deepseek.com/) 注册并登录
 2. 在 [API Keys](https://platform.deepseek.com/api_keys) 页面创建 API Key
 
-默认分类配置使用 `deepseek-v4-flash`、`thinking=disabled` 和 batch size `5`。DeepSeek 分类和标题翻译固定关闭 thinking；GLM 分类和标题翻译固定使用 `thinking=enabled`、`reasoning_effort=low` 及确定性采样设置。分类请求保留简短 `reason`，不要求模型生成内部决策轨迹或阅读动作；阅读动作由应用根据相关性标签确定。Profile 生成仍独立使用 DeepSeek V4 Pro key。
+默认分类配置使用 `deepseek-v4-flash`、关闭 thinking 和 batch size `5`。`Settings → Model → Advanced model settings` 可以为支持的分类模型开启思考；应用只使用各供应商最低档位：DeepSeek 与 Qwen 为 `low`，MiMo 使用其 Chat API 可表达的最低 `enabled`，GLM 始终固定为 `low`、不能关闭。DeepSeek 或 MiMo 开启思考后，分类和连接测试使用至少 4096 completion tokens，避免 reasoning 用尽原有 600/1100 Token 预算而没有最终 JSON；较大批次原本需要的更高上限不会被降低。标题翻译仍关闭思考。分类请求保留简短 `reason`，不要求模型生成内部决策轨迹或阅读动作；阅读动作由应用根据相关性标签确定。Profile 生成仍独立使用 DeepSeek V4 Pro key。
 
 连接测试会在后台发送一个最小 JSON 请求，会消耗少量对应提供商额度；测试 key 不会被保存。停用模型不会删除其 key，必须单独点击 `Clear key` 才会删除。
 

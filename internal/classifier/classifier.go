@@ -38,14 +38,17 @@ Labels are fixed:
 Return concise, evidence-based reasoning grounded in the title and abstract.`
 
 type LLMConfig struct {
-	Context         context.Context
-	APIKey          string
-	Model           string
-	BaseURL         string
-	Provider        string
-	Thinking        string
-	ReasoningEffort string
-	Usage           *llmusage.Collector
+	Context                       context.Context
+	APIKey                        string
+	Model                         string
+	BaseURL                       string
+	Provider                      string
+	Thinking                      string
+	ReasoningEffort               string
+	UseConfiguredProviderControls bool
+	MaxTokens                     int
+	MinMaxTokens                  int
+	Usage                         *llmusage.Collector
 }
 
 type promptPaper struct {
@@ -76,6 +79,11 @@ type chatCompletionResponse struct {
 var classifierHTTPClient = &http.Client{Timeout: 60 * time.Second}
 
 const classifierMaxAttempts = 2
+
+// ThinkingMaxTokensFloor leaves room for reasoning plus the required JSON answer.
+// The production-size 600/1100 limits can be exhausted before DeepSeek or MiMo
+// emit final content when thinking is enabled.
+const ThinkingMaxTokensFloor = 4096
 
 func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig) ([]store.Classification, error) {
 	// 复刻 Python classifier 的批量分类与缺失标题翻译补全逻辑。
@@ -113,6 +121,13 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 		})
 	}
 
+	maxTokens := max(600, 220*len(papers))
+	if cfg.MaxTokens > 0 {
+		maxTokens = cfg.MaxTokens
+	}
+	if cfg.MinMaxTokens > maxTokens {
+		maxTokens = cfg.MinMaxTokens
+	}
 	payload := map[string]any{
 		"model": cfg.Model,
 		"messages": []map[string]string{
@@ -120,7 +135,7 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 			{"role": "user", "content": batchClassificationPrompt(indexed, profile)},
 		},
 		"temperature":     0,
-		"max_tokens":      max(600, 220*len(papers)),
+		"max_tokens":      maxTokens,
 		"response_format": map[string]string{"type": "json_object"},
 	}
 	applyProviderControls(cfg, payload, false)
@@ -718,6 +733,10 @@ func TestConnection(cfg LLMConfig) error {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return fmt.Errorf("classifier API key is required")
 	}
+	maxTokens := 32
+	if cfg.MinMaxTokens > maxTokens {
+		maxTokens = cfg.MinMaxTokens
+	}
 	payload := map[string]any{
 		"model": cfg.Model,
 		"messages": []map[string]string{
@@ -725,7 +744,7 @@ func TestConnection(cfg LLMConfig) error {
 			{"role": "user", "content": "Return {\"ok\":true}."},
 		},
 		"temperature":     0,
-		"max_tokens":      32,
+		"max_tokens":      maxTokens,
 		"response_format": map[string]string{"type": "json_object"},
 	}
 	applyProviderControls(cfg, payload, false)
@@ -751,13 +770,55 @@ func applyProviderControls(cfg LLMConfig, payload map[string]any, forceDisabled 
 		switch {
 		case model == "glm-5.3-flash" || strings.Contains(model, "glm-5.3-flash"):
 			provider = "zhipu"
+		case model == "qwen3.8-flash" || strings.Contains(model, "qwen3.8-flash"):
+			provider = "qwen"
+		case model == "mimo-v2.5" || strings.Contains(model, "mimo-v2.5"):
+			provider = "mimo"
 		case strings.Contains(model, "deepseek"):
 			provider = "deepseek"
 		}
 	}
 	if forceDisabled {
+		if provider == "qwen" || model == "qwen3.8-flash" {
+			delete(payload, "thinking")
+			delete(payload, "enable_thinking")
+			payload["reasoning_effort"] = "none"
+			return
+		}
 		payload["thinking"] = map[string]string{"type": "disabled"}
 		delete(payload, "reasoning_effort")
+		return
+	}
+	if cfg.UseConfiguredProviderControls {
+		thinking := normalizedThinking(cfg.Thinking)
+		if provider == "mimo" || model == "mimo-v2.5" {
+			if maxTokens, ok := payload["max_tokens"]; ok {
+				payload["max_completion_tokens"] = maxTokens
+				delete(payload, "max_tokens")
+			}
+			payload["thinking"] = map[string]string{"type": thinking}
+			delete(payload, "reasoning_effort")
+			return
+		}
+		if provider == "qwen" || model == "qwen3.8-flash" {
+			delete(payload, "thinking")
+			delete(payload, "enable_thinking")
+			if effort := strings.TrimSpace(cfg.ReasoningEffort); effort != "" {
+				payload["reasoning_effort"] = effort
+			} else if thinking == "disabled" {
+				payload["reasoning_effort"] = "none"
+			}
+			return
+		}
+		payload["thinking"] = map[string]string{"type": thinking}
+		if thinking == "disabled" {
+			delete(payload, "reasoning_effort")
+		} else if effort := strings.TrimSpace(cfg.ReasoningEffort); effort != "" {
+			payload["reasoning_effort"] = effort
+		}
+		if provider == "zhipu" || model == "glm-5.3-flash" {
+			payload["do_sample"] = false
+		}
 		return
 	}
 	if provider == "zhipu" || model == "glm-5.3-flash" {
@@ -772,6 +833,21 @@ func applyProviderControls(cfg LLMConfig, payload map[string]any, forceDisabled 
 		delete(payload, "reasoning_effort")
 		return
 	}
+	if provider == "qwen" || model == "qwen3.8-flash" {
+		delete(payload, "thinking")
+		delete(payload, "enable_thinking")
+		payload["reasoning_effort"] = "none"
+		return
+	}
+	if provider == "mimo" || model == "mimo-v2.5" {
+		if maxTokens, ok := payload["max_tokens"]; ok {
+			payload["max_completion_tokens"] = maxTokens
+			delete(payload, "max_tokens")
+		}
+		payload["thinking"] = map[string]string{"type": "disabled"}
+		delete(payload, "reasoning_effort")
+		return
+	}
 	thinking := normalizedThinking(cfg.Thinking)
 	payload["thinking"] = map[string]string{"type": thinking}
 	if effort := strings.TrimSpace(cfg.ReasoningEffort); effort != "" {
@@ -782,10 +858,10 @@ func applyProviderControls(cfg LLMConfig, payload map[string]any, forceDisabled 
 func supportsThinkingFallback(cfg LLMConfig) bool {
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	model := strings.ToLower(strings.TrimSpace(cfg.Model))
-	if provider == "zhipu" || provider == "deepseek" {
+	if provider == "zhipu" || provider == "deepseek" || provider == "qwen" || provider == "mimo" {
 		return false
 	}
-	if model == "glm-5.3-flash" || strings.Contains(model, "glm-5.3-flash") || model == "deepseek-v4-flash" {
+	if model == "glm-5.3-flash" || strings.Contains(model, "glm-5.3-flash") || model == "deepseek-v4-flash" || model == "qwen3.8-flash" || model == "mimo-v2.5" {
 		return false
 	}
 	return normalizedThinking(cfg.Thinking) != "disabled"
@@ -794,7 +870,7 @@ func supportsThinkingFallback(cfg LLMConfig) bool {
 func isManagedClassifierProvider(cfg LLMConfig) bool {
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	model := strings.ToLower(strings.TrimSpace(cfg.Model))
-	return provider == "deepseek" || provider == "zhipu" || model == "deepseek-v4-flash" || model == "glm-5.3-flash"
+	return provider == "deepseek" || provider == "zhipu" || provider == "qwen" || provider == "mimo" || model == "deepseek-v4-flash" || model == "glm-5.3-flash" || model == "qwen3.8-flash" || model == "mimo-v2.5"
 }
 
 func shouldRetryWithoutThinking(err error) bool {

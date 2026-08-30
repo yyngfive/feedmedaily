@@ -191,7 +191,7 @@ go run .\cmd\feedmedaily-tray --root .
 ### 7.4 Model
 
 - `Classification models` 多选、按模型 key、启用/停用和默认模型联动正确；默认值不能脱离启用集合。
-- DeepSeek V4 Flash 请求使用 `thinking=disabled` 且无 `reasoning_effort`；GLM-5.3-Flash 请求使用 `thinking=enabled` + `reasoning_effort=low`，失败重试不发送 disabled-thinking。
+- 高级设置关闭思考时，DeepSeek/Qwen/MiMo 均关闭，GLM 仍使用 `thinking=enabled` + `reasoning_effort=low`；开启时只发送各模型最低档，且 DeepSeek/MiMo 的 completion 上限至少为 4096。
 - `Test connection` 以后台 `model-test` job 运行，成功/失败状态可轮询，且日志不出现 key。
 - secret 值不回显明文。
 - environment override 状态清楚显示。
