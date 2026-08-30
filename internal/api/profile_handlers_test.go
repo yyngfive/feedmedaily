@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"github.com/yyngfive/scirssagent/internal/config"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReadOnlyBootstrapEndpoints(t *testing.T) {
@@ -310,13 +312,9 @@ func TestProfileProposalApplyRejectAndReclassifyAPI(t *testing.T) {
 	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`)
 	seedReadOnlyFixture(t, settings.DatabasePath)
 
-	reclassifyPaperIDsFunc = func(_ config.Settings, paperIDs []int64, progress jobruntime.ProgressFunc, _ ...*llmusage.Collector) (int, error) {
-		if progress != nil {
-			progress(jobruntime.PercentProgress("pipeline.classifier.classifying", "classification", 1, 1, "Classifying papers 1/1 (100%)."))
-		}
-		if len(paperIDs) == 0 {
-			return 0, nil
-		}
+	applyReclassifiedPaperIDs := []int64(nil)
+	reclassifyPaperIDsContextFunc = func(_ config.Settings, paperIDs []int64, _ context.Context, _ jobruntime.ProgressFunc, _ ...*llmusage.Collector) (int, error) {
+		applyReclassifiedPaperIDs = append([]int64(nil), paperIDs...)
 		return len(paperIDs), nil
 	}
 	selectReclassifyPaperIDsFunc = func(_ config.Settings, scope string, limit int) ([]int64, error) {
@@ -335,6 +333,24 @@ func TestProfileProposalApplyRejectAndReclassifyAPI(t *testing.T) {
 	handler.ServeHTTP(applyRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/proposals/1/apply", nil))
 	if applyRecorder.Code != http.StatusOK || !contains(applyRecorder.Body.String(), `"state":"applied"`) || !contains(applyRecorder.Body.String(), `"applied_version":2`) {
 		t.Fatalf("apply proposal = %d %s", applyRecorder.Code, applyRecorder.Body.String())
+	}
+	var applyPayload struct {
+		Job *jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(applyRecorder.Body.Bytes(), &applyPayload); err != nil {
+		t.Fatal(err)
+	}
+	if applyPayload.Job != nil {
+		waitForJobCompletion(t, applyPayload.Job.ID)
+		job, ok := jobByID(applyPayload.Job.ID)
+		if !ok || job.Status != "completed" {
+			t.Fatalf("apply reclassify job = %#v", job)
+		}
+		if job.Result["reclassified"] != len(applyReclassifiedPaperIDs) {
+			t.Fatalf("apply reclassify reclassified = %#v, want %d", job.Result["reclassified"], len(applyReclassifiedPaperIDs))
+		}
+	} else if len(applyReclassifiedPaperIDs) != 0 {
+		t.Fatalf("apply did not launch a reclassify job but stub classified %#v", applyReclassifiedPaperIDs)
 	}
 	appliedProfile, err := os.ReadFile(settings.ProfilePath)
 	if err != nil {
@@ -387,7 +403,7 @@ func TestCompactProfileProposalApplyUsesAcceptedChanges(t *testing.T) {
 	seedCompactProposalFixture(t, settings.DatabasePath)
 
 	reclassifiedPaperIDs := []int64(nil)
-	reclassifyPaperIDsFunc = func(_ config.Settings, paperIDs []int64, _ jobruntime.ProgressFunc, _ ...*llmusage.Collector) (int, error) {
+	reclassifyPaperIDsContextFunc = func(_ config.Settings, paperIDs []int64, _ context.Context, _ jobruntime.ProgressFunc, _ ...*llmusage.Collector) (int, error) {
 		reclassifiedPaperIDs = append([]int64(nil), paperIDs...)
 		return len(paperIDs), nil
 	}
@@ -401,6 +417,15 @@ func TestCompactProfileProposalApplyUsesAcceptedChanges(t *testing.T) {
 	handler.ServeHTTP(applyRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/proposals/21/apply", strings.NewReader(body)))
 	if applyRecorder.Code != http.StatusOK || !contains(applyRecorder.Body.String(), `"state":"applied"`) || !contains(applyRecorder.Body.String(), `"status":"accepted"`) || !contains(applyRecorder.Body.String(), `"status":"rejected"`) {
 		t.Fatalf("compact apply = %d %s", applyRecorder.Code, applyRecorder.Body.String())
+	}
+	var applyPayload struct {
+		Job *jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(applyRecorder.Body.Bytes(), &applyPayload); err != nil {
+		t.Fatal(err)
+	}
+	if applyPayload.Job != nil {
+		waitForJobCompletion(t, applyPayload.Job.ID)
 	}
 
 	appliedProfile, err := os.ReadFile(settings.ProfilePath)
@@ -424,6 +449,54 @@ func TestCompactProfileProposalApplyUsesAcceptedChanges(t *testing.T) {
 	}
 }
 
+func TestProfileProposalApplyReclassifyJobCanBeCancelled(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`)
+	seedReadOnlyFixture(t, settings.DatabasePath)
+
+	started := make(chan struct{})
+	reclassifyPaperIDsContextFunc = func(_ config.Settings, _ []int64, ctx context.Context, _ jobruntime.ProgressFunc, _ ...*llmusage.Collector) (int, error) {
+		close(started)
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
+
+	handler := newTestHandler(t, settings)
+	applyRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(applyRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/proposals/1/apply", nil))
+	if applyRecorder.Code != http.StatusOK || !contains(applyRecorder.Body.String(), `"state":"applied"`) {
+		t.Fatalf("apply proposal = %d %s", applyRecorder.Code, applyRecorder.Body.String())
+	}
+	var payload struct {
+		Job *jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(applyRecorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Job == nil {
+		t.Fatal("apply response did not include the reclassify job")
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("apply reclassify job did not start")
+	}
+
+	cancelRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(cancelRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/jobs/"+payload.Job.ID+"/cancel", nil))
+	if cancelRecorder.Code != http.StatusAccepted {
+		t.Fatalf("apply reclassify cancel = %d %s", cancelRecorder.Code, cancelRecorder.Body.String())
+	}
+	job := waitForJobTerminalStatus(t, payload.Job.ID)
+	if job.Status != "cancelled" {
+		t.Fatalf("apply reclassify job status = %s", job.Status)
+	}
+}
+
 func TestCompactProfileProposalApplyRejectsVersionMismatch(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)
@@ -437,4 +510,151 @@ func TestCompactProfileProposalApplyRejectsVersionMismatch(t *testing.T) {
 	if applyRecorder.Code != http.StatusConflict || !contains(applyRecorder.Body.String(), "Regenerate the proposal") {
 		t.Fatalf("version mismatch apply = %d %s", applyRecorder.Code, applyRecorder.Body.String())
 	}
+}
+
+func TestApplyProposalReclassifyQueuesWhileSyncRuns(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`)
+	seedReadOnlyFixture(t, settings.DatabasePath)
+
+	syncStarted := make(chan struct{})
+	releaseSync := make(chan struct{})
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		close(syncStarted)
+		<-releaseSync
+		return jobruntime.RunSummary{Fetched: 1}, nil
+	}
+	reclassifyCalls := make(chan []int64, 1)
+	reclassifyPaperIDsContextFunc = func(_ config.Settings, paperIDs []int64, _ context.Context, _ jobruntime.ProgressFunc, _ ...*llmusage.Collector) (int, error) {
+		reclassifyCalls <- append([]int64(nil), paperIDs...)
+		return len(paperIDs), nil
+	}
+	rebuildLatestReportFunc = func(_ config.Settings, _ jobruntime.ProgressFunc) (int, error) { return 1, nil }
+	handler := newTestHandler(t, settings)
+
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run launch = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	select {
+	case <-syncStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sync did not start")
+	}
+
+	applyRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(applyRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/proposals/1/apply", nil))
+	if applyRecorder.Code != http.StatusOK || !contains(applyRecorder.Body.String(), `"state":"applied"`) {
+		t.Fatalf("apply proposal = %d %s", applyRecorder.Code, applyRecorder.Body.String())
+	}
+	var applyPayload struct {
+		Job *jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(applyRecorder.Body.Bytes(), &applyPayload); err != nil {
+		t.Fatal(err)
+	}
+	if applyPayload.Job == nil {
+		t.Fatal("apply response did not include the reclassify job")
+	}
+	if applyPayload.Job.Status != "queued" {
+		t.Fatalf("apply reclassify job should queue while sync runs, got %s", applyPayload.Job.Status)
+	}
+	select {
+	case paperIDs := <-reclassifyCalls:
+		t.Fatalf("reclassify ran while sync was active: %v", paperIDs)
+	default:
+	}
+
+	close(releaseSync)
+	waitForJobCompletion(t, applyPayload.Job.ID)
+	select {
+	case paperIDs := <-reclassifyCalls:
+		if len(paperIDs) != 1 || paperIDs[0] != 1 {
+			t.Fatalf("queued reclassify papers = %v, want [1]", paperIDs)
+		}
+	default:
+		t.Fatal("queued reclassify never ran after the sync finished")
+	}
+}
+
+func TestApplyProposalQueuedReclassifyCanBeCancelled(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`)
+	seedReadOnlyFixture(t, settings.DatabasePath)
+
+	syncStarted := make(chan struct{})
+	releaseSync := make(chan struct{})
+	runSyncFunc = func(_ config.Settings, opts jobruntime.RunOptions, _ jobruntime.ProgressFunc) (jobruntime.RunSummary, error) {
+		close(syncStarted)
+		select {
+		case <-releaseSync:
+			return jobruntime.RunSummary{Fetched: 1}, nil
+		case <-opts.Context.Done():
+			return jobruntime.RunSummary{}, opts.Context.Err()
+		}
+	}
+	reclassifyCalled := make(chan struct{}, 1)
+	reclassifyPaperIDsContextFunc = func(_ config.Settings, _ []int64, _ context.Context, _ jobruntime.ProgressFunc, _ ...*llmusage.Collector) (int, error) {
+		reclassifyCalled <- struct{}{}
+		return 1, nil
+	}
+	handler := newTestHandler(t, settings)
+
+	runRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(runRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/run", nil))
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run launch = %d %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	var runPayload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(runRecorder.Body.Bytes(), &runPayload); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-syncStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sync did not start")
+	}
+
+	applyRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(applyRecorder, httptest.NewRequest(http.MethodPost, "/api/profile/proposals/1/apply", nil))
+	if applyRecorder.Code != http.StatusOK {
+		t.Fatalf("apply proposal = %d %s", applyRecorder.Code, applyRecorder.Body.String())
+	}
+	var applyPayload struct {
+		Job *jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(applyRecorder.Body.Bytes(), &applyPayload); err != nil {
+		t.Fatal(err)
+	}
+	if applyPayload.Job == nil {
+		t.Fatal("apply response did not include the reclassify job")
+	}
+
+	cancelRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(cancelRecorder, httptest.NewRequest(http.MethodPost, "/api/admin/jobs/"+applyPayload.Job.ID+"/cancel", nil))
+	if cancelRecorder.Code != http.StatusAccepted {
+		t.Fatalf("queued reclassify cancel = %d %s", cancelRecorder.Code, cancelRecorder.Body.String())
+	}
+	job := waitForJobTerminalStatus(t, applyPayload.Job.ID)
+	if job.Status != "cancelled" {
+		t.Fatalf("queued reclassify status = %s, want cancelled", job.Status)
+	}
+	select {
+	case <-reclassifyCalled:
+		t.Fatal("cancelled queued reclassify should never run")
+	default:
+	}
+	close(releaseSync)
+	waitForJobTerminalStatus(t, runPayload.Job.ID)
 }

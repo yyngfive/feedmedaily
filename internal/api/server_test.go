@@ -465,7 +465,7 @@ func stubAPIGlobals(t *testing.T) func() {
 	previousListZoteroCollections := listZoteroCollectionsFunc
 	previousSavePaperToZotero := savePaperToZoteroFunc
 	previousSelectReclassify := selectReclassifyPaperIDsFunc
-	previousReclassify := reclassifyPaperIDsFunc
+	previousReclassifyContext := reclassifyPaperIDsContextFunc
 	previousRebuildLatestReport := rebuildLatestReportFunc
 	previousRunSync := runSyncFunc
 	previousTestClassifierConnection := testClassifierConnectionFunc
@@ -483,6 +483,20 @@ func stubAPIGlobals(t *testing.T) func() {
 	}{items: map[string]context.CancelFunc{}}
 	apiVerifications = verificationRegistry{items: map[string]*pendingVerification{}}
 	return func() {
+		// Give a still-finishing job a moment to release the pipeline lock,
+		// then replace the lock instead of cancelling leftover jobs: a sync
+		// parked in verification wait never finishes on its own, and its test
+		// stub fails if the cancellation wakes it.
+		drainDeadline := time.Now().Add(200 * time.Millisecond)
+		for time.Now().Before(drainDeadline) {
+			release, ok := tryLockPipeline()
+			if ok {
+				release()
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		pipelineWork = new(sync.Mutex)
 		openExternalTargetFunc = previousOpen
 		lookupUpdateTXTFunc = previousLookupTXT
 		backendRunCommandFunc = previousBackendRunCommand
@@ -491,7 +505,7 @@ func stubAPIGlobals(t *testing.T) func() {
 		listZoteroCollectionsFunc = previousListZoteroCollections
 		savePaperToZoteroFunc = previousSavePaperToZotero
 		selectReclassifyPaperIDsFunc = previousSelectReclassify
-		reclassifyPaperIDsFunc = previousReclassify
+		reclassifyPaperIDsContextFunc = previousReclassifyContext
 		rebuildLatestReportFunc = previousRebuildLatestReport
 		runSyncFunc = previousRunSync
 		testClassifierConnectionFunc = previousTestClassifierConnection

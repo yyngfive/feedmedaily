@@ -60,7 +60,7 @@ const (
 	verificationMethodBrowserManual = "browser_manual"
 )
 
-func launchVerificationAwareSyncJob(settings config.Settings, run func(context.Context, jobruntime.ProgressFunc, map[string][]byte, map[string]string, feeds.VerifyHostFunc, *llmusage.Collector) (map[string]any, error)) (jobInfo, bool) {
+func launchVerificationAwareSyncJob(settings config.Settings, run func(context.Context, jobruntime.ProgressFunc, map[string][]byte, map[string]string, feeds.VerifyHostFunc, *llmusage.Collector) (map[string]any, error)) (jobInfo, bool, bool) {
 	job := jobInfo{
 		ID:         nextJobID(),
 		JobType:    "sync",
@@ -70,9 +70,15 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(context.C
 		CreatedAt:  nowFunc().UTC(),
 	}
 	var reused bool
-	job, reused = reserveJobUnlessActive(job)
+	var reserved bool
+	var releasePipeline func()
+	job, reused, reserved, releasePipeline = reservePipelineJob(job)
 	if reused {
-		return job, true
+		return job, true, true
+	}
+	if !reserved {
+		// 另一个 sync/reclassify 正在执行分类工作，拒绝并发启动。
+		return job, false, false
 	}
 	if path, err := logging.Write(settings.LogsDir, logging.Event{
 		Level:      "info",
@@ -90,6 +96,9 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(context.C
 
 	go func() {
 		defer func() {
+			if releasePipeline != nil {
+				releasePipeline()
+			}
 			unregisterJobCancellation(job.ID)
 			cancel()
 		}()
@@ -231,7 +240,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(context.C
 			},
 		})
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
-			finishCancelledSyncJob(settings, &job, usage)
+			finishCancelledSyncJob(settings, &job, result, usage)
 			return
 		}
 		if err == nil {
@@ -261,7 +270,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(context.C
 				current.VerificationSessionState = ""
 			})
 			if !completed {
-				finishCancelledSyncJob(settings, &job, usage)
+				finishCancelledSyncJob(settings, &job, result, usage)
 				return
 			}
 			logJobEvent(settings.LogsDir, &job, "info", "completed", "sync.completed", "Completed.", "", result)
@@ -290,28 +299,28 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(context.C
 			current.VerificationSessionState = ""
 		})
 		if !failed {
-			finishCancelledSyncJob(settings, &job, usage)
+			finishCancelledSyncJob(settings, &job, result, usage)
 			return
 		}
 		logJobEvent(settings.LogsDir, &job, "error", "failed", "sync.failed", "", err.Error(), nil)
 		return
 	}()
 
-	return job, false
+	return job, false, true
 }
 
-func finishCancelledSyncJob(settings config.Settings, job *jobInfo, usage *llmusage.Collector) {
+func finishCancelledSyncJob(settings config.Settings, job *jobInfo, result map[string]any, usage *llmusage.Collector) {
 	finished := nowFunc().UTC()
 	summary := finalizeLLMUsage(settings, job.ID, "sync", "cancelled", usage, finished)
-	logJobEvent(settings.LogsDir, job, "info", "cancelled", "sync.cancelled", "Sync stopped.", "", nil)
+	logJobEvent(settings.LogsDir, job, "info", "cancelled", "sync.cancelled", "Sync stopped.", "", result)
 	updateJob(job.ID, func(current *jobInfo) {
 		current.Status = "cancelled"
 		current.MessageKey = "sync.cancelled"
 		current.Message = "Sync stopped."
 		current.Error = ""
-		current.Result = nil
+		current.Result = result
 		current.LLMUsage = &summary
-		current.WarningCount = 0
+		current.WarningCount = countWarnings(result)
 		clearJobProgress(current)
 		current.FinishedAt = &finished
 		current.CancelRequested = true

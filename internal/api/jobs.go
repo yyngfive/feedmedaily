@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	goruntime "runtime"
@@ -90,13 +91,13 @@ func cancelRegisteredJob(id string) bool {
 	return true
 }
 
-// requestJobCancellation asks an active sync to stop and returns its latest state.
+// requestJobCancellation asks an active cancellable job to stop and returns its latest state.
 func requestJobCancellation(id string) (jobInfo, bool, bool) {
 	job, exists := jobByID(id)
 	if !exists {
 		return jobInfo{}, false, false
 	}
-	if job.JobType != "sync" || !isActiveJobStatus(job.Status) {
+	if !isCancellableJobType(job.JobType) || !isActiveJobStatus(job.Status) {
 		return job, false, true
 	}
 	requested := cancelRegisteredJob(id)
@@ -106,15 +107,86 @@ func requestJobCancellation(id string) (jobInfo, bool, bool) {
 				return
 			}
 			current.CancelRequested = true
-			current.MessageKey = "sync.cancelling"
-			current.Message = "Stopping sync."
+			current.MessageKey = job.JobType + ".cancelling"
+			if job.JobType == "reclassify" {
+				current.Message = "Stopping reclassification."
+			} else {
+				current.Message = "Stopping sync."
+			}
 		})
 	}
 	job, _ = jobByID(id)
 	return job, requested, true
 }
 
-type localJobFunc func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error)
+type localJobFunc func(context.Context, jobruntime.ProgressFunc, *llmusage.Collector) (map[string]any, error)
+
+// pipelineWork serializes classification work: at most one sync or reclassify
+// job may execute at a time. Manual launches take it synchronously (TryLock)
+// and reject with 409; apply-launched reclassify jobs wait for it while queued.
+// It is a pointer so tests can replace a lock left held by a job parked in
+// verification wait without touching that job's goroutine; every acquire
+// captures the instance it locked and releases that same instance.
+var pipelineWork = new(sync.Mutex)
+
+// tryLockPipeline acquires the current pipeline lock without waiting. On
+// success it returns the release func bound to that lock instance.
+func tryLockPipeline() (release func(), ok bool) {
+	mu := pipelineWork
+	if mu.TryLock() {
+		return func() { mu.Unlock() }, true
+	}
+	return nil, false
+}
+
+// lockMuBlocking acquires mu, waiting until it is free or ctx is done, and
+// returns the release func bound to that lock instance on success.
+func lockMuBlocking(mu *sync.Mutex, ctx context.Context) (func(), error) {
+	acquired := make(chan struct{})
+	go func() {
+		mu.Lock()
+		close(acquired)
+	}()
+	select {
+	case <-acquired:
+		return func() { mu.Unlock() }, nil
+	case <-ctx.Done():
+		go func() {
+			<-acquired
+			mu.Unlock()
+		}()
+		return nil, ctx.Err()
+	}
+}
+
+// reservePipelineJob reserves a sync job atomically: it reuses the active sync
+// job when one exists, otherwise stores the new job while holding the pipeline
+// lock so a sync can never start alongside a reclassification. On ok it hands
+// back the release func for the acquired lock instance.
+func reservePipelineJob(job jobInfo) (reserved jobInfo, reused bool, ok bool, release func()) {
+	apiJobs.mu.Lock()
+	defer apiJobs.mu.Unlock()
+	var active jobInfo
+	found := false
+	for _, current := range apiJobs.jobs {
+		if current.JobType != job.JobType || !isActiveJobStatus(current.Status) {
+			continue
+		}
+		if !found || current.CreatedAt.After(active.CreatedAt) {
+			active = current
+			found = true
+		}
+	}
+	if found {
+		return active, true, true, nil
+	}
+	release, locked := tryLockPipeline()
+	if !locked {
+		return job, false, false, nil
+	}
+	apiJobs.jobs[job.ID] = job
+	return job, false, true, release
+}
 
 func listJobs() []jobInfo {
 	// 返回当前内存中的全部作业，并按创建时间倒序排列。
@@ -137,8 +209,10 @@ func jobByID(id string) (jobInfo, bool) {
 	return job, ok
 }
 
-func launchLocalJob(settings config.Settings, jobType string, queuedMessageKey string, queuedMessage string, runningMessageKey string, runningMessage string, run localJobFunc) jobInfo {
+func launchLocalJob(settings config.Settings, jobType string, queuedMessageKey string, queuedMessage string, runningMessageKey string, runningMessage string, run localJobFunc, wait func(context.Context) (func(), error)) jobInfo {
 	// 启动一个纯 Go 本地作业，保持和 legacy bridge 相同的轮询结构。
+	// wait 非空时作业先在 queued 状态等待（如 pipeline 锁）；wait 成功返回的
+	// release 函数绑定本次获取的锁实例，作业结束时由 goroutine 统一释放。
 	job := jobInfo{
 		ID:         nextJobID(),
 		JobType:    jobType,
@@ -158,8 +232,24 @@ func launchLocalJob(settings config.Settings, jobType string, queuedMessageKey s
 		job.LogPath = path
 	}
 	storeJob(job)
+	ctx, cancel := context.WithCancel(context.Background())
+	registerJobCancellation(job.ID, cancel)
 
 	go func() {
+		defer func() {
+			unregisterJobCancellation(job.ID)
+			cancel()
+		}()
+		if wait != nil {
+			release, err := wait(ctx)
+			if err != nil {
+				finished := nowFunc().UTC()
+				usage := llmusage.NewCollector(settings.LLMPricing)
+				finishCancelledLocalJob(settings, &job, jobType, nil, usage, finished)
+				return
+			}
+			defer release()
+		}
 		usage := llmusage.NewCollector(settings.LLMPricing)
 		started := nowFunc().UTC()
 		logJobEvent(settings.LogsDir, &job, "info", "started", runningMessageKey, runningMessage, "", nil)
@@ -183,8 +273,12 @@ func launchLocalJob(settings config.Settings, jobType string, queuedMessageKey s
 				current.ProgressMode = string(update.Mode)
 			})
 		}
-		result, err := run(progress, usage)
+		result, err := run(ctx, progress, usage)
 		finished := nowFunc().UTC()
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			finishCancelledLocalJob(settings, &job, jobType, result, usage, finished)
+			return
+		}
 		if err != nil {
 			summary := finalizeLLMUsage(settings, job.ID, jobType, "failed", usage, finished)
 			logJobEvent(settings.LogsDir, &job, "error", "failed", jobType+".failed", "", err.Error(), nil)
@@ -216,6 +310,27 @@ func launchLocalJob(settings config.Settings, jobType string, queuedMessageKey s
 	}()
 
 	return job
+}
+
+func finishCancelledLocalJob(settings config.Settings, job *jobInfo, jobType string, result map[string]any, usage *llmusage.Collector, finished time.Time) {
+	message := "Job stopped."
+	if jobType == "reclassify" {
+		message = "Reclassification stopped."
+	}
+	summary := finalizeLLMUsage(settings, job.ID, jobType, "cancelled", usage, finished)
+	logJobEvent(settings.LogsDir, job, "info", "cancelled", jobType+".cancelled", message, "", result)
+	updateJob(job.ID, func(current *jobInfo) {
+		current.Status = "cancelled"
+		current.MessageKey = jobType + ".cancelled"
+		current.Message = message
+		current.Error = ""
+		current.Result = result
+		current.LLMUsage = &summary
+		current.WarningCount = countWarnings(result)
+		clearJobProgress(current)
+		current.FinishedAt = &finished
+		current.CancelRequested = true
+	})
 }
 
 func finalizeLLMUsage(settings config.Settings, jobID string, jobType string, status string, collector *llmusage.Collector, finished time.Time) llmusage.Summary {
@@ -255,32 +370,10 @@ func nextJobID() string {
 }
 
 func storeJob(job jobInfo) {
-	// 把新作业写入内存注册表。
+	// 保存或更新作业，供轮询接口读取。
 	apiJobs.mu.Lock()
 	defer apiJobs.mu.Unlock()
 	apiJobs.jobs[job.ID] = job
-}
-
-func reserveJobUnlessActive(job jobInfo) (jobInfo, bool) {
-	// 同一类型的活跃作业只保留一个，避免并发请求穿过先查后写的竞态窗口。
-	apiJobs.mu.Lock()
-	defer apiJobs.mu.Unlock()
-	var active jobInfo
-	found := false
-	for _, current := range apiJobs.jobs {
-		if current.JobType != job.JobType || !isActiveJobStatus(current.Status) {
-			continue
-		}
-		if !found || current.CreatedAt.After(active.CreatedAt) {
-			active = current
-			found = true
-		}
-	}
-	if found {
-		return active, true
-	}
-	apiJobs.jobs[job.ID] = job
-	return job, false
 }
 
 func isActiveJobStatus(status string) bool {
@@ -290,6 +383,10 @@ func isActiveJobStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func isCancellableJobType(jobType string) bool {
+	return jobType == "sync" || jobType == "reclassify"
 }
 
 func updateJob(id string, apply func(*jobInfo)) {

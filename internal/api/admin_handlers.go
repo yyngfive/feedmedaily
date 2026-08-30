@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/yyngfive/scirssagent/internal/config"
 	"github.com/yyngfive/scirssagent/internal/feeds"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
 	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -40,7 +42,7 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	job, reused := launchVerificationAwareSyncJob(
+	job, reused, reserved := launchVerificationAwareSyncJob(
 		serverSettings,
 		func(ctx context.Context, progress jobruntime.ProgressFunc, overrides map[string][]byte, skippedFeeds map[string]string, verifyHost feeds.VerifyHostFunc, usage *llmusage.Collector) (map[string]any, error) {
 			summary, err := runSyncFunc(serverSettings, jobruntime.RunOptions{
@@ -51,18 +53,19 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 				Usage:             usage,
 				Context:           ctx,
 			}, progress)
-			if err != nil {
-				return nil, err
-			}
 			return map[string]any{
 				"fetched":    summary.Fetched,
 				"inserted":   summary.Inserted,
 				"updated":    summary.Updated,
 				"classified": summary.Classified,
 				"errors":     summary.Errors,
-			}, nil
+			}, err
 		},
 	)
+	if !reserved {
+		writeError(w, http.StatusConflict, "A reclassification job is running. Wait for it to finish before syncing.")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"job": job, "reused": reused})
 }
 
@@ -100,6 +103,49 @@ func validateSelectedFeedURLs(feedsPath string, requested []string) ([]string, e
 }
 
 func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
+	serverSettings := s.snapshotSettings()
+	if r.Method == http.MethodGet {
+		paperCount, err := jobruntime.CountPapers(serverSettings)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		classifiedCount, err := jobruntime.CountClassifiedPapers(serverSettings)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		todayCount, todayClassifiedCount, err := jobruntime.CountTodayPapers(serverSettings, nowFunc())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		limit := 0
+		if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+			limit, err = strconv.Atoi(rawLimit)
+			if err != nil || limit < 0 || limit > paperCount {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("limit must be between 0 and %d.", paperCount))
+				return
+			}
+		}
+		countTotal, countClassified, err := jobruntime.CountRecentPaperClassifications(serverSettings, limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"paper_count":              paperCount,
+			"classified_paper_count":   classifiedCount,
+			"unclassified_paper_count": paperCount - classifiedCount,
+			"today_paper_count":        todayCount,
+			"today_classified_count":   todayClassifiedCount,
+			"today_unclassified_count": todayCount - todayClassifiedCount,
+			"count_paper_count":        countTotal,
+			"count_classified_count":   countClassified,
+			"count_unclassified_count": countTotal - countClassified,
+		})
+		return
+	}
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
@@ -112,20 +158,30 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(payload.Scope) == "" {
-		payload.Scope = "recent"
+		payload.Scope = "today"
 	}
-	if payload.Scope != "recent" && payload.Scope != "feedback" && payload.Scope != "all" {
-		writeError(w, http.StatusBadRequest, "scope must be recent, feedback, or all.")
+	if payload.Scope != "today" && payload.Scope != "feedback" && payload.Scope != "all" && payload.Scope != "count" && payload.Scope != "unclassified" {
+		writeError(w, http.StatusBadRequest, "scope must be today, feedback, all, count, or unclassified.")
 		return
 	}
-	if payload.Limit == 0 {
-		payload.Limit = 50
+	if payload.Scope == "count" {
+		paperCount, err := jobruntime.CountPapers(serverSettings)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if payload.Limit < 0 || payload.Limit > paperCount {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("limit must be between 0 and %d.", paperCount))
+			return
+		}
+	} else {
+		payload.Limit = 0
 	}
-	if payload.Limit < 1 || payload.Limit > 500 {
-		writeError(w, http.StatusBadRequest, "limit must be between 1 and 500.")
+	releasePipeline, locked := tryLockPipeline()
+	if !locked {
+		writeError(w, http.StatusConflict, "A sync or reclassification job is already running. Wait for it to finish.")
 		return
 	}
-	serverSettings := s.snapshotSettings()
 	job := launchLocalJob(
 		serverSettings,
 		"reclassify",
@@ -133,28 +189,39 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 		"Job queued.",
 		"pipeline.metadata.enriching",
 		"Getting metadata for papers to reclassify.",
-		func(progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
-			paperIDs, err := selectReclassifyPaperIDsFunc(serverSettings, payload.Scope, payload.Limit)
-			if err != nil {
-				return nil, err
-			}
-			reclassified, err := reclassifyPaperIDsFunc(serverSettings, paperIDs, progress, usage)
-			if err != nil {
-				return nil, err
-			}
-			reportCount, err := rebuildLatestReportFunc(serverSettings, progress)
-			if err != nil {
-				return nil, err
-			}
-			return map[string]any{
-				"scope":         payload.Scope,
-				"paper_ids":     paperIDs,
-				"reclassified":  reclassified,
-				"report_papers": reportCount,
-			}, nil
-		},
+		reclassifyJobRunFunc(serverSettings, payload.Scope, func() ([]int64, error) {
+			return selectReclassifyPaperIDsFunc(serverSettings, payload.Scope, payload.Limit)
+		}),
+		func(context.Context) (func(), error) { return releasePipeline, nil },
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})
+}
+
+// reclassifyJobRunFunc 把一段固定的 paper ids 或 scope 选择逻辑包装成可取消的 reclassify job。
+// pipeline 锁由启动方获取（手动路径同步 TryLock，排队路径由 wait 门获取），
+// 释放统一交给 launchLocalJob 在作业结束时执行。
+func reclassifyJobRunFunc(serverSettings config.Settings, scope string, selectIDs func() ([]int64, error)) localJobFunc {
+	return func(ctx context.Context, progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
+		paperIDs, err := selectIDs()
+		if err != nil {
+			return nil, err
+		}
+		reclassified, err := reclassifyPaperIDsContextFunc(serverSettings, paperIDs, ctx, progress, usage)
+		result := map[string]any{
+			"scope":        scope,
+			"paper_ids":    paperIDs,
+			"reclassified": reclassified,
+		}
+		if err != nil {
+			return result, err
+		}
+		reportCount, err := rebuildLatestReportFunc(serverSettings, progress)
+		if err != nil {
+			return result, err
+		}
+		result["report_papers"] = reportCount
+		return result, nil
+	}
 }
 
 func (s *Server) handleAdminJobs(w http.ResponseWriter, r *http.Request) {
@@ -200,8 +267,8 @@ func (s *Server) handleAdminJobCancel(w http.ResponseWriter, r *http.Request, jo
 		writeError(w, http.StatusNotFound, "Job not found.")
 		return
 	}
-	if job.JobType != "sync" {
-		writeError(w, http.StatusBadRequest, "Only sync jobs can be stopped.")
+	if !isCancellableJobType(job.JobType) {
+		writeError(w, http.StatusBadRequest, "Only sync and reclassify jobs can be stopped.")
 		return
 	}
 	if !isActiveJobStatus(job.Status) {
@@ -209,7 +276,7 @@ func (s *Server) handleAdminJobCancel(w http.ResponseWriter, r *http.Request, jo
 		return
 	}
 	if !requested {
-		writeError(w, http.StatusConflict, "Sync job is no longer cancellable.")
+		writeError(w, http.StatusConflict, "Job is no longer cancellable.")
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"job": job, "cancel_requested": true})
