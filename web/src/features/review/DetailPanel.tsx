@@ -1,7 +1,7 @@
-import {Button} from "@heroui/react";
+import { Button } from "@heroui/react";
 
-import {doiHref, feedbackLabel, paperDate} from "../../app/utils";
-import type {Paper} from "../../shared/types";
+import { doiHref, feedbackLabel, paperDate } from "../../app/utils";
+import type { Paper } from "../../shared/types";
 
 function abstractHtmlForDisplay(paper: Paper): string {
   const images = new Set((paper.abstract_images ?? []).map((image) => image.src));
@@ -46,11 +46,38 @@ export function DetailPanel({
 
   return (
     <aside className="h-full space-y-5 overflow-auto rounded-lg border border-(--line) bg-(--paper-accent) p-5">
+
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="primary" onPress={() => window.open(doiHref(paper), "_blank")}>
+          DOI link
+        </Button>
+        <Button
+          size="sm"
+          isDisabled={markReadBusy}
+          variant={isUnread ? "secondary" : "outline"}
+          onPress={onMarkRead}
+        >
+          {markReadBusy ? "Updating..." : isUnread ? "Mark as read" : "Mark as unread"}
+        </Button>
+        <Button size="sm" variant={zoteroSaved ? "tertiary" : "tertiary"} onPress={onSave}>
+          {zoteroSaved ? "Saved" : "Save to Zotero"}
+        </Button>
+        <Button
+          size="sm"
+          variant={feedbackText ? "danger-soft" : "tertiary"}
+          onPress={onMarkWrong}
+        >
+          Mark wrong
+        </Button>
+      </div>
+
       <div className="space-y-3">
         <h2 className="text-xl font-semibold leading-7 text-(--ink)">{paper.title}</h2>
+        {paper.classification.translated_title_zh ? <h2 className="line-clamp-2 text-base">{paper.classification.translated_title_zh}</h2> : null}
         <p className="text-base leading-6 text-muted">{paper.journal || "Unknown journal"}</p>
         <p className="text-sm leading-6 text-muted">{paperDate(paper)}</p>
       </div>
+
 
       <section className="space-y-2">
         <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
@@ -77,7 +104,7 @@ export function DetailPanel({
         {hasAbstractHtml ? (
           <div
             className="max-h-64 overflow-auto pr-1 text-sm leading-6 text-(--body) [&_a]:text-(--accent) [&_a]:underline [&_p+*]:mt-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-            dangerouslySetInnerHTML={{__html: abstractHtml}}
+            dangerouslySetInnerHTML={{ __html: abstractHtml }}
           />
         ) : paper.abstract ? (
           <p className="max-h-64 overflow-auto pr-1 text-sm leading-6 text-(--body)">
@@ -93,30 +120,6 @@ export function DetailPanel({
           {paper.zotero_status.last_error}
         </div>
       ) : null}
-
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="primary" onPress={() => window.open(doiHref(paper), "_blank")}>
-          DOI link
-        </Button>
-        <Button
-          size="sm"
-          isDisabled={markReadBusy}
-          variant={isUnread ? "secondary" : "outline"}
-          onPress={onMarkRead}
-        >
-          {markReadBusy ? "Updating..." : isUnread ? "Mark as read" : "Mark as unread"}
-        </Button>
-        <Button size="sm" variant={zoteroSaved ? "tertiary" : "tertiary"} onPress={onSave}>
-          {zoteroSaved ? "Saved" : "Save to Zotero"}
-        </Button>
-        <Button
-          size="sm"
-          variant={feedbackText ? "danger-soft" : "tertiary"}
-          onPress={onMarkWrong}
-        >
-          Mark wrong
-        </Button>
-      </div>
     </aside>
   );
 }
