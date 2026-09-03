@@ -123,3 +123,41 @@ INSERT INTO llm_usage_jobs (
 		t.Fatalf("repaired weekend pricing = %#v", items[0].Pricing)
 	}
 }
+
+func TestOpenOrCreateRepairsSingleRateUsageWithMissingCacheBreakdown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	store, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pricing := `[{"model":"mimo-v2.5","snapshot":"xiaomi-mimo-cny-manual","tier":"standard","cache_hit_nano_cny_per_token":20,"cache_miss_nano_cny_per_token":1000,"completion_nano_cny_per_token":2000}]`
+	if _, err := store.db.Exec(`
+INSERT INTO llm_usage_jobs (
+  job_id, job_type, status, model, request_count, prompt_tokens,
+  prompt_cache_hit_tokens, prompt_cache_miss_tokens, completion_tokens,
+  pricing_status, pricing_json, estimated_cost_nano_cny, estimated_cost_cny, completed_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, "mimo-sync", "sync", "completed", "mimo-v2.5", 57, 177_142, 110_656, 62_905, 27_493,
+		"unavailable", pricing, nil, nil, "2026-09-03T04:43:24Z"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	items, err := reopened.ListLLMUsage(time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].EstimatedCostCNY == nil || *items[0].EstimatedCostCNY != "0.123685" {
+		t.Fatalf("repaired MiMo usage = %#v", items)
+	}
+	if items[0].PricingStatus != "estimated" || items[0].PromptCacheMissTokens != 66_486 {
+		t.Fatalf("repaired MiMo cache breakdown = %#v", items[0])
+	}
+}

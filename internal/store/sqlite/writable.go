@@ -135,6 +135,10 @@ func OpenOrCreate(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := repairIncompleteCacheBreakdownPricing(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return buildStore(db)
 }
 

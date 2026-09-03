@@ -159,6 +159,31 @@ func TestCollectorPricesQwenAndMiMoOfficialMainlandRates(t *testing.T) {
 	}
 }
 
+func TestCollectorTreatsUnreportedOfficialProviderInputAsCacheMiss(t *testing.T) {
+	collector := llmusage.NewCollector()
+	collector.Record(llmusage.Event{
+		BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5",
+		Usage: llmusage.ResponseUsage{
+			PromptTokens: 2_000_000, PromptCacheHitTokens: 1_000_000, PromptCacheMissTokens: 1_000_000,
+			CompletionTokens: 1_000_000, CacheBreakdownPresent: true,
+		},
+	})
+	collector.Record(llmusage.Event{
+		BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5",
+		Usage: llmusage.ResponseUsage{
+			PromptTokens: 1_000_000, CompletionTokens: 1_000_000,
+		},
+	})
+
+	summary := collector.Summary()
+	if summary.PricingStatus != "estimated" || summary.EstimatedCostCNY == nil || *summary.EstimatedCostCNY != "6.020000" {
+		t.Fatalf("MiMo estimate with omitted cache details = %#v", summary)
+	}
+	if summary.PromptCacheHitTokens != 1_000_000 || summary.PromptCacheMissTokens != 2_000_000 {
+		t.Fatalf("normalized MiMo cache usage = %#v", summary)
+	}
+}
+
 func TestCollectorDoesNotPriceUnknownProviderOrModel(t *testing.T) {
 	for name, event := range map[string]llmusage.Event{
 		"proxy": {

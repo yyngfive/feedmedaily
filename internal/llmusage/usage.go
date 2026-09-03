@@ -151,10 +151,6 @@ func (c *Collector) Summary() Summary {
 	var totalCost int64
 	for _, event := range events {
 		summary.RequestCount++
-		summary.PromptTokens += event.Usage.PromptTokens
-		summary.PromptCacheHitTokens += event.Usage.PromptCacheHitTokens
-		summary.PromptCacheMissTokens += event.Usage.PromptCacheMissTokens
-		summary.CompletionTokens += event.Usage.CompletionTokens
 		model := strings.TrimSpace(event.Model)
 		if model != "" {
 			models[model] = struct{}{}
@@ -163,14 +159,22 @@ func (c *Collector) Summary() Summary {
 			operations[operation] = struct{}{}
 		}
 		rates, ok := providerRates(event.BaseURL, model, event.OccurredAt, c.pricing)
-		if !ok || !event.Usage.CacheBreakdownPresent {
+		usage := event.Usage
+		if ok {
+			usage, ok = cacheBreakdownForPricing(usage)
+		}
+		summary.PromptTokens += usage.PromptTokens
+		summary.PromptCacheHitTokens += usage.PromptCacheHitTokens
+		summary.PromptCacheMissTokens += usage.PromptCacheMissTokens
+		summary.CompletionTokens += usage.CompletionTokens
+		if !ok {
 			summary.PricingStatus = "unavailable"
 			continue
 		}
 		pricingByModel[model+"|"+rates.Tier] = rates
-		totalCost += event.Usage.PromptCacheHitTokens*rates.CacheHitNanoCNYPerToken +
-			event.Usage.PromptCacheMissTokens*rates.CacheMissNanoCNYPerToken +
-			event.Usage.CompletionTokens*rates.CompletionNanoCNYPerToken
+		totalCost += usage.PromptCacheHitTokens*rates.CacheHitNanoCNYPerToken +
+			usage.PromptCacheMissTokens*rates.CacheMissNanoCNYPerToken +
+			usage.CompletionTokens*rates.CompletionNanoCNYPerToken
 	}
 	if len(events) == 0 {
 		summary.PricingStatus = "unavailable"
@@ -187,6 +191,22 @@ func (c *Collector) Summary() Summary {
 		summary.EstimatedCostCNY = &display
 	}
 	return summary
+}
+
+func cacheBreakdownForPricing(usage ResponseUsage) (ResponseUsage, bool) {
+	if usage.CacheBreakdownPresent {
+		return usage, true
+	}
+	if usage.PromptTokens < 0 || usage.PromptCacheHitTokens < 0 || usage.PromptCacheMissTokens < 0 {
+		return usage, false
+	}
+	accounted := usage.PromptCacheHitTokens + usage.PromptCacheMissTokens
+	if accounted > usage.PromptTokens {
+		return usage, false
+	}
+	usage.PromptCacheMissTokens += usage.PromptTokens - accounted
+	usage.CacheBreakdownPresent = true
+	return usage, true
 }
 
 func providerRates(baseURL string, model string, occurredAt time.Time, pricing PricingCatalog) (PricingBreakdown, bool) {

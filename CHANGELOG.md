@@ -8,6 +8,10 @@ The latest released version is `0.6.0`. The next planned release is `0.6.1`, so 
 
 Changes since `0.6.0`:
 
+### Fixed
+
+- Fixed supported official-provider cost estimates when a response omits cache-token details by conservatively pricing the unclassified input as a cache miss. Existing unavailable single-model rows with one saved price snapshot are repaired on startup without guessing across mixed models or rate tiers.
+
 ## 0.6.0 (2026-08-30)
 
 Changes since `0.5.0`:

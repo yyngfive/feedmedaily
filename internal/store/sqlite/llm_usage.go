@@ -29,6 +29,69 @@ type LLMUsageRecord struct {
 
 var legacyDeepSeekPricingRepairSince = time.Date(2026, 8, 21, 16, 0, 0, 0, time.UTC)
 
+func repairIncompleteCacheBreakdownPricing(db *sql.DB) error {
+	rows, err := db.Query(`
+SELECT job_id, model, prompt_tokens, prompt_cache_hit_tokens,
+       prompt_cache_miss_tokens, completion_tokens, pricing_json
+FROM llm_usage_jobs
+WHERE pricing_status = 'unavailable'
+  AND prompt_tokens > prompt_cache_hit_tokens + prompt_cache_miss_tokens
+  AND pricing_json <> '[]'
+ORDER BY completed_at
+`)
+	if err != nil {
+		return fmt.Errorf("query incomplete cache pricing: %w", err)
+	}
+	type incompleteUsage struct {
+		jobID, model, pricingJSON                     string
+		promptTokens, cacheHit, cacheMiss, completion int64
+	}
+	incomplete := []incompleteUsage{}
+	for rows.Next() {
+		var item incompleteUsage
+		if err := rows.Scan(&item.jobID, &item.model, &item.promptTokens, &item.cacheHit, &item.cacheMiss, &item.completion, &item.pricingJSON); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan incomplete cache pricing: %w", err)
+		}
+		incomplete = append(incomplete, item)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate incomplete cache pricing: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close incomplete cache pricing rows: %w", err)
+	}
+
+	for _, item := range incomplete {
+		var pricing []llmusage.PricingBreakdown
+		if err := json.Unmarshal([]byte(item.pricingJSON), &pricing); err != nil {
+			continue
+		}
+		if len(pricing) != 1 || !strings.EqualFold(strings.TrimSpace(item.model), strings.TrimSpace(pricing[0].Model)) {
+			continue
+		}
+		rates := pricing[0]
+		if rates.CacheHitNanoCNYPerToken < 0 || rates.CacheMissNanoCNYPerToken < 0 || rates.CompletionNanoCNYPerToken < 0 {
+			continue
+		}
+		normalizedMiss := item.promptTokens - item.cacheHit
+		cost := item.cacheHit*rates.CacheHitNanoCNYPerToken +
+			normalizedMiss*rates.CacheMissNanoCNYPerToken +
+			item.completion*rates.CompletionNanoCNYPerToken
+		display := fmt.Sprintf("%.6f", float64(cost)/1_000_000_000)
+		if _, err := db.Exec(`
+UPDATE llm_usage_jobs
+SET prompt_cache_miss_tokens = ?, pricing_status = 'estimated',
+    estimated_cost_nano_cny = ?, estimated_cost_cny = ?
+WHERE job_id = ? AND pricing_status = 'unavailable'
+`, normalizedMiss, cost, display, item.jobID); err != nil {
+			return fmt.Errorf("repair incomplete cache pricing for job %s: %w", item.jobID, err)
+		}
+	}
+	return nil
+}
+
 func repairLegacyDeepSeekPricing(db *sql.DB) error {
 	rows, err := db.Query(`
 SELECT job_id, model, request_count, prompt_tokens,
