@@ -273,6 +273,14 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(context.C
 				finishCancelledSyncJob(settings, &job, result, usage)
 				return
 			}
+			// Release the pipeline lock as soon as the job reports completed:
+			// the terminal status is visible before the completion log write,
+			// and holding the lock across that file write lets a follow-up
+			// sync launch race into a 409 rejection.
+			if releasePipeline != nil {
+				releasePipeline()
+				releasePipeline = nil
+			}
 			logJobEvent(settings.LogsDir, &job, "info", "completed", "sync.completed", "Completed.", "", result)
 			return
 		}
@@ -301,6 +309,10 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(context.C
 		if !failed {
 			finishCancelledSyncJob(settings, &job, result, usage)
 			return
+		}
+		if releasePipeline != nil {
+			releasePipeline()
+			releasePipeline = nil
 		}
 		logJobEvent(settings.LogsDir, &job, "error", "failed", "sync.failed", "", err.Error(), nil)
 		return

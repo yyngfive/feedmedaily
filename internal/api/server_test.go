@@ -528,7 +528,19 @@ func waitForJobCompletion(t *testing.T, jobID string) {
 			if job.Status != "completed" {
 				t.Fatalf("job %s finished with status %s: %s", jobID, job.Status, job.Error)
 			}
-			return
+			// The terminal status becomes visible before the pipeline lock is
+			// released; wait for the lock so a follow-up launch cannot race
+			// into a 409 rejection.
+			lockDeadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(lockDeadline) {
+				release, ok := tryLockPipeline()
+				if ok {
+					release()
+					return
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			t.Fatalf("job %s completed but the pipeline lock is still held", jobID)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
