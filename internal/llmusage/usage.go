@@ -18,6 +18,7 @@ const (
 	PricingSnapshotQwenManual     = "aliyun-qwen-cny-manual"
 	PricingSnapshotMiMoV25CNY     = "xiaomi-mimo-v2.5-cny-2026-08-29"
 	PricingSnapshotMiMoManual     = "xiaomi-mimo-cny-manual"
+	PricingSnapshotZenFreeCNY     = "opencode-zen-mimo-v2.5-free-cny-2026-09-04"
 )
 
 const (
@@ -227,6 +228,10 @@ func providerRates(baseURL string, model string, occurredAt time.Time, pricing P
 	}
 	if strings.EqualFold(parsed.Hostname(), "api.xiaomimimo.com") && strings.EqualFold(strings.TrimSpace(model), "mimo-v2.5") {
 		return standardBreakdown(model, pricing.MiMoV25Snapshot, pricing.MiMoV25), true
+	}
+	if strings.EqualFold(parsed.Hostname(), "opencode.ai") && strings.EqualFold(strings.TrimSpace(model), "mimo-v2.5-free") {
+		// The OpenCode Zen free tier costs nothing; report it at explicit zero rates.
+		return standardBreakdown(model, PricingSnapshotZenFreeCNY, TokenRates{}), true
 	}
 	if !strings.EqualFold(parsed.Hostname(), "api.deepseek.com") {
 		return PricingBreakdown{}, false

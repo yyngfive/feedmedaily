@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yyngfive/scirssagent/internal/config"
 	"github.com/yyngfive/scirssagent/internal/llmusage"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
@@ -579,5 +580,58 @@ func testProfile() map[string]any {
 			"indirect":  []any{},
 			"unrelated": []any{},
 		},
+	}
+}
+
+func TestOpenCodeZenProviderUsesClientUserAgent(t *testing.T) {
+	var capturedUserAgent string
+	var capturedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedUserAgent = r.Header.Get("User-Agent")
+		capturedAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"indirect\",\"confidence\":0.7,\"reason\":\"ok\"}]}"}}]}`))
+	}))
+	defer server.Close()
+
+	_, err := ClassifyPapers([]store.Paper{{ID: 1, Title: "A"}}, testProfile(), LLMConfig{
+		APIKey:                        config.OpenCodeZenPublicAPIKey,
+		Model:                         "mimo-v2.5-free",
+		BaseURL:                       server.URL,
+		Provider:                      "opencode",
+		Thinking:                      "disabled",
+		UseConfiguredProviderControls: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capturedUserAgent != opencodeZenUserAgent {
+		t.Fatalf("OpenCode Zen requests must carry the client User-Agent, got %q", capturedUserAgent)
+	}
+	if capturedAuth != "Bearer "+config.OpenCodeZenPublicAPIKey {
+		t.Fatalf("unexpected auth header %q", capturedAuth)
+	}
+}
+
+func TestNonOpenCodeProviderKeepsDefaultUserAgent(t *testing.T) {
+	var capturedUserAgent string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedUserAgent = r.Header.Get("User-Agent")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"unrelated\",\"confidence\":0.7,\"reason\":\"ok\"}]}"}}]}`))
+	}))
+	defer server.Close()
+
+	_, err := ClassifyPapers([]store.Paper{{ID: 1, Title: "A"}}, testProfile(), LLMConfig{
+		APIKey:                        "key",
+		Model:                         "deepseek-v4-flash",
+		BaseURL:                       server.URL,
+		Provider:                      "deepseek",
+		Thinking:                      "disabled",
+		UseConfiguredProviderControls: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capturedUserAgent != "Go-http-client/1.1" {
+		t.Fatalf("non-OpenCode requests must keep the default User-Agent, got %q", capturedUserAgent)
 	}
 }

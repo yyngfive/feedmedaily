@@ -38,6 +38,7 @@ export function classifierModelsDraftHasRequiredKeys(
 ): boolean {
   return draft.enabledModelIds.length > 0 && draft.enabledModelIds.every((modelID) => {
     const model = models.models.find((item) => item.id === modelID);
+    if (model?.key_optional) return true;
     const credential = draft.credentials[modelID];
     if (credential?.value?.trim()) return true;
     if (!model?.configured) return false;
@@ -148,6 +149,11 @@ export function ClassifierModelsEditor({
             <div key={model.id} className="grid gap-3 py-3 sm:grid-cols-[minmax(150px,0.32fr)_minmax(260px,1fr)_auto] sm:items-center">
               <p className="text-sm font-medium text-(--ink)">{model.label}</p>
               <div className="min-w-0">
+                {model.key_optional ? (
+                  <p className="text-sm leading-5 text-muted">
+                    Built-in free model — no API key needed.
+                  </p>
+                ) : (
                   <TextInputField
                     hideLabel
                     label={`${model.label} API key`}
@@ -156,6 +162,7 @@ export function ClassifierModelsEditor({
                     value={typeof credential?.value === "string" ? credential.value : ""}
                     onChange={(value) => updateCredential(model.id, value)}
                   />
+                )}
               </div>
               <Button
                 isDisabled={testingModelID === model.id}

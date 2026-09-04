@@ -14,6 +14,7 @@ const (
 	ClassifierModelGLM53Flash      = "glm-5.3-flash"
 	ClassifierModelQwen38Flash     = "qwen3.8-flash"
 	ClassifierModelMiMoV25         = "mimo-v2.5"
+	ClassifierModelMiMoZenFree     = "mimo-v2.5-free"
 
 	classifierEnabledModelsKey = "SCIRSS_CLASSIFIER_ENABLED_MODELS"
 	classifierDefaultModelKey  = "SCIRSS_CLASSIFIER_DEFAULT_MODEL"
@@ -21,7 +22,12 @@ const (
 	classifierGLMAPIKey        = "SCIRSS_GLM_API_KEY"
 	classifierQwenAPIKey       = "QWEN_API_KEY"
 	classifierMiMoAPIKey       = "MIMO_API_KEY"
+	classifierZenAPIKey        = "SCIRSS_ZEN_API_KEY"
 )
+
+// OpenCodeZenPublicAPIKey is the anonymous token the OpenCode Zen gateway accepts
+// for its free tier; catalog entries marked KeyOptional fall back to it.
+const OpenCodeZenPublicAPIKey = "public"
 
 // ClassifierModelSpec is the fixed provider contract used by every classifier request.
 type ClassifierModelSpec struct {
@@ -31,6 +37,7 @@ type ClassifierModelSpec struct {
 	BaseURL         string
 	Thinking        string
 	ReasoningEffort string
+	KeyOptional     bool
 }
 
 // ClassifierModelConfig is a resolved model entry. APIKey is kept internal to the backend.
@@ -59,6 +66,7 @@ type ClassifierModelView struct {
 	Enabled             bool   `json:"enabled"`
 	Default             bool   `json:"default"`
 	Configured          bool   `json:"configured"`
+	KeyOptional         bool   `json:"key_optional"`
 	Source              string `json:"source"`
 	StoredLocally       bool   `json:"stored_locally"`
 	EnvironmentOverride bool   `json:"environment_override"`
@@ -112,6 +120,14 @@ var classifierModelCatalog = []ClassifierModelSpec{
 		Thinking:        "disabled",
 		ReasoningEffort: "",
 	},
+	{
+		ID:          ClassifierModelMiMoZenFree,
+		Provider:    "opencode",
+		Label:       "OpenCode MiMo V2.5 (Free)",
+		BaseURL:     "https://opencode.ai/zen/v1",
+		Thinking:    "disabled",
+		KeyOptional: true,
+	},
 }
 
 func classifierModelSpec(modelID string) (ClassifierModelSpec, bool) {
@@ -131,16 +147,16 @@ func ClassifierModelCatalog() []ClassifierModelSpec {
 // EffectiveClassifierModel resolves the selected model while preserving old test/config callers.
 func (s Settings) EffectiveClassifierModel() ClassifierModelConfig {
 	if model, ok := s.ClassifierModels.Models[s.ClassifierModels.DefaultModelID]; ok {
-		return classifierModelWithThinkingPreference(model, s.ClassifierThinking)
+		return applyClassifierKeyFallback(classifierModelWithThinkingPreference(model, s.ClassifierThinking))
 	}
 	if spec, ok := classifierModelSpec(s.ClassifierModels.DefaultModelID); ok {
-		return classifierModelWithThinkingPreference(ClassifierModelConfig{ClassifierModelSpec: spec, APIKey: s.ClassifierAPIKey}, s.ClassifierThinking)
+		return applyClassifierKeyFallback(classifierModelWithThinkingPreference(ClassifierModelConfig{ClassifierModelSpec: spec, APIKey: s.ClassifierAPIKey}, s.ClassifierThinking))
 	}
 	if model, ok := s.ClassifierModels.Models[s.ClassifierModel]; ok {
-		return classifierModelWithThinkingPreference(model, s.ClassifierThinking)
+		return applyClassifierKeyFallback(classifierModelWithThinkingPreference(model, s.ClassifierThinking))
 	}
 	if spec, ok := classifierModelSpec(s.ClassifierModel); ok {
-		return classifierModelWithThinkingPreference(ClassifierModelConfig{ClassifierModelSpec: spec, APIKey: s.ClassifierAPIKey}, s.ClassifierThinking)
+		return applyClassifierKeyFallback(classifierModelWithThinkingPreference(ClassifierModelConfig{ClassifierModelSpec: spec, APIKey: s.ClassifierAPIKey}, s.ClassifierThinking))
 	}
 	return ClassifierModelConfig{
 		ClassifierModelSpec: ClassifierModelSpec{
@@ -150,6 +166,13 @@ func (s Settings) EffectiveClassifierModel() ClassifierModelConfig {
 		},
 		APIKey: s.ClassifierAPIKey,
 	}
+}
+
+func applyClassifierKeyFallback(model ClassifierModelConfig) ClassifierModelConfig {
+	if model.KeyOptional && strings.TrimSpace(model.APIKey) == "" {
+		model.APIKey = OpenCodeZenPublicAPIKey
+	}
+	return model
 }
 
 func classifierModelWithThinkingPreference(model ClassifierModelConfig, preference string) ClassifierModelConfig {
@@ -206,6 +229,10 @@ func classifierModelsResponse(settings Settings) ClassifierModelsResponse {
 			resolved.ClassifierModelSpec = spec
 		}
 		_, isEnabled := enabled[spec.ID]
+		source := firstNonEmptyClassifierSource(resolved.APIKeySource)
+		if spec.KeyOptional && strings.TrimSpace(resolved.APIKey) == "" {
+			source = "builtin"
+		}
 		models = append(models, ClassifierModelView{
 			ID:                  spec.ID,
 			Provider:            spec.Provider,
@@ -215,8 +242,9 @@ func classifierModelsResponse(settings Settings) ClassifierModelsResponse {
 			ReasoningEffort:     spec.ReasoningEffort,
 			Enabled:             isEnabled,
 			Default:             settings.ClassifierModels.DefaultModelID == spec.ID,
-			Configured:          strings.TrimSpace(resolved.APIKey) != "",
-			Source:              firstNonEmptyClassifierSource(resolved.APIKeySource),
+			Configured:          spec.KeyOptional || strings.TrimSpace(resolved.APIKey) != "",
+			KeyOptional:         spec.KeyOptional,
+			Source:              source,
 			StoredLocally:       resolved.StoredLocally,
 			EnvironmentOverride: resolved.APIKeySource == "environment",
 		})
@@ -389,7 +417,9 @@ func normalizeResolvedClassifierModels(enabled []string, configuredDefault strin
 		if legacyConfigured && legacyID != "" {
 			validated = []string{legacyID}
 		} else {
-			validated = []string{ClassifierModelDeepSeekV4Flash}
+			// Fresh setups get the keyless OpenCode Zen entry available next to
+			// DeepSeek while keeping DeepSeek as the initial default classifier.
+			validated = []string{ClassifierModelDeepSeekV4Flash, ClassifierModelMiMoZenFree}
 		}
 	}
 	defaultID := strings.TrimSpace(configuredDefault)
@@ -416,6 +446,9 @@ func classifierModelIDFromLegacy(model string, baseURL string) string {
 	if normalizedModel == ClassifierModelQwen38Flash || strings.Contains(normalizedModel, "qwen3.8-flash") || strings.Contains(strings.ToLower(baseURL), "dashscope.aliyuncs.com") {
 		return ClassifierModelQwen38Flash
 	}
+	if normalizedModel == ClassifierModelMiMoZenFree || strings.Contains(normalizedModel, "mimo-v2.5-free") || strings.Contains(strings.ToLower(baseURL), "opencode.ai") {
+		return ClassifierModelMiMoZenFree
+	}
 	if normalizedModel == ClassifierModelMiMoV25 || strings.Contains(normalizedModel, "mimo-v2.5") || strings.Contains(strings.ToLower(baseURL), "xiaomimimo.com") {
 		return ClassifierModelMiMoV25
 	}
@@ -440,6 +473,9 @@ func UpdateLocalSettingsWithClassifierModels(root string, fields map[string]Sett
 	}
 	for _, modelID := range enabled {
 		if strings.TrimSpace(classifierCredentialValue(current, modelID, update.Credentials)) == "" {
+			if spec, ok := classifierModelSpec(modelID); ok && spec.KeyOptional {
+				continue
+			}
 			return SettingsConfigResponse{}, fmt.Errorf("API key is required for enabled classifier model %s", modelID)
 		}
 	}
@@ -512,6 +548,8 @@ func classifierCredentialKey(modelID string) (string, bool) {
 		return classifierQwenAPIKey, true
 	case ClassifierModelMiMoV25:
 		return classifierMiMoAPIKey, true
+	case ClassifierModelMiMoZenFree:
+		return classifierZenAPIKey, true
 	default:
 		return "", false
 	}
@@ -609,7 +647,7 @@ func ClassifierModelConfigForID(settings Settings, modelID string) (ClassifierMo
 	if strings.TrimSpace(model.APIKey) == "" && settings.EffectiveClassifierModelName() == spec.ID {
 		model.APIKey = settings.ClassifierAPIKey
 	}
-	return classifierModelWithThinkingPreference(model, settings.ClassifierThinking), nil
+	return applyClassifierKeyFallback(classifierModelWithThinkingPreference(model, settings.ClassifierThinking)), nil
 }
 
 // ClassifierModelStorageKey is exposed only to keep tests and adapters from duplicating key rules.

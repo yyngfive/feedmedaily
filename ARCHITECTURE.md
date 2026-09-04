@@ -108,14 +108,16 @@ These files are local machine state and must not be committed:
 
 There are two configurable model roles:
 
-- classifier models: paper relevance classification (`deepseek-v4-flash`, `glm-5.3-flash`, `qwen3.8-flash`, and `mimo-v2.5`)
+- classifier models: paper relevance classification (`deepseek-v4-flash`, `glm-5.3-flash`, `qwen3.8-flash`, `mimo-v2.5`, and the keyless `mimo-v2.5-free`)
 - profile model: onboarding profile generation and feedback-driven profile revision
 
 The classifier catalog owns provider endpoints and supported thinking contracts. The global `SCIRSS_CLASSIFIER_THINKING` preference is exposed under Model → Advanced and can only toggle the lowest supported level: DeepSeek V4 Flash and Qwen3.8-Flash use `low`, MiMo-V2.5 uses the Chat API's lowest expressible `enabled` mode, and Zhipu GLM-5.3-Flash always remains `enabled` with `reasoning_effort=low` and deterministic sampling even when the preference is disabled. Disabled DeepSeek sends `thinking.type=disabled`; disabled Qwen sends `reasoning_effort=none`; disabled MiMo sends `thinking.type=disabled` with its documented `max_completion_tokens` field. DeepSeek and MiMo requests use a 4096 completion-token floor while thinking is enabled, without lowering a larger batch-derived limit. The shared adapter is used by batch classification, single-paper degradation, title translation, and connection tests; title translation remains forced to non-thinking mode. Managed providers never enter the generic disabled-thinking fallback, and no request automatically switches providers.
 
+`mimo-v2.5-free` is the built-in keyless OpenCode Zen entry (`https://opencode.ai/zen/v1`). It carries no credential requirement: when no key is configured the adapter falls back to the `public` anonymous token, so onboarding can enable it out of the box. Because the Zen free tier only serves requests that look like its own clients, requests to this entry set a client-style `User-Agent` header; the free tier is promotional, has no published quota, and can be delisted without notice. Its usage is reported at explicit zero rates (free), and it stays out of the generic thinking fallback.
+
 The classifier entries use their catalog-owned base URLs and their own keys:
 
-- classifier keys: `SCIRSS_DEEPSEEK_API_KEY`, `SCIRSS_GLM_API_KEY`, `QWEN_API_KEY`, and `MIMO_API_KEY`
+- classifier keys: `SCIRSS_DEEPSEEK_API_KEY`, `SCIRSS_GLM_API_KEY`, `QWEN_API_KEY`, and `MIMO_API_KEY` (`mimo-v2.5-free` needs none)
 - Profile keeps its own `SCIRSS_PROFILE_API_KEY` / `SCIRSS_PROFILE_BASE_URL`
 
 `SCIRSS_CLASSIFIER_ENABLED_MODELS` and `SCIRSS_CLASSIFIER_DEFAULT_MODEL` select enabled catalog entries. Legacy `SCIRSS_CLASSIFIER_API_KEY/BASE_URL/MODEL` values remain readable for migration and are materialized into the matching provider key on the first structured save; `SCIRSS_CLASSIFIER_THINKING` is the current global managed-classifier preference, and environment overrides stay authoritative.

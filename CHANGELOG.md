@@ -8,6 +8,10 @@ The latest released version is `0.6.0`. The next planned release is `0.6.1`, so 
 
 Changes since `0.6.0`:
 
+### Added
+
+- Added a built-in free classifier option `OpenCode MiMo V2.5 (mimo-v2.5-free)` served by the OpenCode Zen gateway. It needs no API key (requests fall back to the anonymous `public` token), appears as a keyless entry in onboarding and `Settings → Model`, and fresh setups enable it next to DeepSeek without changing the initial default. Requests to this entry carry a client-style `User-Agent` because the Zen free tier only serves official-client-like traffic; free promotions have no published quota and can be delisted without notice, and its usage is reported at zero cost.
+
 ### Fixed
 
 - Fixed supported official-provider cost estimates when a response omits cache-token details by conservatively pricing the unclassified input as a cache miss. Existing unavailable single-model rows with one saved price snapshot are repaired on startup without guessing across mixed models or rate tiers.

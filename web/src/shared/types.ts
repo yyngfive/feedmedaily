@@ -47,6 +47,7 @@ export type ClassifierModelView = {
   enabled: boolean;
   default: boolean;
   configured: boolean;
+  key_optional: boolean;
   source: SettingsConfigSource | string;
   stored_locally: boolean;
   environment_override: boolean;

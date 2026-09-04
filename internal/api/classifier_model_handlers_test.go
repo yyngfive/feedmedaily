@@ -87,6 +87,46 @@ func TestClassifierModelTestAPIUsesUnsavedKeyWithoutChangingSettings(t *testing.
 	}
 }
 
+func TestClassifierModelTestAPIKeylessOpenCodeZen(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
+	restore := stubAPIGlobals(t)
+	defer restore()
+
+	var captured classifier.LLMConfig
+	testClassifierConnectionFunc = func(cfg classifier.LLMConfig) error {
+		captured = cfg
+		return nil
+	}
+	server := NewServer(func() config.Settings {
+		settings, err := config.Load(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return settings
+	}(), nil)
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/settings/classifier-models/test", strings.NewReader(`{"model_id":"mimo-v2.5-free"}`)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("keyless OpenCode Zen test endpoint status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Job jobInfo `json:"job"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	job := waitForJobTerminalStatus(t, payload.Job.ID)
+	if job.Status != "completed" {
+		t.Fatalf("connection test job status = %s: %s", job.Status, job.Error)
+	}
+	if captured.Model != config.ClassifierModelMiMoZenFree || captured.Provider != "opencode" || captured.APIKey != config.OpenCodeZenPublicAPIKey {
+		t.Fatalf("captured OpenCode Zen config = %#v", captured)
+	}
+}
+
 func TestClassifierModelTestAPIReturnsValidationAndJobErrors(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")

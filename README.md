@@ -22,7 +22,7 @@ FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载
 
 说明：
 
-- 分类模型目前固定提供 `DeepSeek V4 Flash (deepseek-v4-flash)`、`GLM-5.3-Flash (glm-5.3-flash)`、`Qwen3.8-Flash (qwen3.8-flash)` 和 `MiMo-V2.5 (mimo-v2.5)`；配置对应 key 即启用模型，默认模型菜单只显示已有 key 的模型，每个 sync/reclassify job 只使用入队时的默认模型。
+- 分类模型目前固定提供 `DeepSeek V4 Flash (deepseek-v4-flash)`、`GLM-5.3-Flash (glm-5.3-flash)`、`Qwen3.8-Flash (qwen3.8-flash)`、`MiMo-V2.5 (mimo-v2.5)` 和 `OpenCode MiMo V2.5 (mimo-v2.5-free)`；配置对应 key 即启用模型（唯一的例外是内置的 `mimo-v2.5-free`，它使用 OpenCode Zen 免费层，无需 API key），默认模型菜单只显示已可用的模型，每个 sync/reclassify job 只使用入队时的默认模型。
 
 ### 模型设置
 
@@ -47,6 +47,10 @@ FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载
 
 1. 在 [小米 MiMo API 开放平台](https://mimo.mi.com/) 注册并登录
 2. 在控制台的 API Keys 页面申请按量付费 API Key；Token Plan 套餐专属 Key（`tp-` 开头）与本应用的按量付费端点不通用
+
+#### OpenCode MiMo V2.5（mimo-v2.5-free）
+
+内置的免费分类选项，通过 [OpenCode Zen](https://opencode.ai/zen) 网关调用，**无需 API key**，开箱即用。免费层有隐性限制（按官方客户端特征限流、活动随时可能下架、无配额承诺），适合低量试验而非生产依赖。
 
 ## Zotero 设置
 

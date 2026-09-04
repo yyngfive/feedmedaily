@@ -80,6 +80,10 @@ var classifierHTTPClient = &http.Client{Timeout: 60 * time.Second}
 
 const classifierMaxAttempts = 2
 
+// opencodeZenUserAgent mirrors the official OpenCode client fingerprint; the
+// OpenCode Zen free tier only serves requests that look like its own clients.
+const opencodeZenUserAgent = "opencode/1.15.3 ai-sdk/provider-utils/1.0.0 runtime/bun/1.3.2"
+
 // ThinkingMaxTokensFloor leaves room for reasoning plus the required JSON answer.
 // The production-size 600/1100 limits can be exhausted before DeepSeek or MiMo
 // emit final content when thinking is enabled.
@@ -335,6 +339,9 @@ func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string,
 	}
 	request.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	request.Header.Set("Content-Type", "application/json")
+	if isOpenCodeZenProvider(cfg) {
+		request.Header.Set("User-Agent", opencodeZenUserAgent)
+	}
 	started := time.Now()
 	response, err := classifierHTTPClient.Do(request)
 	if err != nil {
@@ -855,7 +862,14 @@ func applyProviderControls(cfg LLMConfig, payload map[string]any, forceDisabled 
 	}
 }
 
+func isOpenCodeZenProvider(cfg LLMConfig) bool {
+	return strings.EqualFold(strings.TrimSpace(cfg.Provider), "opencode")
+}
+
 func supportsThinkingFallback(cfg LLMConfig) bool {
+	if isOpenCodeZenProvider(cfg) {
+		return false
+	}
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	model := strings.ToLower(strings.TrimSpace(cfg.Model))
 	if provider == "zhipu" || provider == "deepseek" || provider == "qwen" || provider == "mimo" {
@@ -868,6 +882,9 @@ func supportsThinkingFallback(cfg LLMConfig) bool {
 }
 
 func isManagedClassifierProvider(cfg LLMConfig) bool {
+	if isOpenCodeZenProvider(cfg) {
+		return true
+	}
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	model := strings.ToLower(strings.TrimSpace(cfg.Model))
 	return provider == "deepseek" || provider == "zhipu" || provider == "qwen" || provider == "mimo" || model == "deepseek-v4-flash" || model == "glm-5.3-flash" || model == "qwen3.8-flash" || model == "mimo-v2.5"
