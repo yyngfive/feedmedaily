@@ -61,6 +61,28 @@ func TestTitlesMatchAndDatesMatch(t *testing.T) {
 	}
 }
 
+// 校验规则：标题与发布日期必须双双一致；任一项对不上都视为错配。
+func TestExternalRecordMatchesRequiresTitleAndDate(t *testing.T) {
+	paper := store.Paper{Title: "RNA paper", PublishedDate: stringPtr("2026-06-11")}
+	if !externalRecordMatches(paper, "RNA paper", "2026-06-20") {
+		t.Fatalf("expected both matching to be accepted")
+	}
+	if externalRecordMatches(paper, "RNA paper", "2013-09-01") {
+		t.Fatalf("title match with mismatched date must be rejected")
+	}
+	if externalRecordMatches(paper, "Goals and Habits in the Brain", "2026-06-20") {
+		t.Fatalf("date match with mismatched title must be rejected")
+	}
+	if externalRecordMatches(paper, "Goals and Habits in the Brain", "2013-09-01") {
+		t.Fatalf("both mismatched must be rejected")
+	}
+	// 论文缺少发布日期时无法完成日期校验，一律不采信。
+	dateless := store.Paper{Title: "RNA paper"}
+	if externalRecordMatches(dateless, "RNA paper", "2026-06-20") {
+		t.Fatalf("dateless paper must not adopt a searched doi")
+	}
+}
+
 func TestEnrichPaperSkipsProvidersWhenRSSIsComplete(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +134,7 @@ func TestEnrichPaperPrefersOpenAlexWhenMetadataIsMissing(t *testing.T) {
 	defer func() { openAlexBaseURL = previousOpenAlex }()
 	openAlexBaseURL = server.URL
 
-	paper := store.Paper{Title: "RNA paper", DOI: stringPtr("10.1000/test")}
+	paper := store.Paper{Title: "RNA paper", DOI: stringPtr("10.1000/test"), PublishedDate: stringPtr("2026-01-10")}
 	enriched, doiRejected := EnrichPaper(paper)
 	if doiRejected {
 		t.Fatalf("unexpected doiRejected")
@@ -167,7 +189,7 @@ func TestEnrichPaperFillsAuthorsAndAbstractFromCrossref(t *testing.T) {
 	openAlexBaseURL = "http://127.0.0.1:1"
 	crossrefBaseURL = server.URL
 
-	paper := store.Paper{Title: "NAR paper", DOI: stringPtr("10.1093/nar/gkag494")}
+	paper := store.Paper{Title: "NAR paper", DOI: stringPtr("10.1093/nar/gkag494"), PublishedDate: stringPtr("2026-01-20")}
 	enriched, doiRejected := EnrichPaper(paper)
 	if doiRejected {
 		t.Fatalf("unexpected doiRejected")
@@ -205,6 +227,7 @@ func TestEnrichPaperKeepsRSSAbstractWhileBackfillingAuthors(t *testing.T) {
 	paper := store.Paper{
 		Title:          "JACS paper",
 		DOI:            stringPtr("10.1021/jacs.5c22299"),
+		PublishedDate:  stringPtr("2026-02-11"),
 		Abstract:       stringPtr("rss abstract"),
 		AbstractSource: "rss",
 	}
@@ -250,7 +273,7 @@ func TestEnrichPaperWithoutDOIUsesOpenAlexOnly(t *testing.T) {
 	openAlexBaseURL = openAlexServer.URL
 	crossrefBaseURL = crossrefServer.URL
 
-	paper := store.Paper{Title: "Search-only paper"}
+	paper := store.Paper{Title: "Search-only paper", PublishedDate: stringPtr("2026-03-15")}
 	enriched, doiRejected := EnrichPaper(paper)
 	if doiRejected {
 		t.Fatalf("unexpected doiRejected")
@@ -274,7 +297,8 @@ func TestEnrichPaperSearchSkipsNonMatchingCandidates(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"results":[
 				{"doi":"https://doi.org/10.1000/wrong-hit","title":"Goals and Habits in the Brain","publication_date":"2013-09-01"},
-				{"doi":"https://doi.org/10.1000/right-hit","title":"Search-only paper with a longer record title","publication_date":"2026-03-01","abstract_inverted_index":{"Useful":[0],"abstract":[1]},"primary_location":{"source":{"display_name":"Cell"}},"authorships":[{"author":{"display_name":"Alice Smith"}}]}
+				{"doi":"https://doi.org/10.1000/title-only-hit","title":"Search-only paper with a longer title","publication_date":"2007-12-01"},
+				{"doi":"https://doi.org/10.1000/right-hit","title":"Search-only paper with a longer title","publication_date":"2026-03-01","abstract_inverted_index":{"Useful":[0],"abstract":[1]},"primary_location":{"source":{"display_name":"Cell"}},"authorships":[{"author":{"display_name":"Alice Smith"}}]}
 			]}`))
 			return
 		}
@@ -306,7 +330,7 @@ func TestEnrichPaperSearchWithoutMatchKeepsDOIEmpty(t *testing.T) {
 		openAlexRequests++
 		_, _ = w.Write([]byte(`{"results":[
 			{"doi":"https://doi.org/10.1000/wrong-hit-1","title":"Goals and Habits in the Brain","publication_date":"2013-09-01"},
-			{"doi":"https://doi.org/10.1000/wrong-hit-2","title":"Spins in few-electron quantum dots","publication_date":"2007-12-01"}
+			{"doi":"https://doi.org/10.1000/title-only-hit","title":"Search-only paper","publication_date":"2007-12-01"}
 		]}`))
 	}))
 	defer openAlexServer.Close()
@@ -324,7 +348,7 @@ func TestEnrichPaperSearchWithoutMatchKeepsDOIEmpty(t *testing.T) {
 	openAlexBaseURL = openAlexServer.URL
 	crossrefBaseURL = crossrefServer.URL
 
-	paper := store.Paper{Title: "Search-only paper", Abstract: stringPtr("rss abstract"), AbstractSource: "rss"}
+	paper := store.Paper{Title: "Search-only paper", PublishedDate: stringPtr("2026-06-11"), Abstract: stringPtr("rss abstract"), AbstractSource: "rss"}
 	enriched, doiRejected := EnrichPaper(paper)
 	if doiRejected {
 		t.Fatalf("unexpected doiRejected")
@@ -390,6 +414,44 @@ func TestEnrichPaperRejectsMismatchedDOI(t *testing.T) {
 	}
 }
 
+// 标题一致但 Crossref 记录的发布日期对不上：同样否决该 DOI。
+func TestEnrichPaperRejectsDOIWhenCrossrefDateMismatch(t *testing.T) {
+	openAlexServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/works/https://doi.org/10.1000/test") {
+			_, _ = w.Write([]byte(`{"doi":"https://doi.org/10.1000/test","title":"RNA paper","publication_date":"2026-06-20"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer openAlexServer.Close()
+	crossrefServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/works/10.1000/test" {
+			_, _ = w.Write([]byte(`{"message":{"DOI":"10.1000/test","title":["RNA paper"],"issued":{"date-parts":[[2013,9]]},"container-title":["Neuron"]}}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer crossrefServer.Close()
+
+	previousOpenAlex := openAlexBaseURL
+	previousCrossref := crossrefBaseURL
+	defer func() {
+		openAlexBaseURL = previousOpenAlex
+		crossrefBaseURL = previousCrossref
+	}()
+	openAlexBaseURL = openAlexServer.URL
+	crossrefBaseURL = crossrefServer.URL
+
+	paper := store.Paper{Title: "RNA paper", DOI: stringPtr("10.1000/test"), PublishedDate: stringPtr("2026-06-11")}
+	enriched, doiRejected := EnrichPaper(paper)
+	if !doiRejected {
+		t.Fatalf("expected doiRejected: crossref date does not match")
+	}
+	if enriched.DOI != nil {
+		t.Fatalf("expected doi to be cleared, got %#v", enriched.DOI)
+	}
+}
+
 func TestEnrichPaperKeepsDOIWhenCrossrefAccepts(t *testing.T) {
 	openAlexServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/works/https://doi.org/10.1000/test") {
@@ -417,7 +479,7 @@ func TestEnrichPaperKeepsDOIWhenCrossrefAccepts(t *testing.T) {
 	openAlexBaseURL = openAlexServer.URL
 	crossrefBaseURL = crossrefServer.URL
 
-	paper := store.Paper{Title: "RNA paper: a longer title", DOI: stringPtr("10.1000/test")}
+	paper := store.Paper{Title: "RNA paper: a longer title", DOI: stringPtr("10.1000/test"), PublishedDate: stringPtr("2026-01-05")}
 	enriched, doiRejected := EnrichPaper(paper)
 	if doiRejected {
 		t.Fatalf("unexpected doiRejected")
@@ -449,7 +511,7 @@ func TestEnrichPaperKeepsDOIWhenCrossrefIsUnavailable(t *testing.T) {
 	openAlexBaseURL = openAlexServer.URL
 	crossrefBaseURL = "http://127.0.0.1:1"
 
-	paper := store.Paper{Title: "RNA paper", DOI: stringPtr("10.1000/test")}
+	paper := store.Paper{Title: "RNA paper", DOI: stringPtr("10.1000/test"), PublishedDate: stringPtr("2026-06-11")}
 	enriched, doiRejected := EnrichPaper(paper)
 	if doiRejected {
 		t.Fatalf("unexpected doiRejected: crossref had no verdict, doi must be kept")

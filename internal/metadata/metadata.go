@@ -28,10 +28,11 @@ var (
 )
 
 const (
-	// errDOIRejected 表示按 DOI 精确查询到的记录与论文标题、发布日期都对不上，
-	// 即该 DOI 指向了另一篇论文。
+	// errDOIRejected 表示按 DOI 精确查询到的记录与论文的标题、发布日期
+	// 没有双双一致，即该 DOI 无法确认指向这篇论文。
 	errDOIRejected = "doi-rejected"
-	// errNoMatchingResult 表示标题搜索返回的候选里没有一条能对应当前论文。
+	// errNoMatchingResult 表示标题搜索返回的候选里没有一条能同时通过
+	// 标题与发布日期校验。
 	errNoMatchingResult = "no-matching-result"
 )
 
@@ -116,8 +117,8 @@ func EnrichPaper(paper store.Paper) (store.Paper, bool) {
 		if crossrefPaper, errText := enrichWithCrossref(enriched); crossrefPaper != nil {
 			enriched = applyMetadataCandidate(enriched, *crossrefPaper)
 		} else if errText == errDOIRejected {
-			// Crossref 是 DOI 注册机构，其记录与标题、发布日期都对不上时，
-			// 判定该 DOI 指向了别的论文：丢弃 DOI，链接回退到出版社 URL。
+			// Crossref 是 DOI 注册机构，其记录无法同时通过标题与发布日期
+			// 校验时，判定该 DOI 不可信：丢弃 DOI，链接回退到出版社 URL。
 			doiRejected = true
 			externalErrors = append(externalErrors, "crossref:"+errText)
 		} else if errText != "" {
@@ -317,14 +318,12 @@ func crossrefRecordDate(message map[string]any) string {
 	return year
 }
 
-// externalRecordMatches 判断外部记录是否对应当前论文：标题对得上即可采信；
-// 标题对不上但发布日期一致时也采信；只有标题与发布日期都对不上才判定为错配。
-// RSS 标题可能被截断或带 HTML 标记，因此标题匹配用归一化后的相等或包含关系。
+// externalRecordMatches 判断外部记录是否对应当前论文：标题与发布日期必须
+// 双双一致才采信（只凭标题一致不足以确认，避免标题近似的无关论文被采纳）；
+// 任一项对不上都判定为错配。RSS 标题可能被截断或带 HTML 标记，因此标题
+// 匹配用归一化后的相等或包含关系；日期按年月比较。
 func externalRecordMatches(paper store.Paper, recordTitle string, recordDate string) bool {
-	if titlesMatch(paper.Title, recordTitle) {
-		return true
-	}
-	return datesMatch(stringValue(paper.PublishedDate), recordDate)
+	return titlesMatch(paper.Title, recordTitle) && datesMatch(stringValue(paper.PublishedDate), recordDate)
 }
 
 func titlesMatch(paperTitle string, recordTitle string) bool {

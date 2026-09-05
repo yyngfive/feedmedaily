@@ -28,7 +28,7 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 1. Feed subscriptions are stored in `data/rss_feeds.json`.
 2. `feedmedailyd` fetches feed content through a layered Go pipeline: HTTP client, generic RSS/Atom/RDF parser, and publisher-specific extractors.
 3. Papers are deduplicated and upserted into `data/literature.sqlite`.
-4. Metadata enrichment runs only when core fields such as DOI, authors, journal, or usable abstract content are missing. Externally resolved records are validated against the paper title and publication date; a DOI whose record matches neither is dropped so linking falls back to the publisher URL, and enrichment writes back under the row's stored `paper_key` so a newly found DOI never splits a paper into duplicate rows.
+4. Metadata enrichment runs only when core fields such as DOI, authors, journal, or usable abstract content are missing. Externally resolved records are validated against both the paper title and the publication date, and a DOI whose record fails either check is dropped so linking falls back to the publisher URL; enrichment writes back under the row's stored `paper_key` so a newly found DOI never splits a paper into duplicate rows.
 5. The classifier evaluates papers against the active `data/classification_profile.json`.
 6. Classifications, feedback, profile proposals, Zotero save status, and completed-job LLM usage are persisted in SQLite.
 7. `feedmedailyd` serves `web/dist` and exposes the local JSON API surface.
