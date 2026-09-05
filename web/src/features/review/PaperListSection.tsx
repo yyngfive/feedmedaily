@@ -1,13 +1,13 @@
 import React from "react";
-import {Button} from "@heroui/react";
-import {Virtuoso, type VirtuosoHandle} from "react-virtuoso";
+import { Button } from "@heroui/react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 
-import {relevanceTabs, type RelevanceFilter} from "../../app/constants";
-import {EmptyStateCard} from "../../shared/components/EmptyStateCard";
-import {TextInputField} from "../../shared/components/FormFields";
-import {StatusBanner} from "../../shared/components/StatusBanner";
-import {PaperCard} from "./PaperCard";
-import type {Paper, Relevance} from "../../shared/types";
+import { relevanceTabs, type RelevanceFilter } from "../../app/constants";
+import { EmptyStateCard } from "../../shared/components/EmptyStateCard";
+import { TextInputField } from "../../shared/components/FormFields";
+import { StatusBanner } from "../../shared/components/StatusBanner";
+import { PaperCard } from "./PaperCard";
+import type { Paper, Relevance } from "../../shared/types";
 
 export function PaperListSection({
   loadError,
@@ -106,8 +106,8 @@ export function PaperListSection({
               </Button>
             ))}
           </div>
-          {/* TODO：需要加一个清空内容的x按钮 */}
           <TextInputField
+            clearable
             label="Search"
             placeholder="Search title, abstract, author, journal"
             value={query}
@@ -205,9 +205,9 @@ export function PaperListSection({
             ref={virtuosoRef}
             className="h-full"
             computeItemKey={(index) => papers[index].id}
-            increaseViewportBy={{bottom: 480, top: 240}}
+            increaseViewportBy={{ bottom: 480, top: 240 }}
             initialTopMostItemIndex={0}
-            style={{height: "100%"}}
+            style={{ height: "100%" }}
             totalCount={papers.length}
             itemContent={(index) => {
               const paper = papers[index];
