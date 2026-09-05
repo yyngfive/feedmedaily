@@ -95,6 +95,7 @@ export function AppTab({appMeta, appUpdate, appUpdateChecking, configFields, con
             <div className="mt-3 flex flex-wrap gap-2">
               {appUpdate.has_update && appUpdate.download_url ? <Button size="sm" onPress={() => window.open(appUpdate.download_url!, "_blank", "noopener,noreferrer")}>Download installer</Button> : null}
               {appUpdate.release_notes_url ? <Button size="sm" variant="outline" onPress={() => window.open(appUpdate.release_notes_url!, "_blank", "noopener,noreferrer")}>Release notes</Button> : null}
+              <Button size="sm" variant="outline" onPress={() => window.open('https://github.com/yyngfive/feedmedaily/blob/main/README.md', "_blank", "noopener,noreferrer")}>User Manual</Button>
             </div>
           </div>
         ) : <p className="mt-3 text-sm text-muted">Update information is unavailable.</p>}
