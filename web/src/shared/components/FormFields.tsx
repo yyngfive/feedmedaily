@@ -117,6 +117,31 @@ export function TextInputField({
   );
 }
 
+export function TextAreaField({
+  className = "",
+  description,
+  disabled = false,
+  hideLabel = false,
+  label,
+  onChange,
+  placeholder,
+  rows,
+  value,
+}: TextAreaFieldProps) {
+  return (
+    <TextField
+      className={`w-full gap-2 ${className}`}
+      isDisabled={disabled}
+      value={value}
+      onChange={onChange}
+    >
+      <Label className={hideLabel ? "sr-only" : undefined}>{label}</Label>
+      <TextArea className="w-full" placeholder={placeholder} rows={rows} style={{resize: "vertical"}} />
+      {description ? <Description>{description}</Description> : null}
+    </TextField>
+  );
+}
+
 export function CheckboxRow({
   checked,
   children,
