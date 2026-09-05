@@ -1,6 +1,6 @@
 import { Button } from "@heroui/react";
 
-import { doiHref, feedbackLabel, paperDate } from "../../app/utils";
+import { feedbackLabel, paperDate, paperLinkHref } from "../../app/utils";
 import type { Paper } from "../../shared/types";
 
 function abstractHtmlForDisplay(paper: Paper): string {
@@ -39,6 +39,7 @@ export function DetailPanel({
     );
   }
   const feedbackText = feedbackLabel(paper);
+  const linkHref = paperLinkHref(paper);
   const zoteroSaved = paper.zotero_status?.saved ?? false;
   const hasAbstractHtml = Boolean(paper.abstract_html);
   const abstractHtml = hasAbstractHtml ? abstractHtmlForDisplay(paper) : "";
@@ -48,9 +49,11 @@ export function DetailPanel({
     <aside className="h-full space-y-5 overflow-auto rounded-lg border border-(--line) bg-(--paper-accent) p-5">
 
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="primary" onPress={() => window.open(doiHref(paper), "_blank")}>
-          DOI link
-        </Button>
+        {linkHref && (
+          <Button size="sm" variant="primary" onPress={() => window.open(linkHref, "_blank")}>
+            Link
+          </Button>
+        )}
         <Button
           size="sm"
           isDisabled={markReadBusy}
