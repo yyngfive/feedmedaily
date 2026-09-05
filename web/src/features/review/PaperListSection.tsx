@@ -106,7 +106,7 @@ export function PaperListSection({
               </Button>
             ))}
           </div>
-
+          {/* TODO：需要加一个清空内容的x按钮 */}
           <TextInputField
             label="Search"
             placeholder="Search title, abstract, author, journal"
