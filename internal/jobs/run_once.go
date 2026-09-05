@@ -224,10 +224,26 @@ func reclassifyExistingPapersContext(sqliteStore *store.Store, settings config.S
 		if paper == nil {
 			continue
 		}
-		enriched := metadata.EnrichPaper(*paper)
+		enriched, doiRejected := metadata.EnrichPaper(*paper)
 		enriched.ID = paperID
-		if _, _, err := sqliteStore.UpsertPaper(enriched, now); err != nil {
+		// enrichment 会补上 DOI；若按新内容重算键会把同一篇文章插成新行，
+		// 因此沿用该行已存储的 paper_key 原地写回。
+		storedKey, err := sqliteStore.StoredPaperKey(paperID)
+		if err != nil {
 			return 0, nil, err
+		}
+		if storedKey != "" {
+			if _, _, err := sqliteStore.UpsertPaperWithKey(enriched, storedKey, now); err != nil {
+				return 0, nil, err
+			}
+		} else if _, _, err := sqliteStore.UpsertPaper(enriched, now); err != nil {
+			return 0, nil, err
+		}
+		if doiRejected {
+			// DOI 与标题、日期都对不上：清掉错误 DOI，界面回退到出版社 URL。
+			if err := sqliteStore.ClearPaperDOI(paperID); err != nil {
+				return 0, nil, err
+			}
 		}
 		enrichedPairs = append(enrichedPairs, classificationPaperPair{PaperID: paperID, Paper: enriched})
 		EmitProgress(progress, PercentProgress(

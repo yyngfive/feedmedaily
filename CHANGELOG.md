@@ -15,6 +15,12 @@ Changes since `0.6.0`:
 ### Fixed
 
 - Fixed supported official-provider cost estimates when a response omits cache-token details by conservatively pricing the unclassified input as a cache miss. Existing unavailable single-model rows with one saved price snapshot are repaired on startup without guessing across mixed models or rate tiers.
+- Fixed metadata enrichment adopting mismatched DOIs. When a paper has no DOI, enrichment now searches OpenAlex with the title, checks up to five candidates, and only accepts a record whose title or publication date matches the paper; DOI lookups are validated the same way through Crossref. A DOI whose record matches neither is dropped, so papers link through their publisher URL instead of an unrelated older article. This also stops the daily enrichment from inserting duplicate unclassified rows for papers that were already classified.
+- Fixed enrichment write-back to upsert under the paper's stored `paper_key` instead of recomputing the key after a DOI was filled in, which had been splitting the same article into a second row whose classification never completed.
+
+### Changed
+
+- Renamed the review detail panel's `DOI link` button to `Link`. It opens the DOI when present, falls back to the publisher URL from the feed when the DOI is missing, and hides when neither exists.
 
 ## 0.6.0 (2026-08-30)
 

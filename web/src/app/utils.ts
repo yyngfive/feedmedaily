@@ -26,11 +26,12 @@ export function authorsLine(paper: Paper): string {
   return `${authors.slice(0, 3).join(", ")} +${authors.length - 3}`;
 }
 
-export function doiHref(paper: Paper): string {
+// 详情面板的 Link 按钮：优先 DOI，缺失时回退出版社 URL，两者皆无返回空串。
+export function paperLinkHref(paper: Paper): string {
   if (paper.doi) {
     return `https://doi.org/${paper.doi.replace(/^https?:\/\/doi.org\//i, "")}`;
   }
-  return paper.url;
+  return paper.url ?? "";
 }
 
 function isWithinDays(value: string, reportDate: string, days: number): boolean {

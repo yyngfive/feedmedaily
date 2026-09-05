@@ -98,7 +98,7 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 
 - 主界面采用三栏布局：左侧筛选、中央论文列表、右侧详情。
 - 中央列表默认使用 `Unread + Last 30 days`，采用虚拟列表；论文卡只显示摘要，不放置行内动作。
-- `DOI link`、`Mark as read`、`Save to Zotero`、`Mark wrong` 由右侧详情面板负责。
+- `Link`（DOI 优先，缺失时回退出版社 URL；两者皆无则隐藏）、`Mark as read`、`Save to Zotero`、`Mark wrong` 由右侧详情面板负责。
 - 如果已有 Profile，三栏工作区应立即渲染，论文列表不得等待非关键 Admin 数据。
 - 如果没有 Profile，先显示 onboarding；如果没有 RSS feed，应等待 feed 加载结束后再进入 feed 初始化空状态。
 

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yyngfive/scirssagent/internal/logging"
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
@@ -22,6 +23,16 @@ var (
 	tagRE              = regexp.MustCompile(`<[^>]+>`)
 	whitespaceRE       = regexp.MustCompile(`\s+`)
 	abstractPrefixRE   = regexp.MustCompile(`(?i)^(abstract|summary)\s*:?`)
+	nonAlnumRE         = regexp.MustCompile(`[^\p{L}\p{N}]+`)
+	digitsRE           = regexp.MustCompile(`^\d+$`)
+)
+
+const (
+	// errDOIRejected 表示按 DOI 精确查询到的记录与论文标题、发布日期都对不上，
+	// 即该 DOI 指向了另一篇论文。
+	errDOIRejected = "doi-rejected"
+	// errNoMatchingResult 表示标题搜索返回的候选里没有一条能对应当前论文。
+	errNoMatchingResult = "no-matching-result"
 )
 
 func NormalizeDOI(value string) string {
@@ -75,8 +86,9 @@ func AbstractFromOpenAlexInvertedIndex(index map[string][]int) string {
 	return strings.TrimSpace(strings.Join(parts, " "))
 }
 
-func EnrichPaper(paper store.Paper) store.Paper {
-	// 只迁 reclassify 所需的 metadata enrich，失败时走本地内容回退。
+// EnrichPaper 只做 reclassify 所需的 metadata enrich，失败时走本地内容回退。
+// 第二个返回值表示论文自带的 DOI 被校验判定为错配（两个信号都对不上）而丢弃。
+func EnrichPaper(paper store.Paper) (store.Paper, bool) {
 	normalizedDOI := NormalizeDOI(stringValue(paper.DOI))
 	hadDOIAtStart := normalizedDOI != ""
 	externalErrors := []string{}
@@ -85,8 +97,8 @@ func EnrichPaper(paper store.Paper) store.Paper {
 		if normalizedDOI != "" {
 			result.DOI = stringPtr(normalizedDOI)
 		}
-		logEnrichmentResult(result, normalizedDOI, externalErrors)
-		return result
+		logEnrichmentResult(result, externalErrors)
+		return result, false
 	}
 
 	enriched := paper
@@ -94,17 +106,26 @@ func EnrichPaper(paper store.Paper) store.Paper {
 		enriched.DOI = stringPtr(normalizedDOI)
 	}
 
-	if openAlexPaper, ok, errText := enrichWithOpenAlex(enriched); ok {
-		enriched = applyMetadataCandidate(enriched, openAlexPaper)
+	if openAlexPaper, errText := enrichWithOpenAlex(enriched); openAlexPaper != nil {
+		enriched = applyMetadataCandidate(enriched, *openAlexPaper)
 	} else if errText != "" {
 		externalErrors = append(externalErrors, "openalex:"+errText)
 	}
+	doiRejected := false
 	if hadDOIAtStart {
-		if crossrefPaper, ok, errText := enrichWithCrossref(enriched); ok {
-			enriched = applyMetadataCandidate(enriched, crossrefPaper)
+		if crossrefPaper, errText := enrichWithCrossref(enriched); crossrefPaper != nil {
+			enriched = applyMetadataCandidate(enriched, *crossrefPaper)
+		} else if errText == errDOIRejected {
+			// Crossref 是 DOI 注册机构，其记录与标题、发布日期都对不上时，
+			// 判定该 DOI 指向了别的论文：丢弃 DOI，链接回退到出版社 URL。
+			doiRejected = true
+			externalErrors = append(externalErrors, "crossref:"+errText)
 		} else if errText != "" {
 			externalErrors = append(externalErrors, "crossref:"+errText)
 		}
+	}
+	if doiRejected {
+		enriched.DOI = nil
 	}
 	if !hasAbstractContent(enriched) {
 		enriched.Abstract = nil
@@ -112,8 +133,8 @@ func EnrichPaper(paper store.Paper) store.Paper {
 		enriched.AbstractImages = []store.AbstractImage{}
 		enriched.AbstractSource = "none"
 	}
-	logEnrichmentResult(enriched, normalizedDOI, externalErrors)
-	return enriched
+	logEnrichmentResult(enriched, externalErrors)
+	return enriched, doiRejected
 }
 
 func needsExternalEnrichment(paper store.Paper) bool {
@@ -129,26 +150,44 @@ func needsExternalEnrichment(paper store.Paper) bool {
 	return !hasAbstractContent(paper)
 }
 
-func enrichWithOpenAlex(paper store.Paper) (store.Paper, bool, string) {
+func enrichWithOpenAlex(paper store.Paper) (*store.Paper, string) {
 	var url string
-	if doi := NormalizeDOI(stringValue(paper.DOI)); doi != "" {
-		url = strings.TrimRight(openAlexBaseURL, "/") + "/works/https://doi.org/" + doi
+	searchMode := NormalizeDOI(stringValue(paper.DOI)) == ""
+	if searchMode {
+		// 没有 DOI 时按标题搜索；标题搜索的第一条结果经常是同名近似论文，
+		// 因此取前 5 条并做标题/日期校验，逐条找到第一条能对应当前论文的记录。
+		url = strings.TrimRight(openAlexBaseURL, "/") + "/works?search=" + queryEscape(paper.Title) + "&per-page=5&select=doi,title,publication_date,publication_year,primary_location,authorships,abstract_inverted_index"
 	} else {
-		url = strings.TrimRight(openAlexBaseURL, "/") + "/works?search=" + queryEscape(paper.Title) + "&per-page=1"
+		url = strings.TrimRight(openAlexBaseURL, "/") + "/works/https://doi.org/" + NormalizeDOI(stringValue(paper.DOI))
 	}
 	responseBody, ok, errText := httpGet(url)
 	if !ok {
-		return paper, false, errText
+		return nil, errText
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(responseBody, &payload); err != nil {
-		return paper, false, err.Error()
+		return nil, err.Error()
 	}
 	work := payload
-	if results, ok := payload["results"].([]any); ok && len(results) > 0 {
-		if first, ok := results[0].(map[string]any); ok {
-			work = first
+	if searchMode {
+		results, _ := payload["results"].([]any)
+		matched := false
+		for _, rawResult := range results {
+			result, ok := rawResult.(map[string]any)
+			if !ok {
+				continue
+			}
+			if externalRecordMatches(paper, openAlexRecordTitle(result), openAlexRecordDate(result)) {
+				work = result
+				matched = true
+				break
+			}
 		}
+		if !matched {
+			return nil, errNoMatchingResult
+		}
+	} else if !externalRecordMatches(paper, openAlexRecordTitle(work), openAlexRecordDate(work)) {
+		return nil, errDOIRejected
 	}
 	abstract := ""
 	if rawIndex, ok := work["abstract_inverted_index"].(map[string]any); ok {
@@ -191,25 +230,36 @@ func enrichWithOpenAlex(paper store.Paper) (store.Paper, bool, string) {
 		result.Abstract = nil
 		result.AbstractSource = "none"
 	}
-	return result, true, ""
+	return &result, ""
 }
 
-func enrichWithCrossref(paper store.Paper) (store.Paper, bool, string) {
+func openAlexRecordTitle(work map[string]any) string {
+	return firstNonEmpty(normalizedString(work["title"]), normalizedString(work["display_name"]))
+}
+
+func openAlexRecordDate(work map[string]any) string {
+	return firstNonEmpty(normalizedString(work["publication_date"]), normalizedString(work["publication_year"]))
+}
+
+func enrichWithCrossref(paper store.Paper) (*store.Paper, string) {
 	doi := NormalizeDOI(stringValue(paper.DOI))
 	if doi == "" {
-		return paper, false, ""
+		return nil, ""
 	}
 	responseBody, ok, errText := httpGet(strings.TrimRight(crossrefBaseURL, "/") + "/works/" + doi)
 	if !ok {
-		return paper, false, errText
+		return nil, errText
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(responseBody, &payload); err != nil {
-		return paper, false, err.Error()
+		return nil, err.Error()
 	}
 	message, ok := payload["message"].(map[string]any)
 	if !ok {
-		return paper, false, "crossref response missing message object"
+		return nil, "crossref response missing message object"
+	}
+	if !externalRecordMatches(paper, crossrefRecordTitle(message), crossrefRecordDate(message)) {
+		return nil, errDOIRejected
 	}
 	journal := stringValue(paper.Journal)
 	if titles, ok := message["container-title"].([]any); ok && len(titles) > 0 {
@@ -232,7 +282,105 @@ func enrichWithCrossref(paper store.Paper) (store.Paper, bool, string) {
 		result.Abstract = nil
 		result.AbstractSource = "none"
 	}
-	return result, true, ""
+	return &result, ""
+}
+
+func crossrefRecordTitle(message map[string]any) string {
+	titles, ok := message["title"].([]any)
+	if !ok || len(titles) == 0 {
+		return ""
+	}
+	return normalizedString(titles[0])
+}
+
+func crossrefRecordDate(message map[string]any) string {
+	issued, ok := message["issued"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	dateParts, ok := issued["date-parts"].([]any)
+	if !ok || len(dateParts) == 0 {
+		return ""
+	}
+	parts, ok := dateParts[0].([]any)
+	if !ok || len(parts) == 0 {
+		return ""
+	}
+	year := normalizedString(parts[0])
+	if len(parts) > 1 {
+		month := normalizedString(parts[1])
+		if len(month) == 1 {
+			month = "0" + month
+		}
+		return year + "-" + month
+	}
+	return year
+}
+
+// externalRecordMatches 判断外部记录是否对应当前论文：标题对得上即可采信；
+// 标题对不上但发布日期一致时也采信；只有标题与发布日期都对不上才判定为错配。
+// RSS 标题可能被截断或带 HTML 标记，因此标题匹配用归一化后的相等或包含关系。
+func externalRecordMatches(paper store.Paper, recordTitle string, recordDate string) bool {
+	if titlesMatch(paper.Title, recordTitle) {
+		return true
+	}
+	return datesMatch(stringValue(paper.PublishedDate), recordDate)
+}
+
+func titlesMatch(paperTitle string, recordTitle string) bool {
+	left := normalizeTitle(paperTitle)
+	right := normalizeTitle(recordTitle)
+	if left == "" || right == "" {
+		return false
+	}
+	if left == right {
+		return true
+	}
+	// 包含判定要求较短一方足够长，避免短标题误配。
+	if utf8.RuneCountInString(left) >= 20 && strings.Contains(right, left) {
+		return true
+	}
+	if utf8.RuneCountInString(right) >= 20 && strings.Contains(left, right) {
+		return true
+	}
+	return false
+}
+
+func normalizeTitle(value string) string {
+	clean := html.UnescapeString(value)
+	clean = tagRE.ReplaceAllString(clean, " ")
+	clean = strings.ToLower(clean)
+	clean = nonAlnumRE.ReplaceAllString(clean, " ")
+	return strings.Join(strings.Fields(clean), " ")
+}
+
+// datesMatch 按年月比较发布日期；任一方只有年份时退化为按年比较。
+func datesMatch(paperDate string, recordDate string) bool {
+	paperYear, paperMonth := parseYearMonth(paperDate)
+	recordYear, recordMonth := parseYearMonth(recordDate)
+	if paperYear == "" || recordYear == "" {
+		return false
+	}
+	if paperYear != recordYear {
+		return false
+	}
+	if paperMonth == "" || recordMonth == "" {
+		return true
+	}
+	return paperMonth == recordMonth
+}
+
+func parseYearMonth(value string) (string, string) {
+	clean := strings.TrimSpace(value)
+	if len(clean) < 4 || !digitsRE.MatchString(clean[:4]) {
+		return "", ""
+	}
+	year := clean[:4]
+	month := ""
+	if len(clean) >= 7 && clean[4] == '-' && digitsRE.MatchString(clean[5:7]) {
+		month = clean[5:7]
+	}
+	return year, month
 }
 
 func hasAbstractContent(paper store.Paper) bool {
@@ -425,7 +573,7 @@ func normalizedString(raw any) string {
 	return value
 }
 
-func logEnrichmentResult(paper store.Paper, normalizedDOI string, externalErrors []string) {
+func logEnrichmentResult(paper store.Paper, externalErrors []string) {
 	_, _ = logging.WriteDefault(logging.Event{
 		Level:     "info",
 		Component: "metadata",
@@ -433,7 +581,7 @@ func logEnrichmentResult(paper store.Paper, normalizedDOI string, externalErrors
 		Message:   "abstract_enrichment",
 		Data: map[string]any{
 			"paper_key":        PaperKey(paper),
-			"doi_found":        normalizedDOI != "",
+			"doi_found":        strings.TrimSpace(stringValue(paper.DOI)) != "",
 			"abstract_source":  paper.AbstractSource,
 			"abstract_empty":   !hasAbstractContent(paper),
 			"external_errors":  externalErrors,
