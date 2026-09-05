@@ -62,7 +62,12 @@ func (s *Store) PaperByID(paperID int64) (*Paper, error) {
 }
 
 func (s *Store) UpsertPaper(paper Paper, now time.Time) (int64, bool, error) {
-	key := paperKey(paper)
+	return s.UpsertPaperWithKey(paper, paperKey(paper), now)
+}
+
+// UpsertPaperWithKey 以调用方给定的稳定键 upsert。enrichment 写回会补上 DOI，
+// 若按内容重新算键会把同一篇文章拆成多行，因此写回路径必须沿用原行已存储的键。
+func (s *Store) UpsertPaperWithKey(paper Paper, key string, now time.Time) (int64, bool, error) {
 	if strings.TrimSpace(key) == "" {
 		return 0, false, fmt.Errorf("paper key cannot be blank")
 	}
@@ -495,7 +500,55 @@ func stringValue(value *string) string {
 	return *value
 }
 
+// StoredPaperKey 返回库中已存储的 paper_key，enrichment 写回时用它保持键稳定。
+// schema 没有 paper_key 列或行不存在时返回空串，调用方退回内容重算键。
+func (s *Store) StoredPaperKey(paperID int64) (string, error) {
+	if !s.paperColumns["paper_key"] {
+		return "", nil
+	}
+	var key string
+	err := s.db.QueryRow(`SELECT paper_key FROM papers WHERE id = ?`, paperID).Scan(&key)
+	if err != nil {
+		if strings.Contains(err.Error(), "sql: no rows in result set") {
+			return "", nil
+		}
+		return "", fmt.Errorf("query stored paper key: %w", err)
+	}
+	return key, nil
+}
+
+// ClearPaperDOI 清除指定论文的 DOI。enrichment 校验判定 DOI 与标题、日期都
+// 对不上时调用，链接回退到出版社 URL。
+func (s *Store) ClearPaperDOI(paperID int64) error {
+	if _, err := s.db.Exec(`UPDATE papers SET doi = NULL WHERE id = ?`, paperID); err != nil {
+		return fmt.Errorf("clear paper doi: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) findPaperByKey(key string) (*Paper, error) {
+	if s.paperColumns["paper_key"] {
+		row := s.db.QueryRow(fmt.Sprintf(`
+			SELECT id, source_url, feed_title, title, url, doi, journal, authors_json, abstract,
+				%s AS abstract_source, published_date, first_seen_at, %s AS read_at, raw_json
+			FROM papers
+			WHERE paper_key = ?
+			ORDER BY id DESC
+		`, s.columnExpr(s.paperColumns, "abstract_source", quote(abstractSourceNone)), s.columnExpr(s.paperColumns, "read_at", "NULL")), key)
+		base, err := scanPaperRow(row)
+		if err != nil {
+			if strings.Contains(err.Error(), "sql: no rows in result set") {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("query paper by key: %w", err)
+		}
+		paper, err := paperFromPaperRow(base)
+		if err != nil {
+			return nil, err
+		}
+		return &paper, nil
+	}
+	// 旧 schema 没有存储 paper_key 列：按内容重算键后逐行比对。
 	rows, err := s.db.Query(fmt.Sprintf(`
 		SELECT id, source_url, feed_title, title, url, doi, journal, authors_json, abstract,
 			%s AS abstract_source, published_date, first_seen_at, %s AS read_at, raw_json
