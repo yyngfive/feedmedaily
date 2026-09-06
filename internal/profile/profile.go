@@ -184,11 +184,15 @@ func PrepareUpdatedProfile(edited map[string]any, current map[string]any, now ti
 }
 
 func ValidateBytes(data []byte) (map[string]any, error) {
-	// 用严格 JSON 解码校验 profile 结构，再返回原始对象形状。
-	if _, err := parseDocumentBytes(data); err != nil {
+	// 用严格 JSON 解码校验 profile 结构，并返回标准化后的紧凑形状。
+	// 不能原样返回磁盘/库里的原始 JSON：旧版纯字符串规则必须在这里
+	// 透明迁移为 {text, topics} 对象，API 消费者才总能拿到一致结构。
+	document, err := parseDocumentBytes(data)
+	if err != nil {
 		return nil, err
 	}
-	return decodeMap(data)
+	payload, _, err := compactDocumentMap(document)
+	return payload, err
 }
 
 func ValidateMap(payload map[string]any) (map[string]any, error) {

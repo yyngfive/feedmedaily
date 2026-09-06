@@ -1,7 +1,7 @@
 import {Button, Card, Spinner} from "@heroui/react";
 import React from "react";
 
-import {statusMessage} from "../../app/utils";
+import {statusMessage, toProfileRule} from "../../app/utils";
 import type {
   ClassifierModelsResponse,
   ClassificationProfile,
@@ -75,9 +75,9 @@ function createDraft(profile: ClassificationProfile): ProfileDraft {
   return {
     name: profile.meta.name,
     scope: profile.scope,
-    directRulesText: profile.relevance_rules.direct.map((rule) => rule.text).join("\n"),
-    indirectRulesText: profile.relevance_rules.indirect.map((rule) => rule.text).join("\n"),
-    unrelatedRulesText: profile.relevance_rules.unrelated.map((rule) => rule.text).join("\n"),
+    directRulesText: profile.relevance_rules.direct.map((rule) => toProfileRule(rule).text).join("\n"),
+    indirectRulesText: profile.relevance_rules.indirect.map((rule) => toProfileRule(rule).text).join("\n"),
+    unrelatedRulesText: profile.relevance_rules.unrelated.map((rule) => toProfileRule(rule).text).join("\n"),
   };
 }
 

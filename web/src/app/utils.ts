@@ -1,7 +1,19 @@
 import {relevanceLabel} from "./constants";
 import type {DateFilter} from "./constants";
-import type {JobInfo, Paper, Relevance, ReportTopics} from "../shared/types";
+import type {JobInfo, Paper, ProfileRule, Relevance, ReportTopics} from "../shared/types";
 import {TOPIC_NONE} from "../shared/types";
+
+// toProfileRule 兼容旧后端返回的纯字符串规则，统一为 {text, topics} 对象。
+export function toProfileRule(rule: unknown): ProfileRule {
+  if (typeof rule === "string") {
+    return {text: rule, topics: []};
+  }
+  const value = (rule ?? {}) as Partial<ProfileRule>;
+  return {
+    text: typeof value.text === "string" ? value.text : "",
+    topics: Array.isArray(value.topics) ? value.topics.filter((id): id is string => typeof id === "string") : [],
+  };
+}
 
 export function sentence(value?: string | null): string {
   if (!value) {

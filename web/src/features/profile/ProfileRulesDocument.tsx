@@ -2,6 +2,7 @@ import {Button, Card, Chip} from "@heroui/react";
 import React from "react";
 
 import {TextAreaField, TextInputField} from "../../shared/components/FormFields";
+import {toProfileRule} from "../../app/utils";
 import type {ClassificationProfile, ProfileRule, TopicDefinition} from "../../shared/types";
 
 type ProfileRuleDraft = {
@@ -18,8 +19,11 @@ type ProfileDraft = {
   topics: TopicDefinition[];
 };
 
-function draftRules(rules: ProfileRule[]): ProfileRuleDraft[] {
-  return rules.map((rule) => ({text: rule.text, topics: [...(rule.topics ?? [])]}));
+function draftRules(rules: unknown[]): ProfileRuleDraft[] {
+  return rules.map((rule) => {
+    const normalized = toProfileRule(rule);
+    return {text: normalized.text, topics: [...normalized.topics]};
+  });
 }
 
 function createDraft(profile: ClassificationProfile): ProfileDraft {
@@ -57,7 +61,7 @@ function TopicTagChips({
   );
 }
 
-function RuleSection({items, title, topicLabels}: {items: ProfileRule[]; title: string; topicLabels: Map<string, string>}) {
+function RuleSection({items, title, topicLabels}: {items: unknown[]; title: string; topicLabels: Map<string, string>}) {
   return (
     <section className="space-y-2">
       <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-muted">{title}</h3>
@@ -65,12 +69,15 @@ function RuleSection({items, title, topicLabels}: {items: ProfileRule[]; title: 
         <p className="text-sm text-muted">No rules yet.</p>
       ) : (
         <ul className="space-y-2 text-sm leading-6 text-(--body)">
-          {items.map((rule) => (
-            <li key={`${title}-${rule.text}`} className="space-y-1">
-              <span>{rule.text}</span>
-              <TopicTagChips label="Topics" topics={rule.topics ?? []} topicLabels={topicLabels} />
-            </li>
-          ))}
+          {items.map((item) => {
+            const rule = toProfileRule(item);
+            return (
+              <li key={`${title}-${rule.text}`} className="space-y-1">
+                <span>{rule.text}</span>
+                <TopicTagChips label="Topics" topics={rule.topics} topicLabels={topicLabels} />
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>
@@ -308,8 +315,8 @@ export function ProfileRulesDocument({
       profile.relevance_rules.direct,
       profile.relevance_rules.indirect,
     ]) {
-      for (const rule of section) {
-        for (const id of rule.topics ?? []) {
+      for (const item of section) {
+        for (const id of toProfileRule(item).topics) {
           ids.add(id);
         }
       }

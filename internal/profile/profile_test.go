@@ -501,3 +501,35 @@ func TestPrepareAppliedProfileFromChangesRejectsUnknownTopicLabel(t *testing.T) 
 		t.Fatalf("expected unknown topic label error, got %v", err)
 	}
 }
+
+func TestReadCurrentNormalizesLegacyStringRules(t *testing.T) {
+	// 回归：ReadCurrent 不能原样透传磁盘旧形状，否则 API 返回字符串规则、
+	// 新前端按对象渲染会整段空白。读路径必须返回迁移后的结构化形状。
+	root := t.TempDir()
+	path := filepath.Join(root, "classification_profile.json")
+	legacy := `{
+		"meta":{"name":"XNA","version":24,"created_at":"2025-04-06T00:00:00Z","updated_at":"2026-06-16T00:00:00Z","source_description":"legacy"},
+		"scope":"nucleic acid chemistry",
+		"relevance_rules":{"direct":["RNA chemistry"],"indirect":[],"unrelated":["Plant biology"]},
+		"topic_taxonomy":[],
+		"few_shots":[]
+	}`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := ReadCurrent(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct, ok := payload["relevance_rules"].(map[string]any)["direct"].([]any)
+	if !ok || len(direct) != 1 {
+		t.Fatalf("unexpected direct rules: %#v", payload["relevance_rules"])
+	}
+	rule, ok := direct[0].(map[string]any)
+	if !ok || rule["text"] != "RNA chemistry" {
+		t.Fatalf("expected structured rule object, got %#v", direct[0])
+	}
+	if tags, ok := rule["topics"].([]any); !ok || len(tags) != 0 {
+		t.Fatalf("expected empty topics list, got %#v", rule["topics"])
+	}
+}
