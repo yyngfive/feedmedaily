@@ -62,17 +62,6 @@ export function FiltersSidebar({
   visibleTotals: Record<Relevance, number>;
 }) {
   const selectedJournalSet = new Set(selectedJournals);
-  // 主题过滤选项：注册表主题 + 未归类（判定过无主题/孤儿）+ 未判定（从未跑过主题）。
-  const topicOptions: Array<{value: TopicFilterValue; label: string; count: number}> = [
-    {value: "unassigned", label: "Unassigned", count: topics?.unassigned ?? 0},
-    {value: "unprocessed", label: "Not processed", count: topics?.unprocessed ?? 0},
-    ...(topics?.items ?? []).map((topic) => ({
-      value: topic.id as TopicFilterValue,
-      label: topic.label,
-      count: topics?.counts[topic.id] ?? 0,
-    })),
-  ];
-  const activeTopicFilter = topicFilter !== "all";
 
   return (
     <aside className="h-full space-y-4 overflow-auto rounded-lg border border-(--line) bg-(--paper-accent) p-4">
@@ -100,38 +89,18 @@ export function FiltersSidebar({
       </div>
 
       <div className="space-y-3">
-        <section className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="text-sm font-medium text-(--ink)">Topic</h3>
-            {activeTopicFilter ? (
-              <Button size="sm" variant="ghost" onPress={() => onTopicFilterChange("all")}>
-                All
-              </Button>
-            ) : null}
-          </div>
-          <div className="max-h-44 space-y-1 overflow-auto rounded-md border border-(--line) bg-(--paper) p-2">
-            {topicOptions.length === 0 ? (
-              <p className="px-1 py-2 text-sm text-muted">No topics in the profile yet.</p>
-            ) : (
-              topicOptions.map((option) => (
-                <button
-                  key={option.value}
-                  aria-pressed={topicFilter === option.value}
-                  className={`flex w-full items-center justify-between gap-2 rounded px-1.5 py-1 text-left text-sm ${
-                    topicFilter === option.value
-                      ? "bg-(--paper-accent) font-medium text-(--ink)"
-                      : "text-(--body) hover:bg-(--paper-accent)"
-                  }`}
-                  onClick={() => onTopicFilterChange(option.value)}
-                  type="button"
-                >
-                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                  <span className="text-xs text-muted">{option.count}</span>
-                </button>
-              ))
-            )}
-          </div>
-        </section>
+        {/* 主题过滤与 Date 等过滤同形态：单选下拉，All + 固定桶 + 注册表主题，不显示计数。 */}
+        <SelectField
+          label="Topic"
+          options={[
+            {value: "all", label: "All"},
+            {value: "unassigned", label: "Unassigned"},
+            {value: "unprocessed", label: "Not processed"},
+            ...(topics?.items ?? []).map((topic) => ({value: topic.id, label: topic.label})),
+          ]}
+          value={topicFilter}
+          onChange={(value) => onTopicFilterChange(value as TopicFilterValue)}
+        />
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-medium text-(--ink)">Journal</h3>
