@@ -465,9 +465,10 @@ func applyProposalChanges(base profileDocument, changes []ProposalChange, includ
 }
 
 // resolveTopicTags 把规则变更的主题 label 解析为注册表 id（大小写不敏感）。
-// 引用了既不在注册表、也不由本次 topic add 变更提供的 label 时返回错误。
+// 每条规则最多一个主题：多个 label 时确定性截断到第一个；引用了既不在注册表、
+// 也不由本次 topic add 变更提供的 label 时返回错误。
 func resolveTopicTags(change ProposalChange, labelToID map[string]string) ([]string, error) {
-	result := make([]string, 0, len(change.TopicsAfter))
+	result := make([]string, 0, 1)
 	for _, label := range change.TopicsAfter {
 		clean := strings.TrimSpace(label)
 		if clean == "" {
@@ -478,6 +479,7 @@ func resolveTopicTags(change ProposalChange, labelToID map[string]string) ([]str
 			return nil, fmt.Errorf("change %s references unknown topic label: %s", change.ID, clean)
 		}
 		result = append(result, id)
+		break
 	}
 	return result, nil
 }

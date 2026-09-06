@@ -628,9 +628,15 @@ func normalizeRuleObjects(items []classificationRule) []classificationRule {
 			continue
 		}
 		seen[clean] = struct{}{}
+		topicIDs := normalizeTopicIDs(item.TopicIDs)
+		if len(topicIDs) > 1 {
+			// 每条规则最多归属一个主题：规范化时确定性截断到第一个 id，
+			// 旧数据里多标签的规则按首个标签落地。
+			topicIDs = topicIDs[:1]
+		}
 		result = append(result, classificationRule{
 			Text:     clean,
-			TopicIDs: normalizeTopicIDs(item.TopicIDs),
+			TopicIDs: topicIDs,
 		})
 	}
 	return result

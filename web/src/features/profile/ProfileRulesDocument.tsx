@@ -2,8 +2,9 @@ import {Button, Card, Chip} from "@heroui/react";
 import React from "react";
 
 import {TextAreaField, TextInputField} from "../../shared/components/FormFields";
+import {SelectField} from "../../shared/components/SelectField";
 import {toProfileRule} from "../../app/utils";
-import type {ClassificationProfile, ProfileRule, TopicDefinition} from "../../shared/types";
+import type {ClassificationProfile, TopicDefinition} from "../../shared/types";
 
 type ProfileRuleDraft = {
   text: string;
@@ -116,8 +117,8 @@ function RuleListEditor({
       </section>
     );
   }
-  // direct/indirect 需要按条打标：每条规则一个多行文本框，主题 chip 与
-  // Remove 集中在文本框下方的一行，避免每条规则套边框盒子的视觉噪音。
+  // direct/indirect 需要按条打标：每条规则一个多行文本框，主题用单选下拉
+  //（每条规则最多归属一个主题），Remove 与下拉同行靠右，无逐条边框盒子。
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between gap-3">
@@ -134,61 +135,56 @@ function RuleListEditor({
         <p className="text-sm text-muted">No rules yet.</p>
       ) : (
         <div className="space-y-3">
-          {items.map((rule, index) => (
-            <div key={`${title}-${index}`} className="space-y-1.5">
-              <TextAreaField
-                hideLabel
-                label={title}
-                rows={2}
-                value={rule.text}
-                onChange={(text) =>
-                  onChange(items.map((item, i) => (i === index ? {...item, text} : item)))
-                }
-              />
-              <div className="flex flex-wrap items-center gap-1.5">
-                {topics.map((topic) => {
-                  const tagged = rule.topics.includes(topic.id);
-                  return (
-                    <Chip
-                      key={topic.id}
-                      color={tagged ? "accent" : "default"}
-                      size="sm"
-                      variant={tagged ? "soft" : "tertiary"}
-                      onClick={() =>
+          {items.map((rule, index) => {
+            const topicOptions = [
+              {value: "", label: "No topic"},
+              ...topics.map((topic) => ({value: topic.id, label: topic.label})),
+            ];
+            const selectedTopic = rule.topics[0] ?? "";
+            const knownTopic = selectedTopic === "" || topicOptions.some((option) => option.value === selectedTopic);
+            return (
+              <div key={`${title}-${index}`} className="space-y-1.5">
+                <TextAreaField
+                  hideLabel
+                  label={title}
+                  rows={2}
+                  value={rule.text}
+                  onChange={(text) =>
+                    onChange(items.map((item, i) => (i === index ? {...item, text} : item)))
+                  }
+                />
+                <div className="flex items-end gap-2">
+                  <div className="w-56">
+                    <SelectField
+                      label="Topic"
+                      options={topicOptions}
+                      value={knownTopic ? selectedTopic : ""}
+                      onChange={(value) =>
                         onChange(
                           items.map((item, i) =>
-                            i === index
-                              ? {
-                                  ...item,
-                                  topics: tagged
-                                    ? item.topics.filter((id) => id !== topic.id)
-                                    : [...item.topics, topic.id],
-                                }
-                              : item,
+                            i === index ? {...item, topics: value ? [value] : []} : item,
                           ),
                         )
                       }
-                    >
-                      {topic.label}
-                    </Chip>
-                  );
-                })}
-                {topics.length === 0 && rule.topics.length > 0 ? (
-                  <span className="text-xs text-muted">
-                    Removed topics: {rule.topics.map((id) => topicLabels.get(id) ?? id).join(", ")}
-                  </span>
-                ) : null}
-                <Button
-                  className="ml-auto"
-                  size="sm"
-                  variant="ghost"
-                  onPress={() => onChange(items.filter((_, i) => i !== index))}
-                >
-                  Remove
-                </Button>
+                    />
+                  </div>
+                  {topics.length === 0 && rule.topics.length > 0 ? (
+                    <p className="flex-1 pb-2 text-xs text-muted">
+                      Removed topic: {topicLabels.get(rule.topics[0]) ?? rule.topics[0]}
+                    </p>
+                  ) : null}
+                  <Button
+                    className="ml-auto"
+                    size="sm"
+                    variant="ghost"
+                    onPress={() => onChange(items.filter((_, i) => i !== index))}
+                  >
+                    Remove
+                  </Button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>
@@ -329,7 +325,7 @@ export function ProfileRulesDocument({
     if (!onSave) {
       return;
     }
-    const cleanRules = (rules: ProfileRuleDraft[]): ProfileRule[] =>
+    const cleanRules = (rules: ProfileRuleDraft[]) =>
       rules
         .map((rule) => ({text: rule.text.trim(), topics: rule.topics.filter(Boolean)}))
         .filter((rule) => rule.text);

@@ -36,10 +36,9 @@ Labels are fixed:
 - unrelated
 
 Topic routing (after relevance is decided):
-- The profile may list topics (id + label) and tag some direct/indirect rules with topic ids.
-- For a direct or indirect paper, consider the topic tags of every matched rule that carries topics and pick the single best-fitting topic id.
-- If several matched rules carry topics, choose the topic whose criteria fit the paper's core contribution best.
-- If no matched rule carries topics, or none of the candidate topics fits, set topic to "" (empty string).
+- The profile may list topics (id + label); each direct/indirect rule carries at most one topic id.
+- For a direct or indirect paper, consider the topic of every matched rule that carries one and pick the single best-fitting topic id.
+- If no matched rule carries a topic, or none of the candidate topics fits, set topic to "" (empty string).
 - Never assign a topic to an unrelated paper; always set topic to "" for unrelated.
 - Use topic ids exactly as they appear in the registry. Never invent topic ids.
 

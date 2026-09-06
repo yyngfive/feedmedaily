@@ -27,12 +27,11 @@ Requirements:
 - Do not invent operations such as restore, keep, retain, or update; express restored boundaries as add or rewrite changes.
 
 Topic handling:
-- Topics are optional user-facing buckets for related papers. Rules in the current profile carry topic labels; the topics list maps ids to labels.
+- Topics are optional user-facing buckets for related papers. Rules in the current profile carry at most one topic label each; the topics list maps ids to labels.
 - Topic changes must use section "topic" with operation "add" and topic_after label-only entries. Never remove, rewrite, or merge existing topics.
 - Add a new topic only when the feedback points at a cluster of papers no existing topic label covers.
 - Topic minimality: reuse an existing topic label whenever it can cover the papers; do not create near-duplicate topics; do not create a topic for a single paper; prefer fewer topics.
-- Direct and indirect rule changes may carry topics_before/topics_after as topic LABEL lists. topics_after applies to every rule in text_after.
-- A rule change may modify only topic tags (text unchanged): use operation rewrite with identical text_before/text_after and the new topics_after.
+- Direct and indirect rule changes may carry topics_before/topics_after with AT MOST ONE topic label each. topics_after applies to every rule in text_after. A rule carries at most one topic; express a retag as rewrite with identical text and the new single label.
 - Only retag rules when the feedback is about topic assignment; never retag rules as a side effect of relevance repairs.
 - Do not tag unrelated rules or the scope with topics.
 - In maintenance mode do not create topics and do not modify rule topic tags.

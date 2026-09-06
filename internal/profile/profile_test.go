@@ -533,3 +533,20 @@ func TestReadCurrentNormalizesLegacyStringRules(t *testing.T) {
 		t.Fatalf("expected empty topics list, got %#v", rule["topics"])
 	}
 }
+
+func TestNormalizeRuleObjectsTruncatesToSingleTopic(t *testing.T) {
+	// 单主题契约：一条规则多个主题 id 时确定性截断到第一个。
+	normalized := normalizeRuleObjects([]classificationRule{
+		{Text: "RNA chemistry", TopicIDs: []string{"t-bbb00002", "t-aaa00001"}},
+		{Text: "No topics", TopicIDs: nil},
+	})
+	if len(normalized) != 2 {
+		t.Fatalf("unexpected rules: %#v", normalized)
+	}
+	if len(normalized[0].TopicIDs) != 1 || normalized[0].TopicIDs[0] != "t-bbb00002" {
+		t.Fatalf("expected first topic kept, got %#v", normalized[0].TopicIDs)
+	}
+	if len(normalized[1].TopicIDs) != 0 {
+		t.Fatalf("expected no topics, got %#v", normalized[1].TopicIDs)
+	}
+}

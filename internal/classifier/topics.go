@@ -12,8 +12,8 @@ import (
 
 const topicAssignInstructions = `Assign each paper to at most one topic using the user-supplied topic registry and tagged rules.
 
-- The registry lists topic ids and labels; some direct/indirect relevance rules carry topic ids.
-- For each paper, consider the topic tags of every rule whose criteria the paper satisfies, and pick the single best-fitting topic id.
+- The registry lists topic ids and labels; each direct/indirect relevance rule carries at most one topic id.
+- For each paper, consider the topic of every rule whose criteria the paper satisfies, and pick the single best-fitting topic id.
 - If no tagged rule fits the paper, or none of the candidate topics fits, set topic to "" (empty string).
 - Use topic ids exactly as they appear in the registry. Never invent topic ids.`
 
