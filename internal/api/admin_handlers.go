@@ -191,17 +191,23 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 	jobRun := reclassifyJobRunFunc(serverSettings, payload.Scope, func() ([]int64, error) {
 		return selectReclassifyPaperIDsFunc(serverSettings, payload.Scope, payload.Limit)
 	})
+	queuedMessage := "Job queued."
+	runningStage := "pipeline.metadata.enriching"
+	runningMessage := "Getting metadata for papers to reclassify."
 	if payload.Scope == "topics" {
-		// topics 补跑走 topic-only 路径：不重新判相关性，只做主题路由。
+		// topics 补跑走 topic-only 路径：不重新判相关性，只做主题路由，
+		// 启动文案与进度阶段也应反映这一点而不是复用 reclassify 的。
 		jobRun = topicBackfillJobRunFunc(serverSettings)
+		runningStage = "pipeline.classifier.assigning_topics"
+		runningMessage = "Assigning topics to related papers."
 	}
 	job := launchLocalJob(
 		serverSettings,
 		"reclassify",
 		"job.started",
-		"Job queued.",
-		"pipeline.metadata.enriching",
-		"Getting metadata for papers to reclassify.",
+		queuedMessage,
+		runningStage,
+		runningMessage,
 		jobRun,
 		func(context.Context) (func(), error) { return releasePipeline, nil },
 	)
