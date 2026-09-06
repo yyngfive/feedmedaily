@@ -8,6 +8,7 @@ import (
 	"github.com/yyngfive/scirssagent/internal/feeds"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
 	"github.com/yyngfive/scirssagent/internal/llmusage"
+	"github.com/yyngfive/scirssagent/internal/logging"
 	"io"
 	"net/http"
 	"os"
@@ -190,7 +191,7 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 	}
 	jobRun := reclassifyJobRunFunc(serverSettings, payload.Scope, func() ([]int64, error) {
 		return selectReclassifyPaperIDsFunc(serverSettings, payload.Scope, payload.Limit)
-	})
+	}, nil)
 	queuedMessage := "Job queued."
 	runningStage := "pipeline.metadata.enriching"
 	runningMessage := "Getting metadata for papers to reclassify."
@@ -241,8 +242,10 @@ func topicBackfillJobRunFunc(serverSettings config.Settings) localJobFunc {
 
 // reclassifyJobRunFunc 把一段固定的 paper ids 或 scope 选择逻辑包装成可取消的 reclassify job。
 // pipeline 锁由启动方获取（手动路径同步 TryLock，排队路径由 wait 门获取），
-// 释放统一交给 launchLocalJob 在作业结束时执行。
-func reclassifyJobRunFunc(serverSettings config.Settings, scope string, selectIDs func() ([]int64, error)) localJobFunc {
+// 释放统一交给 launchLocalJob 在作业结束时执行。feedbackIDs 非空时（apply-proposal
+// 路径传入该 proposal 关联、apply 时刚关闭的那批 feedback）对账把它们算进来，
+// 手动路径传 nil、只对账重分类论文上仍 open 的 feedback。
+func reclassifyJobRunFunc(serverSettings config.Settings, scope string, selectIDs func() ([]int64, error), feedbackIDs []int64) localJobFunc {
 	return func(ctx context.Context, progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
 		paperIDs, err := selectIDs()
 		if err != nil {
@@ -262,6 +265,19 @@ func reclassifyJobRunFunc(serverSettings config.Settings, scope string, selectID
 			return result, err
 		}
 		result["report_papers"] = reportCount
+		reconciliation, recErr := jobruntime.ReconcileFeedback(serverSettings, paperIDs, feedbackIDs)
+		if recErr != nil {
+			// 对账失败不推翻重分类结果，只在日志留痕。
+			_, _ = logging.WriteDefault(logging.Event{
+				Level:     "warning",
+				Component: "api.jobs",
+				Action:    "reconcile_failed",
+				Message:   "Feedback correction reconciliation failed; the reclassification result is unchanged.",
+				Error:     recErr.Error(),
+			})
+		} else if reconciliation.Checked > 0 {
+			result["reconciliation"] = reconciliation
+		}
 		return result, nil
 	}
 }

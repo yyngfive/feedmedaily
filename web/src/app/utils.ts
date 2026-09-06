@@ -88,10 +88,15 @@ export function relevanceCounts(papers: Paper[]): Record<Relevance, number> {
 }
 
 export function feedbackLabel(paper: Paper): string | null {
-  if (!paper.feedback_status?.has_feedback || !paper.feedback_status.corrected_relevance) {
+  const corrected = paper.feedback_status?.corrected_relevance;
+  if (!paper.feedback_status?.has_feedback || !corrected) {
     return null;
   }
-  return `Feedback -> ${relevanceLabel[paper.feedback_status.corrected_relevance]}`;
+  // 纠正已落实（最新分类等于纠正值）时不再显示待生效 chip：分类本身已是答案。
+  if (corrected === paper.classification.relevance) {
+    return null;
+  }
+  return `Feedback -> ${relevanceLabel[corrected]}`;
 }
 
 export type TopicFilterValue = "all" | "unassigned" | "unprocessed" | (string & {});

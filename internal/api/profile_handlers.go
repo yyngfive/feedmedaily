@@ -649,7 +649,7 @@ func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Reque
 			"Waiting for the active sync or reclassification to finish.",
 			"pipeline.metadata.enriching",
 			"Getting metadata for papers to reclassify.",
-			reclassifyJobRunFunc(serverSettings, "feedback", func() ([]int64, error) { return paperIDs, nil }),
+			reclassifyJobRunFunc(serverSettings, "feedback", func() ([]int64, error) { return paperIDs, nil }, feedbackIDs),
 			func(ctx context.Context) (func(), error) { return lockMuBlocking(pipelineMu, ctx) },
 		)
 		reclassifyJob = &job

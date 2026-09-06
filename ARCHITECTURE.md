@@ -197,6 +197,7 @@ Behavioral baseline:
 6. User feedback can generate new full-profile proposals.
 7. Applying a proposal reclassifies only papers linked to that proposal feedback. This reclassification runs as a cancellable background job instead of blocking the apply request; with no linked papers the apply response only rebuilds the report synchronously.
 8. Manually saving the profile reclassifies papers whose feedback is still open (not yet consumed by a proposal), so pending corrections take effect under the updated rules; used feedback is never re-run.
+9. When a reclassification job finishes it reconciles recorded feedback corrections against the papers' latest classification: proposal-apply jobs check the feedback that apply just consumed, manual runs check still-open feedback on the reclassified papers. The job result reports how many corrections were fulfilled and lists unfulfilled ones (paper, corrected value, current value). "Consumed" (feedback closed at apply) and "fulfilled" (classification matches the correction) are deliberately separate predicates; unfulfilled feedback stays open so the next proposal can see it, and pending-correction chips on paper cards hide once the latest classification satisfies the correction.
 
 Supported admin reclassification scopes:
 

@@ -33,10 +33,13 @@ export function PaperCard({
       : topicID && topicLabel
         ? topicLabel
         : "未归类";
-  // 待生效的主题纠正（最近一条 open feedback）：chip 追加“原值 -> 纠正值”，
-  // 与相关性 "Feedback -> Direct" chip 同一语义——纠正已被记录，等重分类生效。
+  // 待生效的主题纠正（最近一条 open feedback）：仅在最新分类尚未满足纠正时，
+  // chip 追加“原值 -> 纠正值”；落实后分类本身显示纠正值，chip 回到普通主题形态。
+  // 未落实判定用原始值比较（空数组按哨兵 none），与后端对账口径一致。
   const pendingTopic = paper.feedback_status?.corrected_topic ?? null;
-  const pendingTopicText = pendingTopic == null
+  const currentTopicRaw = paper.classification.topic_tags?.[0] ?? TOPIC_NONE;
+  const topicPending = pendingTopic != null && currentTopicRaw !== pendingTopic;
+  const pendingTopicText = !topicPending
     ? null
     : pendingTopic === TOPIC_NONE
       ? "无主题"

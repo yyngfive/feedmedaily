@@ -489,12 +489,16 @@ func summarizeResult(jobType string, result map[string]any) string {
 			warnings,
 		)
 	case "reclassify":
-		return fmt.Sprintf(
+		message := fmt.Sprintf(
 			"Reclassify completed. scope=%v reclassified=%v report_papers=%v.",
 			result["scope"],
 			result["reclassified"],
 			result["report_papers"],
 		)
+		if reconciliation, ok := result["reconciliation"].(jobruntime.ReconcileResult); ok && reconciliation.Checked > 0 {
+			message += fmt.Sprintf(" Feedback corrections fulfilled: %d of %d.", reconciliation.Fulfilled, reconciliation.Checked)
+		}
+		return message
 	case "profile-bootstrap":
 		return fmt.Sprintf("Initial profile proposal completed. proposal_id=%v.", result["proposal_id"])
 	case "profile-proposal":

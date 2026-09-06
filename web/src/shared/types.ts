@@ -378,6 +378,25 @@ export type JobInfo = {
   llm_usage?: LLMUsageSummary | null;
 };
 
+// 重分类后的 feedback 纠正对账：主题字段是后端解析好的展示 label。
+export type CorrectionStatus = {
+  feedback_id: number;
+  paper_id: number;
+  paper_title: string;
+  original_relevance: string;
+  corrected_relevance: string;
+  current_relevance: string;
+  original_topic?: string | null;
+  corrected_topic?: string | null;
+  current_topic: string;
+};
+
+export type ReclassifyReconciliation = {
+  checked: number;
+  fulfilled: number;
+  unfulfilled: CorrectionStatus[];
+};
+
 export type LLMPricingBreakdown = {
   model: string;
   snapshot: string;

@@ -193,6 +193,98 @@ func (s *Store) DeleteFeedback(id int64) error {
 	return nil
 }
 
+// FeedbackByIDs 按 id 批量读取 feedback 记录（含已消费的）。apply-proposal 的
+// 重分类在作业开始前就把关联 feedback 关闭，对账只能按显式 id 列表取回它们。
+func (s *Store) FeedbackByIDs(ids []int64) ([]FeedbackRecord, error) {
+	if len(ids) == 0 || len(s.feedbackColumns) == 0 || len(s.paperColumns) == 0 {
+		return []FeedbackRecord{}, nil
+	}
+	placeholders := make([]string, 0, len(ids))
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	rows, err := s.db.Query(fmt.Sprintf(`
+		SELECT f.id, f.paper_id, p.title AS paper_title,
+			f.original_relevance, f.corrected_relevance,
+			%s AS original_topic, %s AS corrected_topic, f.note,
+			%s AS state, %s AS used_in_prompt, f.created_at
+		FROM feedback f
+		JOIN papers p ON p.id = f.paper_id
+		WHERE f.id IN (%s)
+		ORDER BY f.created_at DESC, f.id DESC
+	`,
+		s.columnExpr(s.feedbackColumns, "original_topic", "NULL"),
+		s.columnExpr(s.feedbackColumns, "corrected_topic", "NULL"),
+		s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen)), s.columnExpr(s.feedbackColumns, "used_in_prompt", "0"),
+		strings.Join(placeholders, ",")), args...)
+	if err != nil {
+		return nil, fmt.Errorf("query feedback by ids: %w", err)
+	}
+	defer rows.Close()
+
+	items := []FeedbackRecord{}
+	for rows.Next() {
+		record, err := scanFeedbackRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate feedback by ids: %w", err)
+	}
+	return items, nil
+}
+
+// OpenFeedbackForPapers 返回指定论文集合上仍处于 open 状态的 feedback 记录，
+// 供重分类后的纠正对账使用。
+func (s *Store) OpenFeedbackForPapers(paperIDs []int64) ([]FeedbackRecord, error) {
+	if len(paperIDs) == 0 || len(s.feedbackColumns) == 0 || len(s.paperColumns) == 0 {
+		return []FeedbackRecord{}, nil
+	}
+	placeholders := make([]string, 0, len(paperIDs))
+	args := make([]any, 0, len(paperIDs)+1)
+	args = append(args, feedbackStateOpen)
+	for _, paperID := range paperIDs {
+		placeholders = append(placeholders, "?")
+		args = append(args, paperID)
+	}
+	rows, err := s.db.Query(fmt.Sprintf(`
+		SELECT f.id, f.paper_id, p.title AS paper_title,
+			f.original_relevance, f.corrected_relevance,
+			%s AS original_topic, %s AS corrected_topic, f.note,
+			%s AS state, %s AS used_in_prompt, f.created_at
+		FROM feedback f
+		JOIN papers p ON p.id = f.paper_id
+		WHERE %s = ? AND f.paper_id IN (%s)
+		ORDER BY f.created_at DESC, f.id DESC
+	`,
+		s.columnExpr(s.feedbackColumns, "original_topic", "NULL"),
+		s.columnExpr(s.feedbackColumns, "corrected_topic", "NULL"),
+		s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen)), s.columnExpr(s.feedbackColumns, "used_in_prompt", "0"),
+		s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen)),
+		strings.Join(placeholders, ",")), args...)
+	if err != nil {
+		return nil, fmt.Errorf("query open feedback for papers: %w", err)
+	}
+	defer rows.Close()
+
+	items := []FeedbackRecord{}
+	for rows.Next() {
+		record, err := scanFeedbackRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate open feedback for papers: %w", err)
+	}
+	return items, nil
+}
+
 func (s *Store) MarkFeedbackUsed(ids []int64) error {
 	for _, id := range ids {
 		if _, err := s.db.Exec(`

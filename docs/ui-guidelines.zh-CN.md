@@ -98,7 +98,7 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 
 - 主界面采用三栏布局：左侧筛选、中央论文列表、右侧详情。
 - 中央列表默认使用 `Unread + Last 30 days`，采用虚拟列表；论文卡只显示摘要，不放置行内动作。
-- 论文卡在相关性 chip 旁可显示主题 chip：中性色（default/soft），不与 direct/indirect 的语义色混用；真实主题显示当前 label，哨兵或孤儿 id 显示"未归类"，未判定与 unrelated 论文不显示主题 chip。存在待生效主题纠正（最近一条 open feedback）时，chip 追加"原值 -> 纠正值"（显式"无主题"显示"无主题"，未判定的原值显示"未判定"），与相关性 `Feedback -> ...` chip 同语义。主题 chip 不可点击，主题过滤只发生在左侧栏。
+- 论文卡在相关性 chip 旁可显示主题 chip：中性色（default/soft），不与 direct/indirect 的语义色混用；真实主题显示当前 label，哨兵或孤儿 id 显示"未归类"，未判定与 unrelated 论文不显示主题 chip。存在待生效主题纠正（最近一条 open feedback）且最新分类尚未满足纠正时，chip 追加"原值 -> 纠正值"（显式"无主题"显示"无主题"，未判定的原值显示"未判定"），与相关性 `Feedback -> ...` chip 同语义；两类待生效 chip 都以"最新分类 ≠ 纠正值"为显示条件，纠正落实后 chip 自动消失，由 Dashboard 的重分类对账报告承担"已生效/未落实"的呈现。主题 chip 不可点击，主题过滤只发生在左侧栏。
 - 左侧栏 Topic 过滤与 Date 等过滤同形态：单选下拉（`All` + `Unassigned`（判定过无主题/孤儿）+ `Not processed`（从未判定）+ 注册表主题），不显示计数；与相关性过滤 AND 叠加。
 - `Link`（DOI 优先，缺失时回退出版社 URL；两者皆无则隐藏）、`Mark as read`、`Save to Zotero`、`Mark wrong` 由右侧详情面板负责。
 - Mark wrong 弹窗在相关性下拉之外提供主题下拉（当前值预选、含"无主题"）与一个内联新建主题输入；新建走窄接口写入 profile 注册表，不跳转设置页。重新打开时优先回填最近一条 open feedback 的主题纠正（显式"无主题"回填"无主题"），没有待生效纠正才回填当前分类值。
@@ -110,7 +110,7 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 - Settings 保持右侧抽屉和 `Dashboard`、`Feeds`、`Profile`、`Model`、`App` 五个稳定顶层页面。
 - 桌面使用左侧导航，窄屏退化为横向标签；标题、导航和关闭按钮固定，仅右侧内容滚动。
 - Admin 负责 feed 编辑、手动任务、反馈、Profile proposal 和应用配置。
-- Dashboard 优先展示运行中任务、验证状态和主要 Sync；定向 Sync、Reclassify、用量等低频项渐进披露。
+- Dashboard 优先展示运行中任务、验证状态和主要 Sync；定向 Sync、Reclassify、用量等低频项渐进披露。Reclassify 作业完成后，Latest activity 面板展示 feedback 纠正对账：`已落实 n / 共 m` 汇总行 + 未落实清单的渐进披露（论文标题 + "纠正值 … ；当前值 …"，主题用后端解析好的 label）。
 - Feeds 使用独立本地草稿；取消必须恢复已保存值，未保存修改不能污染阅读状态。
 - Profile 使用一个主要审阅文档；反馈队列位于下方作为次级区域。Profile 编辑态包含一个 Topics 章节：主题条支持新建、改名与删除（删除用 danger 样式），未被任何规则引用的主题在只读视图标注 `unused`。规则编辑保持多行文本形态：unrelated 规则沿用整体多行文本框（一行一条）；direct/indirect 规则因需按条打标，每条规则一个多行文本框，主题用单选下拉（每条规则最多归属一个主题，选项含"无主题"），Remove 与下拉同行靠右，不套边框盒子，unrelated 不提供打标入口。
 - Model 常显连接与默认模型，低频调优和价格进入 Advanced，并使用一个统一保存动作。

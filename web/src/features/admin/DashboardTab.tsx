@@ -1,9 +1,10 @@
 import {Button, Chip, Spinner} from "@heroui/react";
 import React from "react";
 
+import {relevanceLabel} from "../../app/constants";
 import {fetchLLMUsage, fetchReclassifyOptions, type ReclassifyOptions, type ReclassifyScope} from "../../api/client";
 import {CheckboxRow, TextAreaField, TextInputField} from "../../shared/components/FormFields";
-import type {FeedSubscription, JobInfo, LLMUsageRecord, LLMUsageSummary} from "../../shared/types";
+import type {FeedSubscription, JobInfo, LLMUsageRecord, LLMUsageSummary, ReclassifyReconciliation} from "../../shared/types";
 import {AdminDisclosure} from "./AdminDisclosure";
 
 function formatJobTime(value?: string | null) {
@@ -16,6 +17,22 @@ function formatJobTime(value?: string | null) {
 function jobResultNumber(job: JobInfo, key: string) {
   const value = job.result?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function jobReconciliation(job: JobInfo): ReclassifyReconciliation | null {
+  const value = job.result?.reconciliation;
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Partial<ReclassifyReconciliation>;
+  if (
+    typeof candidate.checked !== "number"
+    || typeof candidate.fulfilled !== "number"
+    || !Array.isArray(candidate.unfulfilled)
+  ) {
+    return null;
+  }
+  return candidate as ReclassifyReconciliation;
 }
 
 function jobResultErrors(job: JobInfo) {
@@ -46,6 +63,8 @@ function LatestJobPanel({feeds, job}: {feeds: FeedSubscription[]; job: JobInfo})
       url,
     };
   });
+  // 重分类后的纠正对账：只有关联到 feedback 的作业才有这份结果。
+  const reconciliation = job.job_type === "reclassify" ? jobReconciliation(job) : null;
 
   return (
     <div className="mt-3 text-sm">
@@ -74,6 +93,29 @@ function LatestJobPanel({feeds, job}: {feeds: FeedSubscription[]; job: JobInfo})
             <dd className="mt-1 font-semibold text-(--ink)">{job.warning_count ?? errors.length}</dd>
           </div>
         </dl>
+      ) : null}
+      {reconciliation && reconciliation.checked > 0 ? (
+        <div className="mt-3 border-y border-(--line) py-3">
+          <p className="text-sm font-medium text-(--ink)">
+            Feedback corrections: {reconciliation.fulfilled} of {reconciliation.checked} fulfilled.
+          </p>
+          {reconciliation.unfulfilled.length > 0 ? (
+            <div className="mt-2"><AdminDisclosure title={`Unfulfilled corrections (${reconciliation.unfulfilled.length})`}>
+              <div className="space-y-3">
+                {reconciliation.unfulfilled.map((item) => (
+                  <div key={item.feedback_id}>
+                    <p className="font-medium text-(--ink)">{item.paper_title}</p>
+                    <p className="mt-1 leading-6 text-(--body)">
+                      Corrected to {relevanceLabel[item.corrected_relevance as keyof typeof relevanceLabel] ?? item.corrected_relevance}
+                      {item.corrected_topic ? ` · topic "${item.corrected_topic}"` : ""}; current is {relevanceLabel[item.current_relevance as keyof typeof relevanceLabel] ?? item.current_relevance}
+                      {item.corrected_topic ? ` · topic "${item.current_topic}"` : ""}.
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </AdminDisclosure></div>
+          ) : null}
+        </div>
       ) : null}
       {job.error ? <p className="mt-3 text-rose-700">{job.error}</p> : null}
       {errors.length > 0 ? (
