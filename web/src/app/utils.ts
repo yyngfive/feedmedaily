@@ -1,6 +1,7 @@
 import {relevanceLabel} from "./constants";
 import type {DateFilter} from "./constants";
-import type {JobInfo, Paper, Relevance} from "../shared/types";
+import type {JobInfo, Paper, Relevance, ReportTopics} from "../shared/types";
+import {TOPIC_NONE} from "../shared/types";
 
 export function sentence(value?: string | null): string {
   if (!value) {
@@ -79,6 +80,44 @@ export function feedbackLabel(paper: Paper): string | null {
     return null;
   }
   return `Feedback -> ${relevanceLabel[paper.feedback_status.corrected_relevance]}`;
+}
+
+export type TopicFilterValue = "all" | "unassigned" | "unprocessed" | (string & {});
+
+// paperTopicState 返回 related 论文的主题状态：assigned（真实主题）、
+// unassigned（哨兵或孤儿 id）、unprocessed（从未判定）；unrelated 论文返回 null。
+export function paperTopicState(paper: Paper): "assigned" | "unassigned" | "unprocessed" | null {
+  const relevance = paper.classification.relevance;
+  if (relevance === "unrelated") {
+    return null;
+  }
+  const tags = paper.classification.topic_tags ?? [];
+  if (tags.length === 0) {
+    return "unprocessed";
+  }
+  return tags[0] === TOPIC_NONE ? "unassigned" : "assigned";
+}
+
+// paperTopicID 返回论文的真实主题 id；哨兵、孤儿与未判定都返回 null。
+export function paperTopicID(paper: Paper, topics: ReportTopics | null | undefined): string | null {
+  const state = paperTopicState(paper);
+  if (state !== "assigned") {
+    return null;
+  }
+  const topicID = paper.classification.topic_tags[0];
+  if (topics && !topics.items.some((item) => item.id === topicID)) {
+    // 孤儿 id（主题已被删除）按未归类展示。
+    return null;
+  }
+  return topicID;
+}
+
+// topicLabelFor 解析主题 id 的展示 label；孤儿 id 返回 null（按未归类处理）。
+export function topicLabelFor(topicID: string, topics: ReportTopics | null | undefined): string | null {
+  if (!topics) {
+    return null;
+  }
+  return topics.items.find((item) => item.id === topicID)?.label ?? null;
 }
 
 export function statusMessage(job: JobInfo): string {

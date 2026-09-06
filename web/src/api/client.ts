@@ -19,6 +19,7 @@ import type {
   SettingsConfigUpdate,
   ZoteroCollectionsResponse,
   ZoteroStatus,
+  TopicDefinition,
 } from "../shared/types";
 
 declare global {
@@ -295,6 +296,9 @@ export async function fetchFeedback(): Promise<FeedbackRecord[]> {
 export async function createFeedback(input: {
   paper_id: number;
   corrected_relevance: Relevance;
+  /** 主题纠正开关；corrected_topic 为 null 表示“无主题”。 */
+  correct_topic?: boolean;
+  corrected_topic?: string | null;
   note?: string;
 }): Promise<FeedbackRecord> {
   return localJSONRequest(
@@ -306,6 +310,20 @@ export async function createFeedback(input: {
     },
     "save feedback",
     "Could not save feedback",
+  );
+}
+
+// 反馈弹窗的窄接口：往当前 profile 注册表追加一个主题（label 幂等）。
+export async function createProfileTopic(label: string): Promise<{topic: TopicDefinition; created: boolean}> {
+  return localJSONRequest(
+    "/api/profile/topics",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({label}),
+    },
+    "create the topic",
+    "Could not create the topic",
   );
 }
 
@@ -420,7 +438,7 @@ export async function launchAdminJob(
   return payload.job;
 }
 
-export type ReclassifyScope = "today" | "feedback" | "all" | "count" | "unclassified";
+export type ReclassifyScope = "today" | "feedback" | "all" | "count" | "unclassified" | "topics";
 
 export type ReclassifyOptions = {
   paper_count: number;
@@ -432,6 +450,7 @@ export type ReclassifyOptions = {
   count_paper_count: number;
   count_classified_count: number;
   count_unclassified_count: number;
+  topics_paper_count: number;
 };
 
 export async function fetchReclassifyOptions(limit?: number): Promise<ReclassifyOptions> {

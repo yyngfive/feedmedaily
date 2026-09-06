@@ -7,7 +7,7 @@ import { EmptyStateCard } from "../../shared/components/EmptyStateCard";
 import { TextInputField } from "../../shared/components/FormFields";
 import { StatusBanner } from "../../shared/components/StatusBanner";
 import { PaperCard } from "./PaperCard";
-import type { Paper, Relevance } from "../../shared/types";
+import type { Paper, Relevance, ReportTopics } from "../../shared/types";
 
 export function PaperListSection({
   loadError,
@@ -29,6 +29,7 @@ export function PaperListSection({
   selectedId,
   setQuery,
   setRelevance,
+  topics,
   unreadSelectedRangeCount,
   unreadVisibleCount,
   visibleBaseCount,
@@ -53,6 +54,7 @@ export function PaperListSection({
   selectedId: number | null;
   setQuery: (value: string) => void;
   setRelevance: (value: RelevanceFilter) => void;
+  topics: ReportTopics | null | undefined;
   unreadSelectedRangeCount: number;
   unreadVisibleCount: number;
   visibleBaseCount: number;
@@ -215,6 +217,7 @@ export function PaperListSection({
                 <div className="px-1 py-1.5">
                   <PaperCard
                     paper={paper}
+                    topics={topics}
                     isSelected={paper.id === selectedId}
                     isUnread={!paper.read_at}
                     onSelect={() => onSelectPaper(paper)}

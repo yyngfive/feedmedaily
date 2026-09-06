@@ -75,9 +75,9 @@ function createDraft(profile: ClassificationProfile): ProfileDraft {
   return {
     name: profile.meta.name,
     scope: profile.scope,
-    directRulesText: profile.relevance_rules.direct.join("\n"),
-    indirectRulesText: profile.relevance_rules.indirect.join("\n"),
-    unrelatedRulesText: profile.relevance_rules.unrelated.join("\n"),
+    directRulesText: profile.relevance_rules.direct.map((rule) => rule.text).join("\n"),
+    indirectRulesText: profile.relevance_rules.indirect.map((rule) => rule.text).join("\n"),
+    unrelatedRulesText: profile.relevance_rules.unrelated.map((rule) => rule.text).join("\n"),
   };
 }
 
@@ -89,6 +89,7 @@ function parseRules(text: string): string[] {
 }
 
 function draftToProfile(profile: ClassificationProfile, draft: ProfileDraft): ClassificationProfile {
+  // onboarding 阶段不做主题打标；规则统一迁移为结构化对象，主题留空由后续编辑补充。
   return {
     ...profile,
     meta: {
@@ -97,9 +98,9 @@ function draftToProfile(profile: ClassificationProfile, draft: ProfileDraft): Cl
     },
     scope: draft.scope.trim(),
     relevance_rules: {
-      direct: parseRules(draft.directRulesText),
-      indirect: parseRules(draft.indirectRulesText),
-      unrelated: parseRules(draft.unrelatedRulesText),
+      direct: parseRules(draft.directRulesText).map((text) => ({text, topics: []})),
+      indirect: parseRules(draft.indirectRulesText).map((text) => ({text, topics: []})),
+      unrelated: parseRules(draft.unrelatedRulesText).map((text) => ({text, topics: []})),
     },
   };
 }

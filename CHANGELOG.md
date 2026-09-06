@@ -10,6 +10,10 @@ Changes since `0.6.0`:
 
 ### Added
 
+- Added user-defined topics for related papers. The profile now carries a topic registry, and direct/indirect rules can be tagged with topics in the Profile editor; the classifier assigns each related paper at most one topic in the same call, and papers that fit no tagged rule stay unassigned. Stored classifications distinguish "no topic decision recorded" from "processed but nothing fits", so renaming a topic is a pure display change while deletions leave papers unassigned until reclassification.
+- Added topic support to `Mark wrong`: the feedback modal offers the current topic registry plus "no topic", can create a new registry topic inline, and records topic corrections alongside relevance corrections so the next profile proposal can retag or add topics.
+- Added a `Topic backfill` reclassification range in Dashboard. It runs a topic-only pass over related papers that have no topic yet — relevance decisions are kept, only topics are assigned — as a cancellable background job with a paper-count preview before it starts.
+- Added a topic filter to the review sidebar (registry topics plus fixed `Unassigned` and `Not processed` buckets) and a neutral topic chip on paper cards. `/api/report/latest` now carries the topic registry snapshot and per-topic counts so filtering needs no extra request.
 - Added a built-in free classifier option `OpenCode MiMo V2.5 (mimo-v2.5-free)` served by the OpenCode Zen gateway. It needs no API key (requests fall back to the anonymous `public` token), appears as a keyless entry in onboarding and `Settings → Model`, and fresh setups enable it next to DeepSeek without changing the initial default. Requests to this entry carry a client-style `User-Agent` because the Zen free tier only serves official-client-like traffic; free promotions have no published quota and can be delisted without notice, and its usage is reported at zero cost.
 
 ### Fixed

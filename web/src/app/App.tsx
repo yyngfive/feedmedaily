@@ -115,7 +115,7 @@ export function App() {
         verificationSubmitting={state.verificationSubmitting}
         verificationSubmitError={state.verificationSubmitError}
       />
-      <FeedbackModal paper={state.feedbackPaper} value={state.feedbackValue} note={state.feedbackNote} onValueChange={state.setFeedbackValue} onNoteChange={state.setFeedbackNote} onClose={() => state.setFeedbackPaper(null)} onSubmit={() => void review.submitFeedback()} />
+      <FeedbackModal paper={state.feedbackPaper} value={state.feedbackValue} note={state.feedbackNote} topics={state.report.topics} topicValue={state.feedbackTopic} onValueChange={state.setFeedbackValue} onTopicChange={(next) => { state.setFeedbackTopic(next); state.setFeedbackTopicTouched(true); }} onNoteChange={state.setFeedbackNote} createTopic={(label) => review.handleCreateFeedbackTopic(label)} onClose={() => state.setFeedbackPaper(null)} onSubmit={() => void review.submitFeedback()} />
       <ZoteroSaveModal paper={state.zoteroPaper} collections={review.zoteroCollections} selectedCollectionKey={review.zoteroCollectionKey} loading={review.zoteroLoading} saving={review.zoteroSaving} error={review.zoteroError} onCollectionChange={state.setZoteroCollectionKey} onClose={() => state.setZoteroPaper(null)} onSubmit={() => void review.handleSaveToZotero()} />
 
       <div className="mx-auto grid min-h-0 w-full max-w-375 flex-1 gap-4 overflow-hidden px-4 py-4 lg:grid-cols-[300px_minmax(0,1fr)_360px]">
@@ -137,6 +137,9 @@ export function App() {
           readFilter={state.readFilter}
           shownCount={review.visibleList.length}
           sortOption={state.sortOption}
+          topicFilter={state.topicFilter}
+          onTopicFilterChange={state.setTopicFilter}
+          topics={state.report.topics}
           totalCount={review.needsFeedSetup ? 0 : state.report.papers.length}
           visibleTotals={review.visibleTotals}
         />
@@ -163,6 +166,7 @@ export function App() {
           selectedId={review.needsFeedSetup ? null : review.selectedPaperId}
           setQuery={state.setQuery}
           setRelevance={state.setRelevance}
+          topics={state.report.topics}
           unreadSelectedRangeCount={review.selectedRangeUnreadPapers.length}
           unreadVisibleCount={review.visibleList.filter((paper) => !paper.read_at).length}
           visibleBaseCount={review.visibleBase.length}

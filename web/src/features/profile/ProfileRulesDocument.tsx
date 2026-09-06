@@ -1,37 +1,75 @@
-import {Button, Card} from "@heroui/react";
+import {Button, Card, Chip} from "@heroui/react";
 import React from "react";
 
 import {TextAreaField, TextInputField} from "../../shared/components/FormFields";
-import type {ClassificationProfile} from "../../shared/types";
+import type {ClassificationProfile, ProfileRule, TopicDefinition} from "../../shared/types";
+
+type ProfileRuleDraft = {
+  text: string;
+  topics: string[];
+};
 
 type ProfileDraft = {
   name: string;
   scope: string;
-  directRules: string[];
-  indirectRules: string[];
-  unrelatedRules: string[];
+  directRules: ProfileRuleDraft[];
+  indirectRules: ProfileRuleDraft[];
+  unrelatedRules: ProfileRuleDraft[];
+  topics: TopicDefinition[];
 };
+
+function draftRules(rules: ProfileRule[]): ProfileRuleDraft[] {
+  return rules.map((rule) => ({text: rule.text, topics: [...(rule.topics ?? [])]}));
+}
 
 function createDraft(profile: ClassificationProfile): ProfileDraft {
   return {
     name: profile.meta.name,
     scope: profile.scope,
-    directRules: [...profile.relevance_rules.direct],
-    indirectRules: [...profile.relevance_rules.indirect],
-    unrelatedRules: [...profile.relevance_rules.unrelated],
+    directRules: draftRules(profile.relevance_rules.direct),
+    indirectRules: draftRules(profile.relevance_rules.indirect),
+    unrelatedRules: draftRules(profile.relevance_rules.unrelated),
+    topics: profile.topic_taxonomy.map((topic) => ({...topic})),
   };
 }
 
-function RuleSection({items, title}: {items: string[]; title: string}) {
+function TopicTagChips({
+  label,
+  topics,
+  topicLabels,
+}: {
+  label: string;
+  topics: string[];
+  topicLabels: Map<string, string>;
+}) {
+  if (topics.length === 0) {
+    return null;
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-xs uppercase tracking-[0.12em] text-muted">{label}</span>
+      {topics.map((topicID) => (
+        <Chip key={topicID} color="default" size="sm" variant="soft">
+          {topicLabels.get(topicID) ?? "未归类"}
+        </Chip>
+      ))}
+    </div>
+  );
+}
+
+function RuleSection({items, title, topicLabels}: {items: ProfileRule[]; title: string; topicLabels: Map<string, string>}) {
   return (
     <section className="space-y-2">
       <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-muted">{title}</h3>
       {items.length === 0 ? (
         <p className="text-sm text-muted">No rules yet.</p>
       ) : (
-        <ul className="list-disc space-y-2 pl-5 text-sm leading-6 text-(--body)">
-          {items.map((item) => (
-            <li key={`${title}-${item}`}>{item}</li>
+        <ul className="space-y-2 text-sm leading-6 text-(--body)">
+          {items.map((rule) => (
+            <li key={`${title}-${rule.text}`} className="space-y-1">
+              <span>{rule.text}</span>
+              <TopicTagChips label="Topics" topics={rule.topics ?? []} topicLabels={topicLabels} />
+            </li>
           ))}
         </ul>
       )}
@@ -39,25 +77,183 @@ function RuleSection({items, title}: {items: string[]; title: string}) {
   );
 }
 
+function RuleDraftRow({
+  allowTopics,
+  onChange,
+  onRemove,
+  rule,
+  topicLabels,
+  topics,
+}: {
+  allowTopics: boolean;
+  onChange: (next: ProfileRuleDraft) => void;
+  onRemove: () => void;
+  rule: ProfileRuleDraft;
+  topicLabels: Map<string, string>;
+  topics: TopicDefinition[];
+}) {
+  return (
+    <div className="space-y-1.5 rounded-md border border-(--line) bg-(--paper) p-2">
+      <div className="flex items-start gap-2">
+        <TextInputField
+          hideLabel
+          label="Rule"
+          value={rule.text}
+          onChange={(value) => onChange({...rule, text: value})}
+        />
+        <Button size="sm" variant="ghost" onPress={onRemove}>
+          Remove
+        </Button>
+      </div>
+      {allowTopics && topics.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {topics.map((topic) => {
+            const tagged = rule.topics.includes(topic.id);
+            return (
+              <Chip
+                key={topic.id}
+                color={tagged ? "accent" : "default"}
+                size="sm"
+                variant={tagged ? "soft" : "tertiary"}
+                onClick={() =>
+                  onChange({
+                    ...rule,
+                    topics: tagged
+                      ? rule.topics.filter((id) => id !== topic.id)
+                      : [...rule.topics, topic.id],
+                  })
+                }
+              >
+                {topic.label}
+              </Chip>
+            );
+          })}
+        </div>
+      ) : null}
+      {allowTopics && topics.length === 0 && rule.topics.length > 0 ? (
+        <p className="text-xs text-muted">
+          Topics were removed from the registry: {rule.topics.map((id) => topicLabels.get(id) ?? id).join(", ")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function RuleListEditor({
+  allowTopics,
   items,
   onChange,
   title,
+  topicLabels,
+  topics,
 }: {
-  items: string[];
-  onChange: (items: string[]) => void;
+  allowTopics: boolean;
+  items: ProfileRuleDraft[];
+  onChange: (items: ProfileRuleDraft[]) => void;
   title: string;
+  topicLabels: Map<string, string>;
+  topics: TopicDefinition[];
 }) {
   return (
     <section className="space-y-2">
-      <h3 className="text-sm font-semibold text-(--ink)">{title}</h3>
-      <TextAreaField
-        hideLabel
-        label={title}
-        rows={7}
-        value={items.join("\n")}
-        onChange={(value) => onChange(value.split(/\r?\n/))}
-      />
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-(--ink)">{title}</h3>
+        <Button
+          size="sm"
+          variant="outline"
+          onPress={() => onChange([...items, {text: "", topics: []}])}
+        >
+          Add rule
+        </Button>
+      </div>
+      {items.length === 0 ? (
+        <p className="text-sm text-muted">No rules yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {items.map((rule, index) => (
+            <RuleDraftRow
+              key={`${title}-${index}`}
+              allowTopics={allowTopics}
+              rule={rule}
+              topicLabels={topicLabels}
+              topics={topics}
+              onChange={(next) => onChange(items.map((item, i) => (i === index ? next : item)))}
+              onRemove={() => onChange(items.filter((_, i) => i !== index))}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TopicsEditor({
+  onChange,
+  topics,
+}: {
+  onChange: (topics: TopicDefinition[]) => void;
+  topics: TopicDefinition[];
+}) {
+  const [newLabel, setNewLabelLabel] = React.useState("");
+  const addTopic = () => {
+    const label = newLabel.trim();
+    if (!label) return;
+    if (topics.some((topic) => topic.label.toLowerCase() === label.toLowerCase())) return;
+    // 新主题的 id 由后端在保存时分配；草稿用空 id 占位。
+    onChange([...topics, {id: "", label}]);
+    setNewLabelLabel("");
+  };
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-(--ink)">Topics</h3>
+      </div>
+      <p className="text-sm leading-6 text-muted">
+        Topics are optional buckets for related papers, assigned through topic tags on direct and
+        indirect rules. Renaming updates every paper automatically; deleted topics leave old papers
+        unassigned until the next classification.
+      </p>
+      {topics.length === 0 ? (
+        <p className="text-sm text-muted">No topics yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {topics.map((topic, index) => (
+            <div key={topic.id || `new-${topic.label}`} className="flex items-center gap-2">
+              <div className="flex-1">
+                <TextInputField
+                  hideLabel
+                  label="Topic label"
+                  value={topic.label}
+                  onChange={(value) =>
+                    onChange(topics.map((item, i) => (i === index ? {...item, label: value} : item)))
+                  }
+                />
+              </div>
+              <Button
+                size="sm"
+                variant="danger"
+                onPress={() => onChange(topics.filter((_, i) => i !== index))}
+              >
+                Delete
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <TextInputField
+            hideLabel
+            label="New topic"
+            placeholder="New topic label"
+            value={newLabel}
+            onChange={setNewLabelLabel}
+          />
+        </div>
+        <Button isDisabled={!newLabel.trim()} size="sm" variant="outline" onPress={addTopic}>
+          Add topic
+        </Button>
+      </div>
     </section>
   );
 }
@@ -102,10 +298,37 @@ export function ProfileRulesDocument({
     setEditing(false);
   }, [profile]);
 
+  const topicLabels = React.useMemo(
+    () => new Map(profile.topic_taxonomy.map((topic) => [topic.id, topic.label])),
+    [profile.topic_taxonomy],
+  );
+  const usedTopicIDs = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const section of [
+      profile.relevance_rules.direct,
+      profile.relevance_rules.indirect,
+    ]) {
+      for (const rule of section) {
+        for (const id of rule.topics ?? []) {
+          ids.add(id);
+        }
+      }
+    }
+    return ids;
+  }, [profile.relevance_rules]);
+
   const saveDraft = async () => {
     if (!onSave) {
       return;
     }
+    const cleanRules = (rules: ProfileRuleDraft[]): ProfileRule[] =>
+      rules
+        .map((rule) => ({text: rule.text.trim(), topics: rule.topics.filter(Boolean)}))
+        .filter((rule) => rule.text);
+    // 草稿里空 id 的新主题由后端保存时分配系统 id。
+    const draftTopics = draft.topics
+      .map((topic) => ({id: topic.id.trim(), label: topic.label.trim()}))
+      .filter((topic) => topic.label);
     const nextProfile: ClassificationProfile = {
       ...profile,
       meta: {
@@ -114,11 +337,11 @@ export function ProfileRulesDocument({
       },
       scope: draft.scope.trim(),
       relevance_rules: {
-        direct: draft.directRules.map((item) => item.trim()).filter(Boolean),
-        indirect: draft.indirectRules.map((item) => item.trim()).filter(Boolean),
-        unrelated: draft.unrelatedRules.map((item) => item.trim()).filter(Boolean),
+        direct: cleanRules(draft.directRules),
+        indirect: cleanRules(draft.indirectRules),
+        unrelated: cleanRules(draft.unrelatedRules),
       },
-      topic_taxonomy: [],
+      topic_taxonomy: draftTopics,
       few_shots: [],
     };
     await onSave(nextProfile);
@@ -183,20 +406,34 @@ export function ProfileRulesDocument({
               />
             </DraftField>
 
+            <TopicsEditor
+              topics={draft.topics}
+              onChange={(topics) => setDraft((current) => ({...current, topics}))}
+            />
+
             <div className="space-y-4">
               <RuleListEditor
+                allowTopics
                 items={draft.directRules}
                 title="Direct rules"
+                topicLabels={topicLabels}
+                topics={draft.topics.filter((topic) => topic.label)}
                 onChange={(directRules) => setDraft((current) => ({...current, directRules}))}
               />
               <RuleListEditor
+                allowTopics
                 items={draft.indirectRules}
                 title="Indirect rules"
+                topicLabels={topicLabels}
+                topics={draft.topics.filter((topic) => topic.label)}
                 onChange={(indirectRules) => setDraft((current) => ({...current, indirectRules}))}
               />
               <RuleListEditor
+                allowTopics={false}
                 items={draft.unrelatedRules}
                 title="Unrelated rules"
+                topicLabels={topicLabels}
+                topics={[]}
                 onChange={(unrelatedRules) => setDraft((current) => ({...current, unrelatedRules}))}
               />
             </div>
@@ -207,9 +444,27 @@ export function ProfileRulesDocument({
               <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-muted">Scope</h3>
               <p className="text-sm leading-7 text-(--body)">{profile.scope}</p>
             </section>
-            <RuleSection items={profile.relevance_rules.direct} title="Direct" />
-            <RuleSection items={profile.relevance_rules.indirect} title="Indirect" />
-            <RuleSection items={profile.relevance_rules.unrelated} title="Unrelated" />
+            {profile.topic_taxonomy.length > 0 ? (
+              <section className="space-y-2">
+                <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-muted">Topics</h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {profile.topic_taxonomy.map((topic) => (
+                    <Chip
+                      key={topic.id}
+                      color="default"
+                      size="sm"
+                      variant={usedTopicIDs.has(topic.id) ? "soft" : "tertiary"}
+                    >
+                      {topic.label}
+                      {usedTopicIDs.has(topic.id) ? "" : " · unused"}
+                    </Chip>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+            <RuleSection items={profile.relevance_rules.direct} title="Direct" topicLabels={topicLabels} />
+            <RuleSection items={profile.relevance_rules.indirect} title="Indirect" topicLabels={topicLabels} />
+            <RuleSection items={profile.relevance_rules.unrelated} title="Unrelated" topicLabels={topicLabels} />
           </>
         )}
       </Card.Content>

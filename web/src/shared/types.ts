@@ -208,11 +208,24 @@ export type Paper = {
   zotero_status?: ZoteroStatus | null;
 };
 
+export type ReportTopic = {
+  id: string;
+  label: string;
+};
+
+export type ReportTopics = {
+  items: ReportTopic[];
+  counts: Record<string, number>;
+  unassigned: number;
+  unprocessed: number;
+};
+
 export type Report = {
   generated_at: string;
   last_updated_at?: string | null;
   report_date: string;
   totals: Record<string, number>;
+  topics?: ReportTopics | null;
   papers: Paper[];
   errors: string[];
 };
@@ -223,6 +236,8 @@ export type FeedbackRecord = {
   paper_title: string;
   original_relevance: Relevance;
   corrected_relevance: Relevance;
+  original_topic?: string | null;
+  corrected_topic?: string | null;
   note?: string | null;
   state: FeedbackState;
   used_in_profile: boolean;
@@ -242,6 +257,9 @@ export type TopicDefinition = {
   label: string;
 };
 
+// 主题哨兵：判定过但无主题。空 tags 数组表示从未判定（存量或 unrelated）。
+export const TOPIC_NONE = "none";
+
 export type ProfileFewShot = {
   title: string;
   relevance: Relevance;
@@ -249,10 +267,16 @@ export type ProfileFewShot = {
   rationale: string;
 };
 
+// 规则是带可选主题 id 标签的结构化对象；后端兼容旧版纯字符串规则。
+export type ProfileRule = {
+  text: string;
+  topics: string[];
+};
+
 export type RelevanceRules = {
-  direct: string[];
-  indirect: string[];
-  unrelated: string[];
+  direct: ProfileRule[];
+  indirect: ProfileRule[];
+  unrelated: ProfileRule[];
 };
 
 export type ClassificationProfile = {
@@ -290,6 +314,9 @@ export type ProposalChange = {
   summary: string;
   text_before: string[];
   text_after: string[];
+  /** 规则变更携带的主题 label 列表（direct/indirect 专属）。 */
+  topics_before?: string[];
+  topics_after?: string[];
   topic_before: TopicDefinition[];
   topic_after: TopicDefinition[];
   rationale: string;
@@ -390,6 +417,7 @@ export const EMPTY_REPORT: Report = {
   last_updated_at: null,
   report_date: new Date().toISOString().slice(0, 10),
   totals: {total: 0, direct: 0, indirect: 0, unrelated: 0},
+  topics: {items: [], counts: {}, unassigned: 0, unprocessed: 0},
   papers: [],
   errors: [],
 };

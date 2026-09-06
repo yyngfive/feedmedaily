@@ -1,8 +1,9 @@
 import React from "react";
 import {flushSync} from "react-dom";
 
-import {createFeedback, deleteFeedback, fetchZoteroCollections, markPaperRead, saveToZotero} from "../../api/client";
-import {matchesDateFilter, relevanceCounts} from "../../app/utils";
+import {createFeedback, createProfileTopic, deleteFeedback, fetchZoteroCollections, markPaperRead, saveToZotero} from "../../api/client";
+import {matchesDateFilter, paperTopicID, paperTopicState, relevanceCounts} from "../../app/utils";
+import type {TopicFilterValue} from "../../app/utils";
 import type {AppData} from "../../app/useAppData";
 import type {AppState, MarkReadRequest} from "../../app/useAppState";
 import type {FeedbackRecord, Paper} from "../../shared/types";
@@ -12,14 +13,14 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
   const {
     beginLocalMutation, bulkReadSubmitting, dateFilter, deferredQuery, endLocalMutation, errorText,
     feedbackFilter, feedbackMutationSequenceRef, feedbackNote, feedbackPaper, feedbackRecords,
-    feedbackValue, feeds, feedsLoaded, logMarkReadDebug, markReadRequest, markReadSequenceRef,
+    feedbackTopic, feedbackTopicTouched, feedbackValue, feeds, feedsLoaded, logMarkReadDebug, markReadRequest, markReadSequenceRef,
     pendingReadOverrides, profile, pushErrorMessage, pushMessage, query, readFilter,
     readMutationSubmitting, relevance, report, reportLoadError, reportLoading, selectedId,
     selectedJournals, setBulkReadSubmitting, setDateFilter, setFeedbackFilter, setFeedbackNote,
-    setFeedbackPaper, setFeedbackRecords, setFeedbackValue, setMarkReadRequest,
+    setFeedbackPaper, setFeedbackRecords, setFeedbackTopic, setFeedbackTopicTouched, setFeedbackValue, setMarkReadRequest,
     setPendingReadOverrides, setQuery, setReadFilter, setRelevance, setReport, setSelectedId,
-    setSelectedJournals, setSortOption, setZoteroCollectionKey, setZoteroCollections,
-    setZoteroError, setZoteroLoading, setZoteroPaper, setZoteroSaving, sortOption,
+    setSelectedJournals, setSortOption, setTopicFilter, setZoteroCollectionKey, setZoteroCollections,
+    setZoteroError, setZoteroLoading, setZoteroPaper, setZoteroSaving, sortOption, topicFilter,
     zoteroCollectionKey, zoteroCollections, zoteroError, zoteroLoading, zoteroPaper, zoteroSaving,
   } = state;
   const {refreshFeedback, refreshProposals, scheduleDeferredReviewRefresh} = data;
@@ -41,7 +42,15 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
       (feedbackFilter === "all" || (feedbackFilter === "marked" ? hasFeedback : !hasFeedback)) &&
       matchesDateFilter(paper.published_date ?? paper.seen_date, report.report_date, dateFilter);
   }), [dateFilter, deferredQuery, effectivePapers, feedbackFilter, readFilter, report.report_date, selectedJournalSet]);
-  const filtered = React.useMemo(() => filteredBase.filter((paper) => relevance === "all" || paper.classification.relevance === relevance), [filteredBase, relevance]);
+  const filtered = React.useMemo(() => filteredBase.filter((paper) => {
+    if (relevance !== "all" && paper.classification.relevance !== relevance) return false;
+    if (topicFilter === "all") return true;
+    // 主题过滤与相关性过滤 AND 叠加；选项含注册表主题 id 与未归类/未判定两个固定桶。
+    const state = paperTopicState(paper);
+    if (topicFilter === "unprocessed") return state === "unprocessed";
+    if (topicFilter === "unassigned") return state === "unassigned" || (state === "assigned" && paperTopicID(paper, report.topics) === null);
+    return state === "assigned" && paperTopicID(paper, report.topics) === topicFilter;
+  }), [filteredBase, relevance, report.topics, topicFilter]);
   const sortedFiltered = React.useMemo(() => {
     const byDate = (paper: Paper) => paper.published_date ?? paper.seen_date;
     return [...filtered].sort((left, right) => {
@@ -192,15 +201,40 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
       pushMessage("app.service.unavailable", {text: errorText(error, "Could not save to Zotero."), tone: "danger"});
     } finally { setZoteroSaving(false); }
   };
-  const openFeedbackModal = (paper: Paper) => { setFeedbackPaper(paper); setFeedbackValue(paper.feedback_status?.corrected_relevance ?? paper.classification.relevance); setFeedbackNote(paper.feedback_status?.note ?? ""); };
+  const openFeedbackModal = (paper: Paper) => {
+    setFeedbackPaper(paper);
+    setFeedbackValue(paper.feedback_status?.corrected_relevance ?? paper.classification.relevance);
+    setFeedbackNote(paper.feedback_status?.note ?? "");
+    // 主题下拉默认当前值：真实主题预选其 id，哨兵/未判定预选“无主题”。
+    const currentTopicID = paperTopicID(paper, report.topics);
+    setFeedbackTopic(currentTopicID ?? "");
+    setFeedbackTopicTouched(false);
+  };
+  // 反馈弹窗内新建主题：走窄接口追加注册表（label 幂等），返回供下拉立即选中。
+  const handleCreateFeedbackTopic = async (label: string): Promise<{id: string; label: string} | null> => {
+    try {
+      const payload = await createProfileTopic(label);
+      scheduleDeferredReviewRefresh("feedback.topic.created");
+      return payload.topic;
+    } catch (error) {
+      pushErrorMessage("feedback.topic.create.failed", error, "Could not create the topic.");
+      return null;
+    }
+  };
   const submitFeedback = async () => {
     if (!feedbackPaper) return;
     const requestId = `feedback-save-${++feedbackMutationSequenceRef.current}`;
     const startedAt = performance.now();
     beginLocalMutation({requestId, kind: "feedback-save", entityId: feedbackPaper.id, startedAt});
-    logMarkReadDebug("feedback.save.started", {requestId, paperId: feedbackPaper.id, correctedRelevance: feedbackValue});
+    logMarkReadDebug("feedback.save.started", {requestId, paperId: feedbackPaper.id, correctedRelevance: feedbackValue, topic: feedbackTopic, topicTouched: feedbackTopicTouched});
     try {
-      const record = await createFeedback({paper_id: feedbackPaper.id, corrected_relevance: feedbackValue, note: feedbackNote.trim() || undefined});
+      const record = await createFeedback({
+        paper_id: feedbackPaper.id,
+        corrected_relevance: feedbackValue,
+        correct_topic: feedbackTopicTouched,
+        corrected_topic: feedbackTopic || null,
+        note: feedbackNote.trim() || undefined,
+      });
       logMarkReadDebug("feedback.save.succeeded", {requestId, paperId: record.paper_id, feedbackId: record.id, durationMs: Math.round(performance.now() - startedAt)});
       flushSync(() => {
         setFeedbackPaper(null);
@@ -240,15 +274,15 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
   };
   const toggleJournalFilter = React.useCallback((value: string) => setSelectedJournals((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value].sort()), [setSelectedJournals]);
   const resetFilters = React.useCallback(() => {
-    setSelectedJournals([]); setDateFilter("30d"); setReadFilter("unread"); setFeedbackFilter("all"); setSortOption("date-desc"); setRelevance("all"); setQuery("");
-  }, [setDateFilter, setFeedbackFilter, setQuery, setReadFilter, setRelevance, setSelectedJournals, setSortOption]);
+    setSelectedJournals([]); setDateFilter("30d"); setReadFilter("unread"); setFeedbackFilter("all"); setSortOption("date-desc"); setRelevance("all"); setTopicFilter("all"); setQuery("");
+  }, [setDateFilter, setFeedbackFilter, setQuery, setReadFilter, setRelevance, setSelectedJournals, setSortOption, setTopicFilter]);
 
   return {
     effectivePapers, journalOptions, lastUpdateLabel, needsFeedSetup, hasNoFetchedPapers,
     visibleBase, visibleList, visibleTotals, selectedPaper, selectedPaperId, selectedRangeUnreadPapers,
     persistReadStatus, persistVisibleReadStatus, persistSelectedRangeReadStatus,
     openZoteroModal, handleSaveToZotero, openFeedbackModal, submitFeedback, handleDeleteFeedback,
-    toggleJournalFilter, resetFilters, query,
+    handleCreateFeedbackTopic, toggleJournalFilter, resetFilters, query,
     zoteroCollections, zoteroCollectionKey, zoteroLoading, zoteroSaving, zoteroError,
   };
 }

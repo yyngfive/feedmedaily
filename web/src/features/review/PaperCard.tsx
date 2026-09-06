@@ -2,22 +2,33 @@ import {Card, Chip} from "@heroui/react";
 import React from "react";
 
 import {relevanceLabel, relevanceTone} from "../../app/constants";
-import {authorsLine, feedbackLabel, paperDate} from "../../app/utils";
-import type {Paper} from "../../shared/types";
+import {authorsLine, feedbackLabel, paperDate, paperTopicID, paperTopicState, topicLabelFor} from "../../app/utils";
+import type {Paper, ReportTopics} from "../../shared/types";
 
 export function PaperCard({
   isSelected,
   isUnread,
   onSelect,
   paper,
+  topics,
 }: {
   isSelected: boolean;
   isUnread: boolean;
   onSelect: () => void;
   paper: Paper;
+  topics: ReportTopics | null | undefined;
 }) {
   const tone = relevanceTone[paper.classification.relevance];
   const feedbackText = feedbackLabel(paper);
+  // 主题 chip：真实主题显示 label；哨兵/孤儿显示“未归类”；未判定与 unrelated 不显示。
+  const topicState = paperTopicState(paper);
+  const topicID = paperTopicID(paper, topics);
+  const topicLabel = topicID ? topicLabelFor(topicID, topics) : null;
+  const topicChipText = topicID
+    ? topicLabel
+    : topicState === "unassigned"
+      ? "未归类"
+      : null;
   const handleSelectKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
@@ -47,6 +58,11 @@ export function PaperCard({
             <Chip color={tone.chip} size="sm" variant="soft">
               {relevanceLabel[paper.classification.relevance]}
             </Chip>
+            {topicChipText ? (
+              <Chip color="default" size="sm" variant="soft">
+                {topicChipText}
+              </Chip>
+            ) : null}
             {feedbackText ? (
               <Chip color="danger" size="sm" variant="soft">
                 {feedbackText}

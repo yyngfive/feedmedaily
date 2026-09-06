@@ -98,7 +98,10 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 
 - 主界面采用三栏布局：左侧筛选、中央论文列表、右侧详情。
 - 中央列表默认使用 `Unread + Last 30 days`，采用虚拟列表；论文卡只显示摘要，不放置行内动作。
+- 论文卡在相关性 chip 旁可显示主题 chip：中性色（default/soft），不与 direct/indirect 的语义色混用；真实主题显示当前 label，哨兵或孤儿 id 显示"未归类"，未判定与 unrelated 论文不显示主题 chip。主题 chip 不可点击，主题过滤只发生在左侧栏。
+- 左侧栏 Topic 过滤区列出注册表全部主题加 `Unassigned`（判定过无主题）与 `Not processed`（从未判定）两个固定桶，单选切换，与相关性过滤 AND 叠加；计数来自报告 payload 的 topics 块，不随其他过滤器联动。
 - `Link`（DOI 优先，缺失时回退出版社 URL；两者皆无则隐藏）、`Mark as read`、`Save to Zotero`、`Mark wrong` 由右侧详情面板负责。
+- Mark wrong 弹窗在相关性下拉之外提供主题下拉（当前值预选、含"无主题"）与一个内联新建主题输入；新建走窄接口写入 profile 注册表，不跳转设置页。
 - 如果已有 Profile，三栏工作区应立即渲染，论文列表不得等待非关键 Admin 数据。
 - 如果没有 Profile，先显示 onboarding；如果没有 RSS feed，应等待 feed 加载结束后再进入 feed 初始化空状态。
 
@@ -109,7 +112,7 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 - Admin 负责 feed 编辑、手动任务、反馈、Profile proposal 和应用配置。
 - Dashboard 优先展示运行中任务、验证状态和主要 Sync；定向 Sync、Reclassify、用量等低频项渐进披露。
 - Feeds 使用独立本地草稿；取消必须恢复已保存值，未保存修改不能污染阅读状态。
-- Profile 使用一个主要审阅文档；反馈队列位于下方作为次级区域。
+- Profile 使用一个主要审阅文档；反馈队列位于下方作为次级区域。Profile 编辑态包含一个 Topics 章节：主题条支持新建、改名与删除（删除用 danger 样式），未被任何规则引用的主题在只读视图标注 `unused`；direct/indirect 规则行通过主题 chip 切换打标，unrelated 规则不提供打标入口。
 - Model 常显连接与默认模型，低频调优和价格进入 Advanced，并使用一个统一保存动作。
 - Model Advanced 中的分类思考只提供全局启用/关闭选择；启用后由后端映射到各供应商最低档，GLM 的说明必须明确其始终为 low、不能关闭。
 - App 顶部常显 About、更新和运行信息；Zotero、Scheduled sync、Local app 使用相同的独立 Disclosure。

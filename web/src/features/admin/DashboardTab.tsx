@@ -274,6 +274,10 @@ export function DashboardTab({
     if (reclassifyScope === "feedback") {
       return "Papers linked to your profile feedback will be reclassified.";
     }
+    if (reclassifyScope === "topics") {
+      const total = reclassifyOptions?.topics_paper_count ?? 0;
+      return `${total} related papers have no topic yet (never processed or unassigned). This job only assigns topics; relevance decisions are kept.`;
+    }
     if (reclassifyOptions === null) {
       return null;
     }
@@ -339,6 +343,7 @@ export function DashboardTab({
                 ["all", "All papers"],
                 ["count", "Specific count"],
                 ["unclassified", "Unclassified papers"],
+                ["topics", "Topic backfill"],
               ] as Array<[ReclassifyScope, string]>).map(([scope, label]) => (
                 <Button key={scope} aria-pressed={reclassifyScope === scope} size="sm" variant={reclassifyScope === scope ? "secondary" : "outline"} onPress={() => setReclassifyScope(scope)}>{label}</Button>
               ))}

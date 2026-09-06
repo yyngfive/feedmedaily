@@ -19,6 +19,7 @@ import type {
 } from "../shared/types";
 import {EMPTY_REPORT} from "../shared/types";
 import type {DateFilter, FeedbackFilter, ReadFilter, RelevanceFilter, SortOption} from "./constants";
+import type {TopicFilterValue} from "./utils";
 import {createUiMessage, type UiMessage} from "./messages";
 
 declare global {
@@ -70,6 +71,7 @@ export function useAppState() {
   const [message, setMessage] = React.useState<UiMessage | null>(null);
   const [query, setQuery] = React.useState("");
   const [relevance, setRelevance] = React.useState<RelevanceFilter>("direct");
+  const [topicFilter, setTopicFilter] = React.useState<TopicFilterValue>("all");
   const [selectedJournals, setSelectedJournals] = React.useState<string[]>([]);
   const [dateFilter, setDateFilter] = React.useState<DateFilter>("30d");
   const [readFilter, setReadFilter] = React.useState<ReadFilter>("unread");
@@ -86,6 +88,9 @@ export function useAppState() {
   const [feedbackPaper, setFeedbackPaper] = React.useState<Paper | null>(null);
   const [feedbackValue, setFeedbackValue] = React.useState<Relevance>("indirect");
   const [feedbackNote, setFeedbackNote] = React.useState("");
+  // 主题纠正的下拉值："" 表示无主题；touched 记录用户是否改过主题，未改过不提交纠正。
+  const [feedbackTopic, setFeedbackTopic] = React.useState("");
+  const [feedbackTopicTouched, setFeedbackTopicTouched] = React.useState(false);
   const [feedsSaving, setFeedsSaving] = React.useState(false);
   const [schedulerSaving, setSchedulerSaving] = React.useState(false);
   const [settingsConfigSaving, setSettingsConfigSaving] = React.useState(false);
@@ -180,13 +185,13 @@ export function useAppState() {
     reportLoading, setReportLoading, adminDataLoading, setAdminDataLoading,
     verificationSubmitting, setVerificationSubmitting, verificationSubmitError, setVerificationSubmitError,
     reportLoadError, setReportLoadError, adminHydrationWarning, setAdminHydrationWarning,
-    message, setMessage, query, setQuery, relevance, setRelevance, selectedJournals, setSelectedJournals,
+    message, setMessage, query, setQuery, relevance, setRelevance, topicFilter, setTopicFilter, selectedJournals, setSelectedJournals,
     dateFilter, setDateFilter, readFilter, setReadFilter, feedbackFilter, setFeedbackFilter,
     sortOption, setSortOption, markReadRequest, setMarkReadRequest, bulkReadSubmitting, setBulkReadSubmitting,
     pendingReadOverrides, setPendingReadOverrides, selectedId, setSelectedId,
     feedbackRecords, setFeedbackRecords, profileProposals, setProfileProposals, jobs, setJobs,
     adminOpen, setAdminOpen, feedbackPaper, setFeedbackPaper, feedbackValue, setFeedbackValue,
-    feedbackNote, setFeedbackNote, feedsSaving, setFeedsSaving, schedulerSaving, setSchedulerSaving,
+    feedbackNote, setFeedbackNote, feedbackTopic, setFeedbackTopic, feedbackTopicTouched, setFeedbackTopicTouched, feedsSaving, setFeedsSaving, schedulerSaving, setSchedulerSaving,
     settingsConfigSaving, setSettingsConfigSaving, profileSaving, setProfileSaving,
     zoteroPaper, setZoteroPaper, zoteroCollections, setZoteroCollections,
     zoteroCollectionKey, setZoteroCollectionKey, zoteroLoading, setZoteroLoading,
