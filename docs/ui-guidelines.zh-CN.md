@@ -98,10 +98,10 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 
 - 主界面采用三栏布局：左侧筛选、中央论文列表、右侧详情。
 - 中央列表默认使用 `Unread + Last 30 days`，采用虚拟列表；论文卡只显示摘要，不放置行内动作。
-- 论文卡在相关性 chip 旁可显示主题 chip：中性色（default/soft），不与 direct/indirect 的语义色混用；真实主题显示当前 label，哨兵或孤儿 id 显示"未归类"，未判定与 unrelated 论文不显示主题 chip。主题 chip 不可点击，主题过滤只发生在左侧栏。
+- 论文卡在相关性 chip 旁可显示主题 chip：中性色（default/soft），不与 direct/indirect 的语义色混用；真实主题显示当前 label，哨兵或孤儿 id 显示"未归类"，未判定与 unrelated 论文不显示主题 chip。存在待生效主题纠正（最近一条 open feedback）时，chip 追加"原值 -> 纠正值"（显式"无主题"显示"无主题"，未判定的原值显示"未判定"），与相关性 `Feedback -> ...` chip 同语义。主题 chip 不可点击，主题过滤只发生在左侧栏。
 - 左侧栏 Topic 过滤区列出注册表全部主题加 `Unassigned`（判定过无主题）与 `Not processed`（从未判定）两个固定桶，单选切换，与相关性过滤 AND 叠加；计数来自报告 payload 的 topics 块，不随其他过滤器联动。
 - `Link`（DOI 优先，缺失时回退出版社 URL；两者皆无则隐藏）、`Mark as read`、`Save to Zotero`、`Mark wrong` 由右侧详情面板负责。
-- Mark wrong 弹窗在相关性下拉之外提供主题下拉（当前值预选、含"无主题"）与一个内联新建主题输入；新建走窄接口写入 profile 注册表，不跳转设置页。
+- Mark wrong 弹窗在相关性下拉之外提供主题下拉（当前值预选、含"无主题"）与一个内联新建主题输入；新建走窄接口写入 profile 注册表，不跳转设置页。重新打开时优先回填最近一条 open feedback 的主题纠正（显式"无主题"回填"无主题"），没有待生效纠正才回填当前分类值。
 - 如果已有 Profile，三栏工作区应立即渲染，论文列表不得等待非关键 Admin 数据。
 - 如果没有 Profile，先显示 onboarding；如果没有 RSS feed，应等待 feed 加载结束后再进入 feed 初始化空状态。
 

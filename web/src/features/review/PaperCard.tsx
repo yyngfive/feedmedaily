@@ -3,6 +3,7 @@ import React from "react";
 
 import {relevanceLabel, relevanceTone} from "../../app/constants";
 import {authorsLine, feedbackLabel, paperDate, paperTopicID, paperTopicState, topicLabelFor} from "../../app/utils";
+import {TOPIC_NONE} from "../../shared/types";
 import type {Paper, ReportTopics} from "../../shared/types";
 
 export function PaperCard({
@@ -26,12 +27,23 @@ export function PaperCard({
   const topicState = paperTopicState(paper);
   const topicID = paperTopicID(paper, topics);
   const topicLabel = topicID ? topicLabelFor(topicID, topics) : null;
-  const topicChipText =
+  const originalTopicText =
     topicState === null || topicState === "unprocessed"
       ? null
       : topicID && topicLabel
         ? topicLabel
         : "未归类";
+  // 待生效的主题纠正（最近一条 open feedback）：chip 追加“原值 -> 纠正值”，
+  // 与相关性 "Feedback -> Direct" chip 同一语义——纠正已被记录，等重分类生效。
+  const pendingTopic = paper.feedback_status?.corrected_topic ?? null;
+  const pendingTopicText = pendingTopic == null
+    ? null
+    : pendingTopic === TOPIC_NONE
+      ? "无主题"
+      : topicLabelFor(pendingTopic, topics) ?? "未归类";
+  const topicChipText = pendingTopicText
+    ? `${originalTopicText ?? (topicState === "unprocessed" ? "未判定" : null) ?? "未归类"} -> ${pendingTopicText}`
+    : originalTopicText;
   const handleSelectKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();

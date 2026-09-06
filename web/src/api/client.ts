@@ -296,7 +296,7 @@ export async function fetchFeedback(): Promise<FeedbackRecord[]> {
 export async function createFeedback(input: {
   paper_id: number;
   corrected_relevance: Relevance;
-  /** 主题纠正开关；corrected_topic 为 null 表示“无主题”。 */
+  /** 主题纠正开关；correct_topic 为 true 且 corrected_topic 为 null/空表示显式“无主题”（后端落哨兵 none）。 */
   correct_topic?: boolean;
   corrected_topic?: string | null;
   note?: string;

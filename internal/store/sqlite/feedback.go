@@ -262,13 +262,14 @@ func scanFeedbackRecord(scanner interface{ Scan(dest ...any) error }) (FeedbackR
 	return record, nil
 }
 
-func decodeFeedbackStatus(correctedRelevance *string, note sql.NullString, createdAt *string, state *string, usedInPrompt sql.NullInt64) (*FeedbackStatus, error) {
-	if correctedRelevance == nil && !note.Valid && createdAt == nil && state == nil && !usedInPrompt.Valid {
+func decodeFeedbackStatus(correctedRelevance *string, correctedTopic sql.NullString, note sql.NullString, createdAt *string, state *string, usedInPrompt sql.NullInt64) (*FeedbackStatus, error) {
+	if correctedRelevance == nil && !correctedTopic.Valid && !note.Valid && createdAt == nil && state == nil && !usedInPrompt.Valid {
 		return nil, nil
 	}
 	status := &FeedbackStatus{
 		HasFeedback:        true,
 		CorrectedRelevance: correctedRelevance,
+		CorrectedTopic:     nullableString(correctedTopic),
 		Note:               nullableString(note),
 		State:              state,
 		UsedInProfile:      usedInPrompt.Valid && usedInPrompt.Int64 != 0,

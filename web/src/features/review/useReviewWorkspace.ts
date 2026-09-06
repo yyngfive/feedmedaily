@@ -6,6 +6,7 @@ import {matchesDateFilter, matchesTopicFilter, paperTopicID, relevanceCounts} fr
 import type {TopicFilterValue} from "../../app/utils";
 import type {AppData} from "../../app/useAppData";
 import type {AppState, MarkReadRequest} from "../../app/useAppState";
+import {TOPIC_NONE} from "../../shared/types";
 import type {FeedbackRecord, Paper} from "../../shared/types";
 
 // 论文审阅 hook 管理筛选、选择和用户直接触发的论文变更。
@@ -109,7 +110,7 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
   React.useEffect(() => logMarkReadDebug("visible-list.changed", {readFilter, count: visibleList.length, firstPaperIds: visibleList.slice(0, 8).map((paper) => paper.id), overrideIds: Object.keys(pendingReadOverrides).map(Number)}), [logMarkReadDebug, pendingReadOverrides, readFilter, visibleList]);
 
   const updatePaper = (paperId: number, updater: (paper: Paper) => Paper) => setReport((current) => ({...current, papers: current.papers.map((paper) => paper.id === paperId ? updater(paper) : paper)}));
-  const applyFeedbackRecordToPaper = React.useCallback((record: FeedbackRecord) => updatePaper(record.paper_id, (paper) => ({...paper, feedback_status: {has_feedback: true, corrected_relevance: record.corrected_relevance, note: record.note ?? null, latest_feedback_at: record.created_at, state: record.state, used_in_profile: record.used_in_profile}})), []);
+  const applyFeedbackRecordToPaper = React.useCallback((record: FeedbackRecord) => updatePaper(record.paper_id, (paper) => ({...paper, feedback_status: {has_feedback: true, corrected_relevance: record.corrected_relevance, corrected_topic: record.corrected_topic ?? null, note: record.note ?? null, latest_feedback_at: record.created_at, state: record.state, used_in_profile: record.used_in_profile}})), []);
   const clearPaperFeedbackStatus = React.useCallback((paperId: number) => updatePaper(paperId, (paper) => ({...paper, feedback_status: null})), []);
 
   const persistReadStatus = async (paperId: number) => {
@@ -200,10 +201,18 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
     setFeedbackPaper(paper);
     setFeedbackValue(paper.feedback_status?.corrected_relevance ?? paper.classification.relevance);
     setFeedbackNote(paper.feedback_status?.note ?? "");
-    // 主题下拉默认当前值：真实主题预选其 id，哨兵/未判定预选“无主题”。
-    const currentTopicID = paperTopicID(paper, report.topics);
-    setFeedbackTopic(currentTopicID ?? "");
-    setFeedbackTopicTouched(false);
+    // 主题下拉默认值：优先沿用最近一条 open feedback 的主题纠正（用户上次的选择），
+    // 哨兵 none 映射为“无主题”；否则回落到当前分类的主题（真实 id 预选，
+    // 哨兵/孤儿/未判定预选“无主题”）。预填自纠正时视为已表态，再次保存不丢主题意见。
+    const pendingTopic = paper.feedback_status?.corrected_topic ?? null;
+    if (pendingTopic != null) {
+      setFeedbackTopic(pendingTopic === TOPIC_NONE ? "" : pendingTopic);
+      setFeedbackTopicTouched(true);
+    } else {
+      const currentTopicID = paperTopicID(paper, report.topics);
+      setFeedbackTopic(currentTopicID ?? "");
+      setFeedbackTopicTouched(false);
+    }
   };
   // 反馈弹窗内新建主题：走窄接口追加注册表（label 幂等），返回供下拉立即选中。
   const handleCreateFeedbackTopic = async (label: string): Promise<{id: string; label: string} | null> => {

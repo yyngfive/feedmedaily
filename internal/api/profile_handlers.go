@@ -121,9 +121,11 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, items)
 	case http.MethodPost:
 		var payload struct {
-			PaperID            int64   `json:"paper_id"`
-			CorrectedRelevance string  `json:"corrected_relevance"`
-			// CorrectTopic 为 true 时按 CorrectedTopic 记录主题纠正；CorrectedTopic 为 null 表示“无主题”。
+			PaperID            int64  `json:"paper_id"`
+			CorrectedRelevance string `json:"corrected_relevance"`
+			// CorrectTopic 为 true 时按 CorrectedTopic 记录主题纠正；
+			// CorrectedTopic 为 null/空表示“显式无主题”，落库为哨兵 none，
+			// 与“未表达主题意见”（CorrectTopic 为 false，corrected_topic 落 NULL）区分。
 			CorrectTopic   bool    `json:"correct_topic"`
 			CorrectedTopic *string `json:"corrected_topic"`
 			Note           *string `json:"note"`
@@ -133,15 +135,23 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var correctedTopic *string
-		if payload.CorrectTopic && payload.CorrectedTopic != nil {
-			topicID := strings.TrimSpace(*payload.CorrectedTopic)
+		if payload.CorrectTopic {
+			topicID := ""
+			if payload.CorrectedTopic != nil {
+				topicID = strings.TrimSpace(*payload.CorrectedTopic)
+			}
+			if topicID == store.TopicNoneID {
+				topicID = ""
+			}
 			if topicID != "" {
 				if err := validateTopicIDInProfile(s.snapshotSettings().ProfilePath, topicID); err != nil {
 					writeError(w, http.StatusBadRequest, err.Error())
 					return
 				}
-				correctedTopic = &topicID
+			} else {
+				topicID = store.TopicNoneID
 			}
+			correctedTopic = &topicID
 		}
 		sqliteStore, err := s.getWriteStore()
 		if err != nil {

@@ -71,9 +71,12 @@ type Classification struct {
 	TranslatedTitleZH *string  `json:"translated_title_zh"`
 }
 
+// FeedbackStatus.CorrectedTopic 是最近一条 open feedback 的主题纠正：
+// 真实主题 id 或哨兵 none（显式“无主题”）；nil 表示未表达主题意见。
 type FeedbackStatus struct {
 	HasFeedback        bool       `json:"has_feedback"`
 	CorrectedRelevance *string    `json:"corrected_relevance"`
+	CorrectedTopic     *string    `json:"corrected_topic"`
 	Note               *string    `json:"note"`
 	LatestFeedbackAt   *time.Time `json:"latest_feedback_at"`
 	State              *string    `json:"state"`
@@ -160,7 +163,8 @@ type ProposalFeedbackContext struct {
 	CorrectedRelevance string
 	Note               *string
 	// OriginalTopic 是纠正前存储的主题值（真实 id、哨兵 none 或空）；
-	// CorrectedTopic 是纠正后的主题 id，nil 表示“无主题”。
+	// CorrectedTopic 是纠正后的主题 id 或哨兵 none（显式“无主题”），
+	// nil 表示该条 feedback 未表达主题意见。
 	OriginalTopic  string
 	CorrectedTopic *string
 }

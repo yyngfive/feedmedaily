@@ -72,19 +72,20 @@ func (s *Store) listReportPapers() ([]ReportPaper, error) {
 func (s *Store) reportPapersQuery() string {
 	latestFeedbackCTE := `
 	latest_feedback AS (
-		SELECT NULL AS paper_id, NULL AS corrected_relevance, NULL AS note,
+		SELECT NULL AS paper_id, NULL AS corrected_relevance, NULL AS corrected_topic, NULL AS note,
 			NULL AS created_at, NULL AS state, NULL AS used_in_prompt, NULL AS rn
 		WHERE 0
 	)`
 	if len(s.feedbackColumns) > 0 {
 		latestFeedbackCTE = fmt.Sprintf(`
 	latest_feedback AS (
-		SELECT paper_id, corrected_relevance, note, created_at,
+		SELECT paper_id, corrected_relevance, %s AS corrected_topic, note, created_at,
 			%s AS state, %s AS used_in_prompt,
 			ROW_NUMBER() OVER (PARTITION BY paper_id ORDER BY created_at DESC, id DESC) AS rn
 		FROM feedback
 		WHERE %s = %s
 	)`,
+			s.columnExpr(s.feedbackColumns, "corrected_topic", "NULL"),
 			s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen)),
 			s.columnExpr(s.feedbackColumns, "used_in_prompt", "0"),
 			s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen)),
@@ -134,7 +135,7 @@ func (s *Store) reportPapersQuery() string {
 			p.id, p.source_url, p.feed_title, p.title, p.url, p.doi, p.journal, p.authors_json, p.abstract,
 			%s AS abstract_source, p.published_date, p.first_seen_at, %s AS read_at, p.raw_json,
 			lc.relevance, lc.confidence, lc.reason, lc.topic_tags_json, lc.recommended_action, lc.model, lc.translated_title_zh,
-			lf.corrected_relevance, lf.note, lf.created_at, lf.state, lf.used_in_prompt,
+			lf.corrected_relevance, lf.corrected_topic, lf.note, lf.created_at, lf.state, lf.used_in_prompt,
 			lz.state, lz.item_key, lz.error_message, lz.attempted_at, lz.saved_at
 		FROM papers p
 		JOIN latest_classifications lc ON lc.paper_id = p.id AND lc.rn = 1
@@ -156,21 +157,23 @@ func (s *Store) latestFeedbackStatus(paperID int64) (*FeedbackStatus, error) {
 		return nil, nil
 	}
 	row := s.db.QueryRow(fmt.Sprintf(`
-		SELECT corrected_relevance, note, created_at, %s AS state, %s AS used_in_prompt
+		SELECT corrected_relevance, %s AS corrected_topic, note, created_at, %s AS state, %s AS used_in_prompt
 		FROM feedback
 		WHERE paper_id = ? AND %s = ?
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
-	`, s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen)),
+	`, s.columnExpr(s.feedbackColumns, "corrected_topic", "NULL"),
+		s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen)),
 		s.columnExpr(s.feedbackColumns, "used_in_prompt", "0"),
 		s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen))), paperID, feedbackStateOpen)
 
 	var correctedRelevance string
+	var correctedTopic sql.NullString
 	var note sql.NullString
 	var createdAt string
 	var state string
 	var usedInPrompt int64
-	err := row.Scan(&correctedRelevance, &note, &createdAt, &state, &usedInPrompt)
+	err := row.Scan(&correctedRelevance, &correctedTopic, &note, &createdAt, &state, &usedInPrompt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -179,6 +182,7 @@ func (s *Store) latestFeedbackStatus(paperID int64) (*FeedbackStatus, error) {
 	}
 	status, err := decodeFeedbackStatus(
 		stringPtr(correctedRelevance),
+		correctedTopic,
 		note,
 		stringPtr(createdAt),
 		stringPtr(state),
@@ -244,6 +248,7 @@ func scanReportPaper(scanner interface{ Scan(dest ...any) error }) (ReportPaper,
 	var translatedTitleZH sql.NullString
 
 	var correctedRelevance sql.NullString
+	var correctedTopic sql.NullString
 	var feedbackNote sql.NullString
 	var feedbackCreatedAt sql.NullString
 	var feedbackState sql.NullString
@@ -278,6 +283,7 @@ func scanReportPaper(scanner interface{ Scan(dest ...any) error }) (ReportPaper,
 		&model,
 		&translatedTitleZH,
 		&correctedRelevance,
+		&correctedTopic,
 		&feedbackNote,
 		&feedbackCreatedAt,
 		&feedbackState,
@@ -316,7 +322,7 @@ func scanReportPaper(scanner interface{ Scan(dest ...any) error }) (ReportPaper,
 	if err != nil {
 		return ReportPaper{}, fmt.Errorf("parse report classification for paper %d: %w", base.ID, err)
 	}
-	feedbackStatus, err := decodeFeedbackStatus(nullableString(correctedRelevance), feedbackNote, nullableString(feedbackCreatedAt), nullableString(feedbackState), feedbackUsedInPrompt)
+	feedbackStatus, err := decodeFeedbackStatus(nullableString(correctedRelevance), correctedTopic, feedbackNote, nullableString(feedbackCreatedAt), nullableString(feedbackState), feedbackUsedInPrompt)
 	if err != nil {
 		return ReportPaper{}, fmt.Errorf("parse report feedback status for paper %d: %w", base.ID, err)
 	}

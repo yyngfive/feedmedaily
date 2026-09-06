@@ -310,6 +310,51 @@ INSERT INTO zotero_saves (
 	if paper.FeedbackStatus.Note == nil || *paper.FeedbackStatus.Note != "Latest open feedback" {
 		t.Fatalf("unexpected feedback note: %#v", paper.FeedbackStatus)
 	}
+	if paper.FeedbackStatus.CorrectedTopic != nil {
+		t.Fatalf("expected nil corrected topic for legacy feedback schema: %#v", paper.FeedbackStatus)
+	}
+}
+
+func TestBuildLatestReportFeedbackStatusCarriesTopicCorrection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	db := openSQLiteTestDB(t, path)
+	seedMutableFixture(t, db)
+	db.Close()
+
+	store, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := time.Date(2026, 5, 16, 8, 0, 0, 0, time.UTC)
+	if _, err := store.CreateFeedback(1, "direct", stringPointer("t-xna"), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	report, err := store.BuildLatestReport(now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Papers) != 1 {
+		t.Fatalf("unexpected paper count: %d", len(report.Papers))
+	}
+	status := report.Papers[0].FeedbackStatus
+	if status == nil || status.CorrectedTopic == nil || *status.CorrectedTopic != "t-xna" {
+		t.Fatalf("expected corrected topic in feedback status: %#v", status)
+	}
+
+	// 最新一条 open feedback 为显式“无主题”时，状态携带哨兵 none。
+	if _, err := store.CreateFeedback(1, "direct", stringPointer(TopicNoneID), nil, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	report, err = store.BuildLatestReport(now.Add(2 * time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status = report.Papers[0].FeedbackStatus
+	if status == nil || status.CorrectedTopic == nil || *status.CorrectedTopic != TopicNoneID {
+		t.Fatalf("expected none sentinel in feedback status: %#v", status)
+	}
 }
 
 func TestBuildLatestReportSupportsLegacySchemaWithoutFeedbackOrZoteroTables(t *testing.T) {

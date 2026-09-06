@@ -216,6 +216,39 @@ func TestFeedbackReadAndDeleteMutationAPIs(t *testing.T) {
 	}
 }
 
+func TestFeedbackPostRecordsTopicCorrection(t *testing.T) {
+	root := t.TempDir()
+	settings := testSettings(root)
+	seedReadOnlyFixture(t, settings.DatabasePath)
+	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[{"id":"t-xna","label":"XNA"}],"few_shots":[]}`)
+	handler := newTestHandler(t, settings)
+
+	topicRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(topicRecorder, httptest.NewRequest(http.MethodPost, "/api/feedback", strings.NewReader(`{"paper_id":1,"corrected_relevance":"direct","correct_topic":true,"corrected_topic":"t-xna"}`)))
+	if topicRecorder.Code != http.StatusOK || !contains(topicRecorder.Body.String(), `"corrected_topic":"t-xna"`) {
+		t.Fatalf("topic correction = %d %s", topicRecorder.Code, topicRecorder.Body.String())
+	}
+
+	// 显式选择“无主题”落哨兵 none，与“未表达主题意见”（corrected_topic 为 null）区分。
+	noneRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(noneRecorder, httptest.NewRequest(http.MethodPost, "/api/feedback", strings.NewReader(`{"paper_id":1,"corrected_relevance":"direct","correct_topic":true,"corrected_topic":null}`)))
+	if noneRecorder.Code != http.StatusOK || !contains(noneRecorder.Body.String(), `"corrected_topic":"none"`) {
+		t.Fatalf("explicit no-topic correction = %d %s", noneRecorder.Code, noneRecorder.Body.String())
+	}
+
+	untouchedRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(untouchedRecorder, httptest.NewRequest(http.MethodPost, "/api/feedback", strings.NewReader(`{"paper_id":1,"corrected_relevance":"direct","correct_topic":false}`)))
+	if untouchedRecorder.Code != http.StatusOK || !contains(untouchedRecorder.Body.String(), `"corrected_topic":null`) {
+		t.Fatalf("no-opinion feedback = %d %s", untouchedRecorder.Code, untouchedRecorder.Body.String())
+	}
+
+	unknownRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(unknownRecorder, httptest.NewRequest(http.MethodPost, "/api/feedback", strings.NewReader(`{"paper_id":1,"corrected_relevance":"direct","correct_topic":true,"corrected_topic":"t-missing"}`)))
+	if unknownRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("unknown topic = %d %s", unknownRecorder.Code, unknownRecorder.Body.String())
+	}
+}
+
 func TestBootstrapProposalGenerateAndZoteroBridgeAPIs(t *testing.T) {
 	root := t.TempDir()
 	settings := testSettings(root)

@@ -160,6 +160,8 @@ export type Classification = {
 export type FeedbackStatus = {
   has_feedback: boolean;
   corrected_relevance?: Relevance | null;
+  // 最近一条 open feedback 的主题纠正：真实主题 id 或哨兵 none（显式无主题）。
+  corrected_topic?: string | null;
   note?: string | null;
   latest_feedback_at?: string | null;
   state?: FeedbackState | null;
