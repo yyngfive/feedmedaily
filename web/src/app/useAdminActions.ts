@@ -87,15 +87,20 @@ export function useAdminActions(state: AppState, data: AppData) {
       setProfileSaving(true);
       const saved = await saveCurrentProfile(nextProfile);
       setProfile(saved.profile);
-      // 保存 profile 只写文件，不自动触发任何重分类：存量论文的更新由
-      // 用户显式触发（Dashboard 的 Feedback papers / Topic backfill 等），
-      // apply proposal 的 feedback 重分类不受影响。
       pushMessage("profile.current.save.succeeded");
+      try {
+        // 保存 profile 后自动重分类仍处于 open 状态的 feedback 关联论文，
+        // 让未消费的纠正立即生效；已消费（used）的不再重跑。
+        registerJob(await launchReclassifyJob({scope: "feedback", limit: 0}));
+        pushMessage("job.reclassify.started");
+      } catch (error) {
+        pushErrorMessage("app.service.unavailable", error, "Could not start the feedback reclassification job.");
+      }
     } catch (error) {
       pushErrorMessage("app.service.unavailable", error, "Could not save the local profile.");
       throw error;
     } finally { setProfileSaving(false); }
-  }, [pushErrorMessage, pushMessage, setProfile, setProfileSaving]);
+  }, [pushErrorMessage, pushMessage, registerJob, setProfile, setProfileSaving]);
   const handleDeleteScheduler = React.useCallback(async () => {
     try {
       setSchedulerSaving(true);

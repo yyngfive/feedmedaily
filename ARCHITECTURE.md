@@ -196,6 +196,7 @@ Behavioral baseline:
 5. Future classifications use that profile.
 6. User feedback can generate new full-profile proposals.
 7. Applying a proposal reclassifies only papers linked to that proposal feedback. This reclassification runs as a cancellable background job instead of blocking the apply request; with no linked papers the apply response only rebuilds the report synchronously.
+8. Manually saving the profile reclassifies papers whose feedback is still open (not yet consumed by a proposal), so pending corrections take effect under the updated rules; used feedback is never re-run.
 
 Supported admin reclassification scopes:
 

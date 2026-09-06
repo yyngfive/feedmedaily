@@ -239,3 +239,30 @@ func TestRelatedPaperIDsWithoutTopicFiltersStates(t *testing.T) {
 		}
 	}
 }
+
+func TestFeedbackPaperIDsSelectsOnlyOpenFeedback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	db := openSQLiteTestDB(t, path)
+	seedMutableFixture(t, db)
+	db.Close()
+
+	store, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	// fixture 里 paper 1 已有一条 used feedback；再补一条 open。
+	if _, err := store.CreateFeedback(1, "direct", nil, nil, time.Date(2026, 5, 16, 6, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := store.FeedbackPaperIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// used 的不再入选：即便库里有历史 feedback，也只有 open 的论文参与重分类。
+	if len(ids) != 1 || ids[0] != 1 {
+		t.Fatalf("expected only open-feedback paper ids, got %v", ids)
+	}
+}

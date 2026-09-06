@@ -290,8 +290,15 @@ func (s *Store) UnclassifiedPaperIDs() ([]int64, error) {
 	return scanIDRows(rows, "unclassified paper ids")
 }
 
+// FeedbackPaperIDs 返回仍有 open 状态 feedback 的 paper ids。已消费（used）
+// 的纠正在 apply proposal 时已经重分类过，不应被再次重跑。
 func (s *Store) FeedbackPaperIDs() ([]int64, error) {
-	rows, err := s.db.Query(`SELECT DISTINCT paper_id FROM feedback ORDER BY created_at DESC, id DESC`)
+	rows, err := s.db.Query(`
+		SELECT DISTINCT paper_id
+		FROM feedback
+		WHERE state = ?
+		ORDER BY created_at DESC, id DESC
+	`, feedbackStateOpen)
 	if err != nil {
 		return nil, fmt.Errorf("query feedback paper ids: %w", err)
 	}
