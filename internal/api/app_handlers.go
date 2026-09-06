@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/yyngfive/scirssagent/internal/config"
+	"github.com/yyngfive/scirssagent/internal/profile"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
+	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -31,7 +33,63 @@ func (s *Server) handleReportLatest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// 注册表快照 + 主题计数由 API 层组装：论文列表不等待 profile 之外的任何水合，
+	// 注册表随报告一并返回，前端解析 id→label 无需二次请求。
+	serverSettings := s.snapshotSettings()
+	if profilePayload, err := profile.ReadCurrent(serverSettings.ProfilePath); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if profilePayload != nil {
+		attachReportTopics(&report, profilePayload)
+	}
 	writeJSON(w, http.StatusOK, report)
+}
+
+// attachReportTopics 结合当前 profile 注册表与报告论文填充主题展示块。
+func attachReportTopics(report *store.Report, profilePayload map[string]any) {
+	topics := store.ReportTopics{Items: []store.ReportTopic{}, Counts: map[string]int{}}
+	if rawTopics, ok := profilePayload["topic_taxonomy"].([]any); ok {
+		for _, rawTopic := range rawTopics {
+			topic, ok := rawTopic.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := topic["id"].(string)
+			label, _ := topic["label"].(string)
+			if strings.TrimSpace(id) == "" || strings.TrimSpace(label) == "" {
+				continue
+			}
+			topics.Items = append(topics.Items, store.ReportTopic{ID: strings.TrimSpace(id), Label: strings.TrimSpace(label)})
+		}
+	}
+	valid := map[string]struct{}{}
+	for _, topic := range topics.Items {
+		valid[topic.ID] = struct{}{}
+	}
+	for _, paper := range report.Papers {
+		switch paper.Classification.Relevance {
+		case "direct", "indirect":
+		default:
+			continue
+		}
+		tags := paper.Classification.TopicTags
+		assigned := false
+		for _, tag := range tags {
+			if _, ok := valid[tag]; ok {
+				topics.Counts[tag]++
+				assigned = true
+				break
+			}
+		}
+		if len(tags) == 0 {
+			// 相关但从未做过主题判定。
+			topics.Unprocessed++
+		} else if !assigned {
+			// 哨兵 none 或已删除主题的孤儿 id。
+			topics.Unassigned++
+		}
+	}
+	report.Topics = &topics
 }
 
 func (s *Server) handleAppHealth(w http.ResponseWriter, r *http.Request) {

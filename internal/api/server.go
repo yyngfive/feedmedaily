@@ -58,6 +58,8 @@ var (
 	lookupUpdateTXTFunc                                                                                              = net.LookupTXT
 	selectReclassifyPaperIDsFunc                                                                                     = jobruntime.SelectPaperIDsForScope
 	reclassifyPaperIDsContextFunc                                                                                    = jobruntime.ReclassifyPaperIDsContext
+	assignTopicsPaperIDsContextFunc                                                                                  = jobruntime.AssignTopicsPaperIDsContext
+	countTopicBackfillPapersFunc                                                                                     = jobruntime.CountTopicBackfillPapers
 	rebuildLatestReportFunc                                                                                          = jobruntime.RebuildLatestReport
 	runSyncFunc                                                                                                      = jobruntime.RunSync
 	bootstrapProfileFunc                                                                                             = jobruntime.GenerateInitialProfileProposal
@@ -198,6 +200,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/settings/feeds", s.handleSettingsFeeds)
 	mux.HandleFunc("/api/settings/scheduler", s.handleSettingsScheduler)
 	mux.HandleFunc("/api/profile/current", s.handleProfileCurrent)
+	mux.HandleFunc("/api/profile/topics", s.handleProfileTopicCreate)
 	mux.HandleFunc("/api/profile/bootstrap", s.handleProfileBootstrap)
 	mux.HandleFunc("/api/feedback", s.handleFeedback)
 	mux.HandleFunc("/api/feedback/", s.handleFeedbackByID)
@@ -296,6 +299,12 @@ func emptyReportPayload() map[string]any {
 			"direct":    0,
 			"indirect":  0,
 			"unrelated": 0,
+		},
+		"topics": map[string]any{
+			"items":       []any{},
+			"counts":      map[string]int{},
+			"unassigned":  0,
+			"unprocessed": 0,
 		},
 		"papers": []any{},
 		"errors": []any{},

@@ -35,6 +35,14 @@ Labels are fixed:
 - indirect
 - unrelated
 
+Topic routing (after relevance is decided):
+- The profile may list topics (id + label) and tag some direct/indirect rules with topic ids.
+- For a direct or indirect paper, consider the topic tags of every matched rule that carries topics and pick the single best-fitting topic id.
+- If several matched rules carry topics, choose the topic whose criteria fit the paper's core contribution best.
+- If no matched rule carries topics, or none of the candidate topics fits, set topic to "" (empty string).
+- Never assign a topic to an unrelated paper; always set topic to "" for unrelated.
+- Use topic ids exactly as they appear in the registry. Never invent topic ids.
+
 Return concise, evidence-based reasoning grounded in the title and abstract.`
 
 type LLMConfig struct {
@@ -125,7 +133,7 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 		})
 	}
 
-	maxTokens := max(600, 220*len(papers))
+	maxTokens := max(650, 270*len(papers))
 	if cfg.MaxTokens > 0 {
 		maxTokens = cfg.MaxTokens
 	}
@@ -194,7 +202,7 @@ func ClassifyPapers(papers []store.Paper, profile map[string]any, cfg LLMConfig)
 		if itemID == "" {
 			continue
 		}
-		classification, err := decodeClassification(item, cfg.Model)
+		classification, err := decodeClassification(item, cfg.Model, validTopicIDs(profile))
 		if err != nil {
 			return nil, err
 		}
@@ -575,7 +583,8 @@ Return valid JSON only, with this exact shape:
       "relevance": "direct | indirect | unrelated",
       "confidence": 0.0,
       "reason": "one concise sentence",
-      "translated_title_zh": "concise Chinese title translation"
+      "translated_title_zh": "concise Chinese title translation",
+      "topic": "topic id from the profile topics registry, or empty string"
     }
   ]
 }
@@ -612,22 +621,68 @@ Items:
 `, string(itemsJSON)))
 }
 
+// profilePromptPayload 把 profile map 压缩成分类 prompt 注入体：
+// scope + 结构化规则（主题用 id）+ 主题注册表。兼容旧版纯字符串规则。
 func profilePromptPayload(profile map[string]any) map[string]any {
+	topics := []map[string]any{}
+	if rawTopics, ok := profile["topic_taxonomy"].([]any); ok {
+		for _, rawTopic := range rawTopics {
+			topic, ok := rawTopic.(map[string]any)
+			if !ok {
+				continue
+			}
+			id := normalizedString(topic["id"])
+			label := normalizedString(topic["label"])
+			if id == "" || label == "" {
+				continue
+			}
+			topics = append(topics, map[string]any{"id": id, "label": label})
+		}
+	}
 	payload := map[string]any{
 		"scope":           normalizedString(profile["scope"]),
-		"relevance_rules": map[string]any{"direct": []string{}, "indirect": []string{}, "unrelated": []string{}},
+		"relevance_rules": map[string]any{"direct": []any{}, "indirect": []any{}, "unrelated": []any{}},
+		"topics":          topics,
 	}
 	if rawRules, ok := profile["relevance_rules"].(map[string]any); ok {
 		payload["relevance_rules"] = map[string]any{
-			"direct":    normalizeStringSlice(rawRules["direct"]),
-			"indirect":  normalizeStringSlice(rawRules["indirect"]),
-			"unrelated": normalizeStringSlice(rawRules["unrelated"]),
+			"direct":    normalizeRulePayload(rawRules["direct"]),
+			"indirect":  normalizeRulePayload(rawRules["indirect"]),
+			"unrelated": normalizeRulePayload(rawRules["unrelated"]),
 		}
 	}
 	return payload
 }
 
-func decodeClassification(item map[string]any, model string) (store.Classification, error) {
+// normalizeRulePayload 把规则列表规整成 {text, topics} 对象数组。
+func normalizeRulePayload(raw any) []map[string]any {
+	items, ok := raw.([]any)
+	if !ok {
+		return []map[string]any{}
+	}
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		switch value := item.(type) {
+		case string:
+			if clean := normalizedString(value); clean != "" {
+				result = append(result, map[string]any{"text": clean, "topics": []string{}})
+			}
+		case map[string]any:
+			text := normalizedString(value["text"])
+			if text == "" {
+				continue
+			}
+			result = append(result, map[string]any{"text": text, "topics": normalizeStringSlice(value["topics"])})
+		default:
+			if clean := normalizedString(item); clean != "" {
+				result = append(result, map[string]any{"text": clean, "topics": []string{}})
+			}
+		}
+	}
+	return result
+}
+
+func decodeClassification(item map[string]any, model string, validTopics map[string]struct{}) (store.Classification, error) {
 	relevance := normalizedString(item["relevance"])
 	if relevance != "direct" && relevance != "indirect" && relevance != "unrelated" {
 		return store.Classification{}, fmt.Errorf("classifier returned unsupported relevance: %s", relevance)
@@ -640,11 +695,38 @@ func decodeClassification(item map[string]any, model string) (store.Classificati
 		RecommendedAction: recommendedActionForRelevance(relevance),
 		Model:             model,
 	}
+	if relevance != "unrelated" {
+		// related 文章一定带一个主题判定结果：命中注册表 id 则落 id，
+		// 否则落哨兵 none（判定过但无主题），与“从未判定”的空数组区分。
+		topic := normalizedString(item["topic"])
+		if _, ok := validTopics[topic]; ok {
+			classification.TopicTags = []string{topic}
+		} else {
+			classification.TopicTags = []string{store.TopicNoneID}
+		}
+	}
 	translated := normalizedString(item["translated_title_zh"])
 	if translated != "" {
 		classification.TranslatedTitleZH = &translated
 	}
 	return classification, nil
+}
+
+// validTopicIDs 从 profile map 提取注册表 id 集合，用于输出校验（防幻觉 id）。
+func validTopicIDs(profile map[string]any) map[string]struct{} {
+	result := map[string]struct{}{}
+	if rawTopics, ok := profile["topic_taxonomy"].([]any); ok {
+		for _, rawTopic := range rawTopics {
+			topic, ok := rawTopic.(map[string]any)
+			if !ok {
+				continue
+			}
+			if id := normalizedString(topic["id"]); id != "" {
+				result[id] = struct{}{}
+			}
+		}
+	}
+	return result
 }
 
 func recommendedActionForRelevance(relevance string) string {

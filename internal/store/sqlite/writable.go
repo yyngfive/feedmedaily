@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS feedback (
   paper_id INTEGER NOT NULL,
   original_relevance TEXT NOT NULL,
   corrected_relevance TEXT NOT NULL,
+  original_topic TEXT,
+  corrected_topic TEXT,
   note TEXT,
   state TEXT NOT NULL DEFAULT 'open',
   used_in_prompt INTEGER NOT NULL DEFAULT 0,
@@ -150,6 +152,12 @@ func ensureMutableSchema(db *sql.DB) error {
 		return err
 	}
 	if err := ensureColumn(db, "profile_proposals", "applied_profile_json", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumn(db, "feedback", "original_topic", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumn(db, "feedback", "corrected_topic", "TEXT"); err != nil {
 		return err
 	}
 	return nil

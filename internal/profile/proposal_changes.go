@@ -26,12 +26,16 @@ const (
 )
 
 type ProposalChange struct {
-	ID                string            `json:"id"`
-	Section           string            `json:"section"`
-	Operation         string            `json:"operation"`
-	Summary           string            `json:"summary"`
-	TextBefore        []string          `json:"text_before"`
-	TextAfter         []string          `json:"text_after"`
+	ID          string   `json:"id"`
+	Section     string   `json:"section"`
+	Operation   string   `json:"operation"`
+	Summary     string   `json:"summary"`
+	TextBefore  []string `json:"text_before"`
+	TextAfter   []string `json:"text_after"`
+	// TopicsBefore/TopicsAfter 是规则变更携带的主题 label 列表（direct/indirect 专属），
+	// apply 时才解析为注册表 id；topic section 变更仍使用 topic_before/topic_after。
+	TopicsBefore      []string          `json:"topics_before"`
+	TopicsAfter       []string          `json:"topics_after"`
 	TopicBefore       []topicDefinition `json:"topic_before"`
 	TopicAfter        []topicDefinition `json:"topic_after"`
 	Rationale         string            `json:"rationale"`
@@ -77,6 +81,8 @@ func (change *ProposalChange) UnmarshalJSON(data []byte) error {
 		Summary           string             `json:"summary"`
 		TextBefore        flexibleStringList `json:"text_before"`
 		TextAfter         flexibleStringList `json:"text_after"`
+		TopicsBefore      flexibleStringList `json:"topics_before"`
+		TopicsAfter       flexibleStringList `json:"topics_after"`
 		TopicBefore       []topicDefinition  `json:"topic_before"`
 		TopicAfter        []topicDefinition  `json:"topic_after"`
 		Rationale         string             `json:"rationale"`
@@ -94,6 +100,8 @@ func (change *ProposalChange) UnmarshalJSON(data []byte) error {
 		Summary:           payload.Summary,
 		TextBefore:        []string(payload.TextBefore),
 		TextAfter:         []string(payload.TextAfter),
+		TopicsBefore:      []string(payload.TopicsBefore),
+		TopicsAfter:       []string(payload.TopicsAfter),
 		TopicBefore:       payload.TopicBefore,
 		TopicAfter:        payload.TopicAfter,
 		Rationale:         payload.Rationale,
@@ -229,8 +237,16 @@ func normalizeProposalChanges(changes []ProposalChange) ([]ProposalChange, error
 		next.Status = strings.TrimSpace(next.Status)
 		next.TextBefore = normalizeRuleList(next.TextBefore)
 		next.TextAfter = normalizeRuleList(next.TextAfter)
-		next.TopicBefore = compactTopics(next.TopicBefore)
-		next.TopicAfter = compactTopics(next.TopicAfter)
+		next.TopicsBefore = normalizeLabelList(next.TopicsBefore)
+		next.TopicsAfter = normalizeLabelList(next.TopicsAfter)
+		// topic add 变更的 topic_after 允许缺 id（label-only），按 label 去重。
+		if next.Section == ProposalSectionTopic {
+			next.TopicBefore = normalizeLabelOnlyTopics(next.TopicBefore)
+			next.TopicAfter = normalizeLabelOnlyTopics(next.TopicAfter)
+		} else {
+			next.TopicBefore = compactTopics(next.TopicBefore)
+			next.TopicAfter = compactTopics(next.TopicAfter)
+		}
 		next.SourceFeedbackIDs = normalizeInt64List(next.SourceFeedbackIDs)
 		next.SourcePaperIDs = normalizeInt64List(next.SourcePaperIDs)
 		if err := next.validate(); err != nil {
@@ -243,6 +259,41 @@ func normalizeProposalChanges(changes []ProposalChange) ([]ProposalChange, error
 		result = append(result, next)
 	}
 	return result, nil
+}
+
+func normalizeLabelList(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		clean := normalizeText(value)
+		if clean == "" {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		result = append(result, clean)
+	}
+	return result
+}
+
+// normalizeLabelOnlyTopics 规整 label-only 主题条目：保留缺失的 id，按 label 去重。
+func normalizeLabelOnlyTopics(items []topicDefinition) []topicDefinition {
+	result := make([]topicDefinition, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		label := normalizeText(item.Label)
+		if label == "" {
+			continue
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		result = append(result, topicDefinition{ID: strings.TrimSpace(item.ID), Label: label})
+	}
+	return result
 }
 
 func normalizeProposalOperation(value string) string {
@@ -279,7 +330,26 @@ func (c ProposalChange) validate() error {
 	default:
 		return fmt.Errorf("unsupported proposal change status: %s", c.Status)
 	}
-	if c.Section == ProposalSectionTopic {
+	// 主题标签 label 列表只允许出现在 direct/indirect 规则变更上。
+	if c.Section != ProposalSectionDirectRule && c.Section != ProposalSectionIndirectRule {
+		if len(c.TopicsBefore) > 0 || len(c.TopicsAfter) > 0 {
+			return fmt.Errorf("section %s cannot include topics_before or topics_after", c.Section)
+		}
+	}
+	switch c.Section {
+	case ProposalSectionScope, ProposalSectionUnrelatedRule:
+		if len(c.TopicBefore) > 0 || len(c.TopicAfter) > 0 {
+			return fmt.Errorf("text changes cannot include topic_before or topic_after")
+		}
+	case ProposalSectionDirectRule, ProposalSectionIndirectRule:
+		if len(c.TopicBefore) > 0 || len(c.TopicAfter) > 0 {
+			return fmt.Errorf("rule changes cannot include topic_before or topic_after; use topics_before/topics_after")
+		}
+	case ProposalSectionTopic:
+		// 主题注册表变更只允许 add：删除/改名/合并由用户在编辑器手动完成。
+		if c.Operation != ProposalOperationAdd {
+			return fmt.Errorf("topic changes support only the add operation")
+		}
 		if len(c.TextBefore) > 0 || len(c.TextAfter) > 0 {
 			return fmt.Errorf("topic changes cannot include text_before or text_after")
 		}
@@ -288,40 +358,33 @@ func (c ProposalChange) validate() error {
 				return err
 			}
 		}
-		for _, item := range c.TopicAfter {
-			if err := item.validate(); err != nil {
-				return err
-			}
+		if len(c.TopicAfter) == 0 {
+			return fmt.Errorf("topic add changes require topic_after")
 		}
-	} else {
-		if len(c.TopicBefore) > 0 || len(c.TopicAfter) > 0 {
-			return fmt.Errorf("text changes cannot include topic_before or topic_after")
+		for _, item := range c.TopicAfter {
+			if strings.TrimSpace(item.Label) == "" {
+				return fmt.Errorf("topic add changes require a non-blank label")
+			}
 		}
 	}
 	switch c.Operation {
 	case ProposalOperationAdd:
-		if c.Section == ProposalSectionTopic && len(c.TopicAfter) == 0 {
-			return fmt.Errorf("topic add changes require topic_after")
-		}
 		if c.Section != ProposalSectionTopic && len(c.TextAfter) == 0 {
 			return fmt.Errorf("text add changes require text_after")
 		}
 	case ProposalOperationRemove:
-		if c.Section == ProposalSectionTopic && len(c.TopicBefore) == 0 {
-			return fmt.Errorf("topic remove changes require topic_before")
+		if c.Section == ProposalSectionTopic {
+			return fmt.Errorf("topic changes support only the add operation")
 		}
-		if c.Section != ProposalSectionTopic && len(c.TextBefore) == 0 {
+		if len(c.TextBefore) == 0 {
 			return fmt.Errorf("text remove changes require text_before")
 		}
 	case ProposalOperationRewrite, ProposalOperationMerge:
 		if c.Section == ProposalSectionTopic {
-			if len(c.TopicBefore) == 0 || len(c.TopicAfter) == 0 {
-				return fmt.Errorf("topic rewrite and merge changes require before and after topics")
-			}
-		} else {
-			if len(c.TextBefore) == 0 || len(c.TextAfter) == 0 {
-				return fmt.Errorf("text rewrite and merge changes require text_before and text_after")
-			}
+			return fmt.Errorf("topic changes support only the add operation")
+		}
+		if len(c.TextBefore) == 0 || len(c.TextAfter) == 0 {
+			return fmt.Errorf("text rewrite and merge changes require text_before and text_after")
 		}
 	}
 	return nil
@@ -345,6 +408,28 @@ func normalizeInt64List(values []int64) []int64 {
 
 func applyProposalChanges(base profileDocument, changes []ProposalChange, include func(ProposalChange) bool) (profileDocument, error) {
 	current := compactDocument(base)
+	// 先应用 topic add 变更并建立 label→id 解析表，规则标签引用才能解析。
+	labelToID := map[string]string{}
+	for _, topic := range current.TopicTaxonomy {
+		labelToID[strings.ToLower(topic.Label)] = topic.ID
+	}
+	for _, change := range changes {
+		if !include(change) || change.Section != ProposalSectionTopic {
+			continue
+		}
+		for _, item := range change.TopicAfter {
+			label := strings.TrimSpace(item.Label)
+			if label == "" {
+				continue
+			}
+			if _, exists := labelToID[strings.ToLower(label)]; exists {
+				continue
+			}
+			entry := topicDefinition{ID: newTopicID(), Label: label}
+			current.TopicTaxonomy = append(current.TopicTaxonomy, entry)
+			labelToID[strings.ToLower(label)] = entry.ID
+		}
+	}
 	for _, change := range changes {
 		if !include(change) {
 			continue
@@ -356,11 +441,19 @@ func applyProposalChanges(base profileDocument, changes []ProposalChange, includ
 			}
 			current.Scope = strings.TrimSpace(change.TextAfter[0])
 		case ProposalSectionDirectRule:
-			current.RelevanceRules.Direct = applyRuleChange(current.RelevanceRules.Direct, change)
+			tags, err := resolveTopicTags(change, labelToID)
+			if err != nil {
+				return profileDocument{}, err
+			}
+			current.RelevanceRules.Direct = applyRuleChange(current.RelevanceRules.Direct, change, tags)
 		case ProposalSectionIndirectRule:
-			current.RelevanceRules.Indirect = applyRuleChange(current.RelevanceRules.Indirect, change)
+			tags, err := resolveTopicTags(change, labelToID)
+			if err != nil {
+				return profileDocument{}, err
+			}
+			current.RelevanceRules.Indirect = applyRuleChange(current.RelevanceRules.Indirect, change, tags)
 		case ProposalSectionUnrelatedRule:
-			current.RelevanceRules.Unrelated = applyRuleChange(current.RelevanceRules.Unrelated, change)
+			current.RelevanceRules.Unrelated = applyRuleChange(current.RelevanceRules.Unrelated, change, nil)
 		case ProposalSectionTopic:
 			continue
 		default:
@@ -371,28 +464,57 @@ func applyProposalChanges(base profileDocument, changes []ProposalChange, includ
 	return current, nil
 }
 
-func applyRuleChange(base []string, change ProposalChange) []string {
+// resolveTopicTags 把规则变更的主题 label 解析为注册表 id（大小写不敏感）。
+// 引用了既不在注册表、也不由本次 topic add 变更提供的 label 时返回错误。
+func resolveTopicTags(change ProposalChange, labelToID map[string]string) ([]string, error) {
+	result := make([]string, 0, len(change.TopicsAfter))
+	for _, label := range change.TopicsAfter {
+		clean := strings.TrimSpace(label)
+		if clean == "" {
+			continue
+		}
+		id, ok := labelToID[strings.ToLower(clean)]
+		if !ok {
+			return nil, fmt.Errorf("change %s references unknown topic label: %s", change.ID, clean)
+		}
+		result = append(result, id)
+	}
+	return result, nil
+}
+
+func applyRuleChange(base []classificationRule, change ProposalChange, tags []string) []classificationRule {
 	switch change.Operation {
 	case ProposalOperationAdd:
-		return normalizeRuleList(append(append([]string{}, base...), change.TextAfter...))
+		return appendRuleObjects(base, change.TextAfter, tags)
 	case ProposalOperationRemove:
 		return removeRules(base, change.TextBefore)
 	case ProposalOperationRewrite, ProposalOperationMerge:
 		next := removeRules(base, change.TextBefore)
-		return normalizeRuleList(append(next, change.TextAfter...))
+		return appendRuleObjects(next, change.TextAfter, tags)
 	default:
-		return normalizeRuleList(base)
+		return normalizeRuleObjects(base)
 	}
 }
 
-func removeRules(base []string, targets []string) []string {
+func appendRuleObjects(base []classificationRule, texts []string, tags []string) []classificationRule {
+	merged := append([]classificationRule{}, base...)
+	for _, text := range texts {
+		merged = append(merged, classificationRule{
+			Text:     text,
+			TopicIDs: append([]string{}, tags...),
+		})
+	}
+	return normalizeRuleObjects(merged)
+}
+
+func removeRules(base []classificationRule, targets []string) []classificationRule {
 	removals := map[string]struct{}{}
 	for _, target := range normalizeRuleList(targets) {
 		removals[target] = struct{}{}
 	}
-	result := make([]string, 0, len(base))
-	for _, item := range normalizeRuleList(base) {
-		if _, ok := removals[item]; ok {
+	result := make([]classificationRule, 0, len(base))
+	for _, item := range normalizeRuleObjects(base) {
+		if _, ok := removals[item.Text]; ok {
 			continue
 		}
 		result = append(result, item)

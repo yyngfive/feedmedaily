@@ -64,7 +64,7 @@ func TestClassifyPapersWithTranslationFallback(t *testing.T) {
 	if requests[0]["model"] != "test-model" || requests[0]["temperature"].(float64) != 0 {
 		t.Fatalf("unexpected classification request: %#v", requests[0])
 	}
-	if requests[0]["max_tokens"].(float64) != 600 {
+	if requests[0]["max_tokens"].(float64) != 650 {
 		t.Fatalf("unexpected classification max_tokens: %#v", requests[0]["max_tokens"])
 	}
 	if requests[0]["thinking"].(map[string]any)["type"] != "enabled" {
@@ -375,7 +375,7 @@ func TestClassifyPapersUsesCompactOutputAndDerivesRecommendedActions(t *testing.
 	}
 }
 
-func TestClassifyPapersFallbackDisablesThinkingAndClearsTopicTags(t *testing.T) {
+func TestClassifyPapersFallbackDisablesThinkingAndWritesTopicSentinel(t *testing.T) {
 	requests := []map[string]any{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -425,8 +425,9 @@ func TestClassifyPapersFallbackDisablesThinkingAndClearsTopicTags(t *testing.T) 
 	if requests[1]["thinking"].(map[string]any)["type"] != "disabled" {
 		t.Fatalf("unexpected fallback thinking: %#v", requests[1]["thinking"])
 	}
-	if len(results[0].TopicTags) != 0 {
-		t.Fatalf("expected empty topic tags for direct paper, got %#v", results[0].TopicTags)
+	// 模型未返回 topic 时：related 论文落哨兵 none（判定过但无主题），unrelated 保持空。
+	if len(results[0].TopicTags) != 1 || results[0].TopicTags[0] != store.TopicNoneID {
+		t.Fatalf("expected sentinel topic for direct paper, got %#v", results[0].TopicTags)
 	}
 	if len(results[1].TopicTags) != 0 {
 		t.Fatalf("expected empty topic tags for unrelated paper, got %#v", results[1].TopicTags)
@@ -633,5 +634,63 @@ func TestNonOpenCodeProviderKeepsDefaultUserAgent(t *testing.T) {
 	}
 	if capturedUserAgent != "Go-http-client/1.1" {
 		t.Fatalf("non-OpenCode requests must keep the default User-Agent, got %q", capturedUserAgent)
+	}
+}
+
+func TestAssignTopicsBatchRoutesAndSkipsWithoutTaggedRules(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"topic\":\"t-rna00001\"},{\"id\":\"2\",\"topic\":\"t-hallucin\"},{\"id\":\"3\",\"topic\":\"\"}]}"}}]}`))
+	}))
+	defer server.Close()
+
+	profile := map[string]any{
+		"scope": "RNA biology",
+		"relevance_rules": map[string]any{
+			"direct":    []any{map[string]any{"text": "RNA chemistry", "topics": []any{"t-rna00001"}}},
+			"indirect":  []any{map[string]any{"text": "Related context", "topics": []any{}}},
+			"unrelated": []any{map[string]any{"text": "Plant biology", "topics": []any{}}},
+		},
+		"topic_taxonomy": []any{
+			map[string]any{"id": "t-rna00001", "label": "RNA Bio"},
+		},
+	}
+	papers := []store.Paper{{ID: 11, Title: "RNA paper"}, {ID: 12, Title: "Other paper"}, {ID: 13, Title: "Third paper"}}
+	result, err := AssignTopicsBatch(papers, profile, LLMConfig{APIKey: "test-key", Model: "test-model", BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result[11] != "t-rna00001" {
+		t.Fatalf("expected valid topic id, got %#v", result[11])
+	}
+	// 幻觉 id 必须按空主题处理，由调用方写哨兵。
+	if result[12] != "" {
+		t.Fatalf("expected hallucinated id to normalize to empty, got %#v", result[12])
+	}
+	if result[13] != "" {
+		t.Fatalf("expected empty topic, got %#v", result[13])
+	}
+	if requests != 1 {
+		t.Fatalf("expected 1 LLM request, got %d", requests)
+	}
+
+	// 没有带标规则时跳过 LLM：直接返回全空结果。
+	untagged := map[string]any{
+		"scope":           "RNA biology",
+		"relevance_rules": map[string]any{"direct": []any{map[string]any{"text": "RNA", "topics": []any{}}}, "indirect": []any{}, "unrelated": []any{}},
+		"topic_taxonomy":  profile["topic_taxonomy"],
+	}
+	result, err = AssignTopicsBatch(papers, untagged, LLMConfig{APIKey: "test-key", Model: "test-model", BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Fatalf("expected no additional LLM request without tagged rules, got %d total", requests)
+	}
+	for _, paper := range papers {
+		if result[paper.ID] != "" {
+			t.Fatalf("expected empty topic for paper %d, got %#v", paper.ID, result[paper.ID])
+		}
 	}
 }

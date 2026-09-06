@@ -2,6 +2,7 @@ package profile
 
 import (
 	"bytes"
+	crand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -44,10 +45,58 @@ type profileFewShot struct {
 	Rationale string   `json:"rationale"`
 }
 
+// TopicNoneID 是分类存储里的保留哨兵：判定过但无主题。它永远不能作为
+// 注册表主题 id 出现，分类器与补跑用它区分“判定为空”和“从未判定”。
+const TopicNoneID = "none"
+
+// classificationRule 是带可选主题标签的分类规则。旧 profile 里规则是纯字符串，
+// UnmarshalJSON 同时接受两种形态以完成透明迁移。
+type classificationRule struct {
+	Text     string   `json:"text"`
+	TopicIDs []string `json:"topics"`
+}
+
+func (r *classificationRule) UnmarshalJSON(data []byte) error {
+	clean := strings.TrimSpace(string(data))
+	if clean == "" || clean == "null" {
+		*r = classificationRule{TopicIDs: []string{}}
+		return nil
+	}
+	if strings.HasPrefix(clean, `"`) {
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return err
+		}
+		*r = classificationRule{Text: value, TopicIDs: []string{}}
+		return nil
+	}
+	var payload struct {
+		Text     string   `json:"text"`
+		TopicIDs []string `json:"topics"`
+	}
+	if err := decodeStrict(data, &payload); err != nil {
+		return err
+	}
+	if payload.TopicIDs == nil {
+		payload.TopicIDs = []string{}
+	}
+	*r = payload
+	return nil
+}
+
 type relevanceRules struct {
-	Direct    []string `json:"direct"`
-	Indirect  []string `json:"indirect"`
-	Unrelated []string `json:"unrelated"`
+	Direct    []classificationRule `json:"direct"`
+	Indirect  []classificationRule `json:"indirect"`
+	Unrelated []classificationRule `json:"unrelated"`
+}
+
+// ruleTexts 提取规则的纯文本列表，供按文本匹配的旧逻辑复用。
+func ruleTexts(rules []classificationRule) []string {
+	result := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		result = append(result, rule.Text)
+	}
+	return result
 }
 
 type proposalDelta struct {
@@ -212,10 +261,112 @@ func parseDocumentBytes(data []byte) (profileDocument, error) {
 	if err := decodeStrict(data, &document); err != nil {
 		return profileDocument{}, fmt.Errorf("parse classification profile: %w", err)
 	}
+	// 模型与编辑器允许只提交 label；进入校验前给缺 id 的主题补系统 id。
+	assignTopicIDs(&document)
+	resolveRuleTopicLabels(&document)
 	if err := document.validate(); err != nil {
 		return profileDocument{}, err
 	}
 	return document, nil
+}
+
+// assignTopicIDs 给缺 id 的主题注册表条目分配系统 id，并保证 id 在注册表内唯一。
+// 保留 id "none" 不改写，留给 validate 拒绝。
+func assignTopicIDs(document *profileDocument) {
+	used := map[string]struct{}{}
+	for index := range document.TopicTaxonomy {
+		topic := &document.TopicTaxonomy[index]
+		topic.ID = normalizeTopicID(topic.ID)
+		if topic.ID == "" {
+			topic.ID = newTopicID()
+		}
+		for {
+			if _, exists := used[topic.ID]; !exists {
+				break
+			}
+			topic.ID = newTopicID()
+		}
+		used[topic.ID] = struct{}{}
+	}
+}
+
+// resolveRuleTopicLabels 把规则主题标签里按 label 书写的值解析成注册表 id。
+// onboarding 契约允许模型用 label 给规则打标；已注册 id 原样保留，未匹配的值
+// 留给 validate 拒绝。label 匹配大小写不敏感，与注册表唯一性口径一致。
+func resolveRuleTopicLabels(document *profileDocument) {
+	byID := map[string]struct{}{}
+	labelToID := map[string]string{}
+	for _, topic := range document.TopicTaxonomy {
+		byID[topic.ID] = struct{}{}
+		labelToID[strings.ToLower(topic.Label)] = topic.ID
+	}
+	resolve := func(rule *classificationRule) {
+		for index, value := range rule.TopicIDs {
+			if _, ok := byID[value]; ok {
+				continue
+			}
+			if id, ok := labelToID[strings.ToLower(value)]; ok {
+				rule.TopicIDs[index] = id
+			}
+		}
+	}
+	for index := range document.RelevanceRules.Direct {
+		resolve(&document.RelevanceRules.Direct[index])
+	}
+	for index := range document.RelevanceRules.Indirect {
+		resolve(&document.RelevanceRules.Indirect[index])
+	}
+}
+
+// newTopicID 生成注册表主题 id：t- 前缀 + 8 位小写字母数字（不含 o/i/l，
+// 天然不会与保留哨兵 none 冲突）。
+var newTopicIDFunc = newRandomTopicID
+
+func newTopicID() string {
+	return newTopicIDFunc()
+}
+
+func newRandomTopicID() string {
+	const alphabet = "0123456789abcdefghjkmnpqrstvwxyz"
+	raw := make([]byte, 8)
+	if _, err := crand.Read(raw); err != nil {
+		// crypto/rand 失败时退回时间戳派生 id，保证流程不中断。
+		return fmt.Sprintf("t-%x", time.Now().UTC().UnixNano())
+	}
+	for index, value := range raw {
+		raw[index] = alphabet[int(value)%len(alphabet)]
+	}
+	return "t-" + string(raw)
+}
+
+// AppendTopicEntry 往当前 profile 注册表追加一个新主题并递增版本。
+// label 已存在时原样返回现有条目且不写文件（changed=false），供反馈弹窗幂等建主题。
+func AppendTopicEntry(current map[string]any, label string, now time.Time) (updated map[string]any, topic topicDefinition, changed bool, err error) {
+	clean := normalizeText(label)
+	if clean == "" {
+		return nil, topicDefinition{}, false, fmt.Errorf("topic label cannot be blank")
+	}
+	if current == nil {
+		return nil, topicDefinition{}, false, fmt.Errorf("no classification profile exists yet")
+	}
+	document, err := parseDocumentMap(current)
+	if err != nil {
+		return nil, topicDefinition{}, false, err
+	}
+	for _, existing := range document.TopicTaxonomy {
+		if strings.EqualFold(strings.TrimSpace(existing.Label), clean) {
+			return current, existing, false, nil
+		}
+	}
+	entry := topicDefinition{ID: newTopicID(), Label: clean}
+	document.TopicTaxonomy = append(document.TopicTaxonomy, entry)
+	document.Meta.Version = document.Meta.Version + 1
+	document.Meta.UpdatedAt = now.UTC()
+	payload, _, err := compactDocumentMap(document)
+	if err != nil {
+		return nil, topicDefinition{}, false, err
+	}
+	return payload, entry, true, nil
 }
 
 func parseDocumentMap(payload map[string]any) (profileDocument, error) {
@@ -269,9 +420,41 @@ func (d profileDocument) validate() error {
 	if len(d.FewShots) > 2 {
 		return fmt.Errorf("classification profile few_shots cannot contain more than 2 items")
 	}
+	labels := map[string]struct{}{}
 	for _, topic := range d.TopicTaxonomy {
 		if err := topic.validate(); err != nil {
 			return err
+		}
+		label := strings.ToLower(strings.TrimSpace(topic.Label))
+		if _, exists := labels[label]; exists {
+			return fmt.Errorf("classification profile topic labels must be unique: %s", topic.Label)
+		}
+		labels[label] = struct{}{}
+	}
+	topicIDs := map[string]struct{}{}
+	for _, topic := range d.TopicTaxonomy {
+		topicIDs[topic.ID] = struct{}{}
+	}
+	for _, section := range []struct {
+		name  string
+		rules []classificationRule
+	}{
+		{"direct", d.RelevanceRules.Direct},
+		{"indirect", d.RelevanceRules.Indirect},
+		{"unrelated", d.RelevanceRules.Unrelated},
+	} {
+		for _, rule := range section.rules {
+			if strings.TrimSpace(rule.Text) == "" {
+				return fmt.Errorf("classification profile %s rule text cannot be blank", section.name)
+			}
+			if section.name == "unrelated" && len(rule.TopicIDs) > 0 {
+				return fmt.Errorf("unrelated rules cannot carry topic tags")
+			}
+			for _, topicID := range rule.TopicIDs {
+				if _, ok := topicIDs[topicID]; !ok {
+					return fmt.Errorf("classification profile rule references unknown topic id: %s", topicID)
+				}
+			}
 		}
 	}
 	for _, shot := range d.FewShots {
@@ -293,8 +476,9 @@ func compactDocument(document profileDocument) profileDocument {
 		},
 		Scope:          strings.TrimSpace(document.Scope),
 		RelevanceRules: compactRules(document.RelevanceRules),
-		TopicTaxonomy:  []topicDefinition{},
-		FewShots:       []profileFewShot{},
+		// topic_taxonomy 是活的规则主题注册表：写回时保留并去重，不再清空。
+		TopicTaxonomy: compactTopics(document.TopicTaxonomy),
+		FewShots:      []profileFewShot{},
 	}
 }
 
@@ -317,6 +501,9 @@ func (m profileMeta) validate() error {
 func (t topicDefinition) validate() error {
 	if strings.TrimSpace(t.ID) == "" {
 		return fmt.Errorf("classification profile topic id cannot be blank")
+	}
+	if t.ID == TopicNoneID {
+		return fmt.Errorf("classification profile topic id %s is reserved", TopicNoneID)
 	}
 	if strings.TrimSpace(t.Label) == "" {
 		return fmt.Errorf("classification profile topic label cannot be blank")
@@ -365,9 +552,9 @@ func validateRelevance(value string) error {
 
 func compactRules(rules relevanceRules) relevanceRules {
 	return relevanceRules{
-		Direct:    normalizeRuleList(rules.Direct),
-		Indirect:  normalizeRuleList(rules.Indirect),
-		Unrelated: normalizeRuleList(rules.Unrelated),
+		Direct:    normalizeRuleObjects(rules.Direct),
+		Indirect:  normalizeRuleObjects(rules.Indirect),
+		Unrelated: normalizeRuleObjects(rules.Unrelated),
 	}
 }
 
@@ -425,6 +612,26 @@ func normalizeRuleList(items []string) []string {
 	return result
 }
 
+func normalizeRuleObjects(items []classificationRule) []classificationRule {
+	result := make([]classificationRule, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		clean := normalizeText(item.Text)
+		if clean == "" {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		result = append(result, classificationRule{
+			Text:     clean,
+			TopicIDs: normalizeTopicIDs(item.TopicIDs),
+		})
+	}
+	return result
+}
+
 func normalizeTopicIDs(items []string) []string {
 	result := make([]string, 0, len(items))
 	seen := map[string]struct{}{}
@@ -443,7 +650,8 @@ func normalizeTopicIDs(items []string) []string {
 }
 
 func normalizeTopicID(value string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(strings.TrimSpace(value)), " ", "_"), "-", "_")
+	// 系统 id 形如 t-xxxx；只做 trim 和小写，不改写连字符，避免 id 在读写间漂移。
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func normalizeText(value string) string {

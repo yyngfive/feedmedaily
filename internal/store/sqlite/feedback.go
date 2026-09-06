@@ -15,12 +15,16 @@ func (s *Store) ListFeedback() ([]FeedbackRecord, error) {
 	}
 	rows, err := s.db.Query(fmt.Sprintf(`
 		SELECT f.id, f.paper_id, p.title AS paper_title,
-			f.original_relevance, f.corrected_relevance, f.note,
+			f.original_relevance, f.corrected_relevance,
+			%s AS original_topic, %s AS corrected_topic, f.note,
 			%s AS state, %s AS used_in_prompt, f.created_at
 		FROM feedback f
 		JOIN papers p ON p.id = f.paper_id
 		ORDER BY f.created_at DESC, f.id DESC
-	`, s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen)), s.columnExpr(s.feedbackColumns, "used_in_prompt", "0")))
+	`,
+		s.columnExpr(s.feedbackColumns, "original_topic", "NULL"),
+		s.columnExpr(s.feedbackColumns, "corrected_topic", "NULL"),
+		s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen)), s.columnExpr(s.feedbackColumns, "used_in_prompt", "0")))
 	if err != nil {
 		return nil, fmt.Errorf("query feedback: %w", err)
 	}
@@ -46,12 +50,16 @@ func (s *Store) ListOpenFeedbackContexts() ([]ProposalFeedbackContext, error) {
 	}
 	rows, err := s.db.Query(fmt.Sprintf(`
 		SELECT f.id, f.paper_id, p.title AS paper_title, p.journal, p.abstract,
-			f.original_relevance, f.corrected_relevance, f.note
+			f.original_relevance, f.corrected_relevance,
+			%s AS original_topic, %s AS corrected_topic, f.note
 		FROM feedback f
 		JOIN papers p ON p.id = f.paper_id
 		WHERE %s = ?
 		ORDER BY f.created_at DESC, f.id DESC
-	`, s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen))), feedbackStateOpen)
+	`,
+		s.columnExpr(s.feedbackColumns, "original_topic", "NULL"),
+		s.columnExpr(s.feedbackColumns, "corrected_topic", "NULL"),
+		s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen))), feedbackStateOpen)
 	if err != nil {
 		return nil, fmt.Errorf("query open feedback contexts: %w", err)
 	}
@@ -63,6 +71,8 @@ func (s *Store) ListOpenFeedbackContexts() ([]ProposalFeedbackContext, error) {
 		var journal sql.NullString
 		var abstract sql.NullString
 		var note sql.NullString
+		var originalTopic sql.NullString
+		var correctedTopic sql.NullString
 		if err := rows.Scan(
 			&item.FeedbackID,
 			&item.PaperID,
@@ -71,6 +81,8 @@ func (s *Store) ListOpenFeedbackContexts() ([]ProposalFeedbackContext, error) {
 			&abstract,
 			&item.OriginalRelevance,
 			&item.CorrectedRelevance,
+			&originalTopic,
+			&correctedTopic,
 			&note,
 		); err != nil {
 			return nil, fmt.Errorf("scan open feedback context: %w", err)
@@ -78,6 +90,13 @@ func (s *Store) ListOpenFeedbackContexts() ([]ProposalFeedbackContext, error) {
 		item.Journal = nullableString(journal)
 		item.Abstract = nullableString(abstract)
 		item.Note = nullableString(note)
+		if originalTopic.Valid {
+			item.OriginalTopic = originalTopic.String
+		}
+		if correctedTopic.Valid {
+			value := correctedTopic.String
+			item.CorrectedTopic = &value
+		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -92,12 +111,16 @@ func (s *Store) FeedbackByID(id int64) (*FeedbackRecord, error) {
 	}
 	row := s.db.QueryRow(fmt.Sprintf(`
 		SELECT f.id, f.paper_id, p.title AS paper_title,
-			f.original_relevance, f.corrected_relevance, f.note,
+			f.original_relevance, f.corrected_relevance,
+			%s AS original_topic, %s AS corrected_topic, f.note,
 			%s AS state, %s AS used_in_prompt, f.created_at
 		FROM feedback f
 		JOIN papers p ON p.id = f.paper_id
 		WHERE f.id = ?
-	`, s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen)), s.columnExpr(s.feedbackColumns, "used_in_prompt", "0")), id)
+	`,
+		s.columnExpr(s.feedbackColumns, "original_topic", "NULL"),
+		s.columnExpr(s.feedbackColumns, "corrected_topic", "NULL"),
+		s.columnExpr(s.feedbackColumns, "state", quote(feedbackStateOpen)), s.columnExpr(s.feedbackColumns, "used_in_prompt", "0")), id)
 	record, err := scanFeedbackRecord(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "sql: no rows in result set") {
@@ -108,7 +131,7 @@ func (s *Store) FeedbackByID(id int64) (*FeedbackRecord, error) {
 	return &record, nil
 }
 
-func (s *Store) CreateFeedback(paperID int64, correctedRelevance string, note *string, now time.Time) (*FeedbackRecord, error) {
+func (s *Store) CreateFeedback(paperID int64, correctedRelevance string, correctedTopic *string, note *string, now time.Time) (*FeedbackRecord, error) {
 	if !isSupportedRelevance(correctedRelevance) {
 		return nil, fmt.Errorf("unsupported relevance value: %s", correctedRelevance)
 	}
@@ -126,12 +149,18 @@ func (s *Store) CreateFeedback(paperID int64, correctedRelevance string, note *s
 	if classification == nil {
 		return nil, ErrClassificationNotFound
 	}
+	// original_topic 记录纠正前的原始值（可能是哨兵 none 或真实 id）；
+	// corrected_topic 为 nil 表示用户要求“无主题”。
+	var originalTopic any
+	if len(classification.TopicTags) > 0 {
+		originalTopic = classification.TopicTags[0]
+	}
 	result, err := s.db.Exec(`
 		INSERT INTO feedback (
-			paper_id, original_relevance, corrected_relevance, note, state, used_in_prompt, created_at
+			paper_id, original_relevance, corrected_relevance, original_topic, corrected_topic, note, state, used_in_prompt, created_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, paperID, classification.Relevance, correctedRelevance, note, feedbackStateOpen, 0, now.UTC().Format(time.RFC3339Nano))
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, paperID, classification.Relevance, correctedRelevance, originalTopic, correctedTopic, note, feedbackStateOpen, 0, now.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, fmt.Errorf("insert feedback: %w", err)
 	}
@@ -213,16 +242,20 @@ func (s *Store) PaperIDsForFeedbackIDs(ids []int64) ([]int64, error) {
 
 func scanFeedbackRecord(scanner interface{ Scan(dest ...any) error }) (FeedbackRecord, error) {
 	var record FeedbackRecord
+	var originalTopic sql.NullString
+	var correctedTopic sql.NullString
 	var note sql.NullString
 	var usedInPrompt int64
 	var createdAt string
-	if err := scanner.Scan(&record.ID, &record.PaperID, &record.PaperTitle, &record.OriginalRelevance, &record.CorrectedRelevance, &note, &record.State, &usedInPrompt, &createdAt); err != nil {
+	if err := scanner.Scan(&record.ID, &record.PaperID, &record.PaperTitle, &record.OriginalRelevance, &record.CorrectedRelevance, &originalTopic, &correctedTopic, &note, &record.State, &usedInPrompt, &createdAt); err != nil {
 		return FeedbackRecord{}, fmt.Errorf("scan feedback row: %w", err)
 	}
 	parsed, err := parseTime(createdAt)
 	if err != nil {
 		return FeedbackRecord{}, fmt.Errorf("parse feedback created_at: %w", err)
 	}
+	record.OriginalTopic = nullableString(originalTopic)
+	record.CorrectedTopic = nullableString(correctedTopic)
 	record.Note = nullableString(note)
 	record.UsedInProfile = usedInPrompt != 0
 	record.CreatedAt = parsed

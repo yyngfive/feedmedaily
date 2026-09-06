@@ -98,18 +98,22 @@ func TestCreateDeleteFeedbackAndMarkRead(t *testing.T) {
 	seedMutableFixture(t, db)
 	db.Close()
 
-	store, err := Open(path)
+	// 写路径总是先经 OpenOrCreate 完成列迁移（与服务器启动行为一致），再打开写 store。
+	store, err := OpenOrCreate(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 
-	record, err := store.CreateFeedback(1, "direct", stringPointer("Make it direct."), time.Date(2026, 5, 16, 4, 0, 0, 0, time.UTC))
+	record, err := store.CreateFeedback(1, "direct", nil, stringPointer("Make it direct."), time.Date(2026, 5, 16, 4, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if record.OriginalRelevance != "indirect" || record.CorrectedRelevance != "direct" {
 		t.Fatalf("unexpected feedback record: %#v", record)
+	}
+	if record.OriginalTopic != nil || record.CorrectedTopic != nil {
+		t.Fatalf("unexpected topic fields: %#v", record)
 	}
 
 	firstReadAt, err := store.MarkPaperRead(1, time.Date(2026, 5, 16, 5, 0, 0, 0, time.UTC))
@@ -134,7 +138,104 @@ func TestCreateDeleteFeedbackAndMarkRead(t *testing.T) {
 	if err := store.DeleteFeedback(record.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateFeedback(999, "direct", nil, time.Now().UTC()); err == nil {
+	if _, err := store.CreateFeedback(999, "direct", nil, nil, time.Now().UTC()); err == nil {
 		t.Fatal("expected missing paper error")
+	}
+}
+
+func TestCreateFeedbackStoresTopicCorrection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	db := openSQLiteTestDB(t, path)
+	seedMutableFixture(t, db)
+	db.Close()
+
+	store, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if err := store.SaveClassification(1, Classification{
+		Relevance: "indirect", Confidence: 0.8, Reason: "fixture",
+		TopicTags: []string{TopicNoneID}, RecommendedAction: "scan", Model: "fixture",
+	}, time.Date(2026, 5, 16, 3, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	record, err := store.CreateFeedback(1, "indirect", stringPointer("t-topic001"), nil, time.Date(2026, 5, 16, 4, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.OriginalTopic == nil || *record.OriginalTopic != TopicNoneID {
+		t.Fatalf("expected original topic sentinel, got %#v", record.OriginalTopic)
+	}
+	if record.CorrectedTopic == nil || *record.CorrectedTopic != "t-topic001" {
+		t.Fatalf("unexpected corrected topic: %#v", record.CorrectedTopic)
+	}
+
+	contexts, err := store.ListOpenFeedbackContexts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contexts) != 1 || contexts[0].OriginalTopic != TopicNoneID || contexts[0].CorrectedTopic == nil || *contexts[0].CorrectedTopic != "t-topic001" {
+		t.Fatalf("unexpected open feedback context: %#v", contexts)
+	}
+
+	// corrected_topic 传 nil 表示“无主题”纠正。
+	record, err = store.CreateFeedback(1, "indirect", nil, stringPointer("no topic"), time.Date(2026, 5, 16, 5, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.CorrectedTopic != nil {
+		t.Fatalf("expected nil corrected topic, got %#v", record.CorrectedTopic)
+	}
+}
+
+func TestRelatedPaperIDsWithoutTopicFiltersStates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	db := openSQLiteTestDB(t, path)
+	seedMutableFixture(t, db)
+	db.Close()
+
+	store, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	seed := []struct {
+		paperID int64
+		rel     string
+		tags    []string
+		at      time.Time
+	}{
+		// 使用 fixture 未触碰的 paper id（fixture 给 paper 1 预置了 02:00 的分类）。
+		{101, "direct", []string{"t-real0001"}, time.Date(2026, 5, 16, 1, 0, 0, 0, time.UTC)},
+		{102, "direct", []string{TopicNoneID}, time.Date(2026, 5, 16, 1, 0, 0, 0, time.UTC)},
+		{103, "indirect", []string{}, time.Date(2026, 5, 16, 1, 0, 0, 0, time.UTC)},
+		{104, "unrelated", []string{}, time.Date(2026, 5, 16, 1, 0, 0, 0, time.UTC)},
+		{105, "indirect", []string{"t-orphan09"}, time.Date(2026, 5, 16, 1, 0, 0, 0, time.UTC)},
+	}
+	for _, item := range seed {
+		if err := store.SaveClassification(item.paperID, Classification{
+			Relevance: item.rel, Confidence: 0.5, Reason: "fixture",
+			TopicTags: item.tags, RecommendedAction: "scan", Model: "fixture",
+		}, item.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ids, err := store.RelatedPaperIDsWithoutTopic(map[string]struct{}{"t-real0001": {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// paper 1 来自 fixture：indirect 且空 tags，属于未判定；104 是 unrelated 应被排除。
+	expected := []int64{105, 103, 102, 1}
+	if len(ids) != len(expected) {
+		t.Fatalf("expected ids %v, got %v", expected, ids)
+	}
+	for index, id := range expected {
+		if ids[index] != id {
+			t.Fatalf("expected ids %v, got %v", expected, ids)
+		}
 	}
 }

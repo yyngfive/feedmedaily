@@ -19,6 +19,10 @@ type FeedbackProposalContext struct {
 	OriginalRelevance  string
 	CorrectedRelevance string
 	Note               *string
+	// OriginalTopic 是纠正前的主题展示值（label、空串或哨兵 none）；
+	// CorrectedTopic 是用户要求的主题 label，nil 表示“不应有主题”。
+	OriginalTopic  string
+	CorrectedTopic *string
 }
 
 type ProposalDraft struct {
@@ -71,7 +75,14 @@ Requirements:
 - Use exactly the schema shape shown below.
 - The fixed relevance labels are direct, indirect, unrelated.
 - Write practical, compact, reusable rules.
-- Do not generate topic_taxonomy entries; return an empty array.
+- You may propose a minimal topic set in topic_taxonomy (label-only entries).
+  Topics are optional buckets for related papers: propose them only when the
+  interests clearly split into distinct buckets, keep the set as small as
+  possible (usually 0-5), reuse one topic across several rules, and never
+  create a topic for a single rule. Every topic label must be a natural
+  summary of the rules it covers, not jargon.
+- You may tag direct and indirect rules with topic labels from topic_taxonomy.
+  Never tag unrelated rules with topics.
 - Do not generate few_shots; return an empty array.
 - Do not include a generic placeholder profile.
 
@@ -289,7 +300,7 @@ func rejectedProposalDraft(currentDocument profileDocument, model string, source
 }
 
 func deterministicProposalAudit(currentDocument profileDocument, feedbackItems []FeedbackProposalContext, attempt compactProposalAttempt) ProposalValidationResult {
-	if missingProtectedBoundary(currentDocument.RelevanceRules.Unrelated, attempt.ProposedDocument.RelevanceRules.Unrelated, "surface adjacency") {
+	if missingProtectedBoundary(ruleTexts(currentDocument.RelevanceRules.Unrelated), ruleTexts(attempt.ProposedDocument.RelevanceRules.Unrelated), "surface adjacency") {
 		return ProposalValidationResult{
 			Accepted:     false,
 			HardRejected: true,
@@ -299,6 +310,17 @@ func deterministicProposalAudit(currentDocument profileDocument, feedbackItems [
 			},
 			RequiredFixes: []string{
 				"Preserve an explicit unrelated rule for surface DNA/RNA/probe adjacency when the core contribution is outside nucleic acid chemistry or nucleic-acid-enzyme engineering.",
+			},
+		}
+	}
+	if issue := topicReferenceAudit(currentDocument, attempt); issue != "" {
+		return ProposalValidationResult{
+			Accepted:     false,
+			HardRejected: true,
+			Summary:      "Profile proposal rejected by deterministic safety audit.",
+			BlockingIssues: []string{issue},
+			RequiredFixes: []string{
+				"Reference only existing topic labels, or add a topic change with operation=add for the new label in the same proposal.",
 			},
 		}
 	}
@@ -324,6 +346,39 @@ func missingProtectedBoundary(currentRules []string, proposedRules []string, phr
 		return false
 	}
 	return !rulesContainPhrase(proposedRules, needle)
+}
+
+// topicReferenceAudit 校验规则变更引用的主题 label 都可解析：要么已存在于注册表，
+// 要么由同一 proposal 内的 topic add 变更提供。返回空串表示通过。
+func topicReferenceAudit(currentDocument profileDocument, attempt compactProposalAttempt) string {
+	known := map[string]struct{}{}
+	for _, topic := range currentDocument.TopicTaxonomy {
+		known[strings.ToLower(strings.TrimSpace(topic.Label))] = struct{}{}
+	}
+	for _, change := range attempt.Changes {
+		if change.Section == ProposalSectionTopic && change.Operation == ProposalOperationAdd {
+			for _, topic := range change.TopicAfter {
+				if label := strings.ToLower(strings.TrimSpace(topic.Label)); label != "" {
+					known[label] = struct{}{}
+				}
+			}
+		}
+	}
+	for _, change := range attempt.Changes {
+		if change.Section != ProposalSectionDirectRule && change.Section != ProposalSectionIndirectRule {
+			continue
+		}
+		for _, label := range append(append([]string{}, change.TopicsAfter...), change.TopicsBefore...) {
+			clean := strings.ToLower(strings.TrimSpace(label))
+			if clean == "" {
+				continue
+			}
+			if _, ok := known[clean]; !ok {
+				return fmt.Sprintf("Rule change %s references unknown topic label: %s", change.ID, label)
+			}
+		}
+	}
+	return ""
 }
 
 func rulesContainPhrase(rules []string, phrase string) bool {
@@ -413,7 +468,7 @@ func profileNameHint(name *string) string {
 func feedbackPromptPayload(items []FeedbackProposalContext) []map[string]any {
 	payload := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		payload = append(payload, map[string]any{
+		entry := map[string]any{
 			"feedback_id":         item.FeedbackID,
 			"paper_id":            item.PaperID,
 			"paper_title":         item.PaperTitle,
@@ -422,7 +477,13 @@ func feedbackPromptPayload(items []FeedbackProposalContext) []map[string]any {
 			"original_relevance":  item.OriginalRelevance,
 			"corrected_relevance": item.CorrectedRelevance,
 			"note":                item.Note,
-		})
+		}
+		if item.OriginalTopic != "" || item.CorrectedTopic != nil {
+			// 主题纠正按需出现：corrected_topic 为 null 表示用户要求“无主题”。
+			entry["original_topic"] = item.OriginalTopic
+			entry["corrected_topic"] = item.CorrectedTopic
+		}
+		payload = append(payload, entry)
 	}
 	return payload
 }
@@ -442,13 +503,21 @@ func feedbackDirectionSummaryJSON(items []FeedbackProposalContext) string {
 
 func profilePromptPayload(document profileDocument, includeFewShots bool) map[string]any {
 	compact := compactDocument(document)
+	// proposal 上下文里规则的主题标签用 label 展示，模型在 changes 中也按 label 引用主题。
+	topicLabels := map[string]string{}
+	topics := make([]map[string]any, 0, len(compact.TopicTaxonomy))
+	for _, topic := range compact.TopicTaxonomy {
+		topicLabels[topic.ID] = topic.Label
+		topics = append(topics, map[string]any{"id": topic.ID, "label": topic.Label})
+	}
 	payload := map[string]any{
 		"scope": compact.Scope,
 		"relevance_rules": map[string]any{
-			"direct":    compact.RelevanceRules.Direct,
-			"indirect":  compact.RelevanceRules.Indirect,
-			"unrelated": compact.RelevanceRules.Unrelated,
+			"direct":    rulesWithLabels(compact.RelevanceRules.Direct, topicLabels),
+			"indirect":  rulesWithLabels(compact.RelevanceRules.Indirect, topicLabels),
+			"unrelated": rulesWithLabels(compact.RelevanceRules.Unrelated, topicLabels),
 		},
+		"topics": topics,
 	}
 	if includeFewShots && len(compact.FewShots) > 0 {
 		payload["few_shots"] = compact.FewShots
@@ -456,10 +525,28 @@ func profilePromptPayload(document profileDocument, includeFewShots bool) map[st
 	return payload
 }
 
+func rulesWithLabels(rules []classificationRule, topicLabels map[string]string) []map[string]any {
+	result := make([]map[string]any, 0, len(rules))
+	for _, rule := range rules {
+		labels := make([]string, 0, len(rule.TopicIDs))
+		for _, topicID := range rule.TopicIDs {
+			if label, ok := topicLabels[topicID]; ok {
+				labels = append(labels, label)
+			}
+		}
+		result = append(result, map[string]any{
+			"text":   rule.Text,
+			"topics": labels,
+		})
+	}
+	return result
+}
+
 func withoutTopicChanges(changes []ProposalChange) []ProposalChange {
+	// 主题注册表变更只保留 add：模型不允许删除/改名/合并已有主题。
 	filtered := make([]ProposalChange, 0, len(changes))
 	for _, change := range changes {
-		if change.Section == ProposalSectionTopic {
+		if change.Section == ProposalSectionTopic && change.Operation != ProposalOperationAdd {
 			continue
 		}
 		filtered = append(filtered, change)
@@ -491,9 +578,9 @@ func initialProfileDelta(document profileDocument, summary string) proposalDelta
 	compact := compactDocument(document)
 	return proposalDelta{
 		Summary:                strings.TrimSpace(summary),
-		DirectRuleAdditions:    compact.RelevanceRules.Direct,
-		IndirectRuleAdditions:  compact.RelevanceRules.Indirect,
-		UnrelatedRuleAdditions: compact.RelevanceRules.Unrelated,
+		DirectRuleAdditions:    ruleTexts(compact.RelevanceRules.Direct),
+		IndirectRuleAdditions:  ruleTexts(compact.RelevanceRules.Indirect),
+		UnrelatedRuleAdditions: ruleTexts(compact.RelevanceRules.Unrelated),
 		ScopeRewrite:           stringPointer(compact.Scope),
 		TagAdditions:           []topicDefinition{},
 		TagRemovals:            []string{},
@@ -546,13 +633,22 @@ func mergeProfileDelta(current profileDocument, delta proposalDelta) profileDocu
 		Meta:  currentCompact.Meta,
 		Scope: scope,
 		RelevanceRules: relevanceRules{
-			Direct:    normalizeRuleList(append(append([]string{}, currentCompact.RelevanceRules.Direct...), bounded.DirectRuleAdditions...)),
-			Indirect:  normalizeRuleList(append(append([]string{}, currentCompact.RelevanceRules.Indirect...), bounded.IndirectRuleAdditions...)),
-			Unrelated: normalizeRuleList(append(append([]string{}, currentCompact.RelevanceRules.Unrelated...), bounded.UnrelatedRuleAdditions...)),
+			Direct:    appendRuleTexts(currentCompact.RelevanceRules.Direct, bounded.DirectRuleAdditions),
+			Indirect:  appendRuleTexts(currentCompact.RelevanceRules.Indirect, bounded.IndirectRuleAdditions),
+			Unrelated: appendRuleTexts(currentCompact.RelevanceRules.Unrelated, bounded.UnrelatedRuleAdditions),
 		},
 		TopicTaxonomy: mergedTopics,
 		FewShots:      compactFewShots(mergedFewShots),
 	}
+}
+
+// appendRuleTexts 把 legacy delta 的纯文本规则追加为无主题标签的规则。
+func appendRuleTexts(base []classificationRule, additions []string) []classificationRule {
+	merged := append([]classificationRule{}, base...)
+	for _, text := range additions {
+		merged = append(merged, classificationRule{Text: text, TopicIDs: []string{}})
+	}
+	return normalizeRuleObjects(merged)
 }
 
 func destructiveRevisionReason(current profileDocument, proposed profileDocument) string {

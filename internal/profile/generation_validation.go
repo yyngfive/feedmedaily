@@ -201,6 +201,7 @@ Reject when any blocking issue is present:
 - The proposal is shorter but less discriminative, even if protected unrelated boundaries are preserved.
 - Hard rejection examples: removed key negative boundaries, broadened indirect for indirect -> unrelated feedback, noun-list scope, contradictory changes, or failure to explain corrected feedback.
 - Soft rejection examples: missing rationale, overly verbose but directionally correct rules, unsupported operation wording, or schema-adjacent formatting that can be repaired without changing the decision direction.
+- Topic assignment is out of scope for boundary judgment: section-topic add changes and rule topic tags (topics_before/topics_after) describe user-facing buckets, not relevance boundaries. Do not reject a proposal over its topic choices.
 
 Current compact profile:
 %s

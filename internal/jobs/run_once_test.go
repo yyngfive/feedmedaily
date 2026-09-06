@@ -159,7 +159,7 @@ func TestRunSyncCancellationKeepsCompletedBatchAndRerunSkipsIt(t *testing.T) {
 	assertClassificationRowsByPaper(t, settings, map[int64]int{1: 1, 2: 1, 3: 1, 4: 1})
 }
 
-func TestRunSyncDoesNotExpandProfileTaxonomyAndClearsTopicTags(t *testing.T) {
+func TestRunSyncDoesNotExpandProfileTaxonomyAndWritesTopicSentinel(t *testing.T) {
 	root := t.TempDir()
 	settings := testJobSettings(root)
 	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {
@@ -242,10 +242,11 @@ func TestRunSyncDoesNotExpandProfileTaxonomyAndClearsTopicTags(t *testing.T) {
 	if first == nil || second == nil {
 		t.Fatalf("missing classifications: %#v %#v", first, second)
 	}
-	if len(first.TopicTags) != 0 {
+	// 模型未返回 topic 时：related 论文落哨兵 none（判定过但无主题）。
+	if len(first.TopicTags) != 1 || first.TopicTags[0] != store.TopicNoneID {
 		t.Fatalf("unexpected first topic tags: %#v", first.TopicTags)
 	}
-	if len(second.TopicTags) != 0 {
+	if len(second.TopicTags) != 1 || second.TopicTags[0] != store.TopicNoneID {
 		t.Fatalf("unexpected second topic tags: %#v", second.TopicTags)
 	}
 }

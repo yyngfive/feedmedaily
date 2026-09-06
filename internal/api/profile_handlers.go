@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
 	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"github.com/yyngfive/scirssagent/internal/profile"
@@ -122,11 +123,25 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
 			PaperID            int64   `json:"paper_id"`
 			CorrectedRelevance string  `json:"corrected_relevance"`
-			Note               *string `json:"note"`
+			// CorrectTopic 为 true 时按 CorrectedTopic 记录主题纠正；CorrectedTopic 为 null 表示“无主题”。
+			CorrectTopic   bool    `json:"correct_topic"`
+			CorrectedTopic *string `json:"corrected_topic"`
+			Note           *string `json:"note"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, http.StatusBadRequest, "Invalid JSON body.")
 			return
+		}
+		var correctedTopic *string
+		if payload.CorrectTopic && payload.CorrectedTopic != nil {
+			topicID := strings.TrimSpace(*payload.CorrectedTopic)
+			if topicID != "" {
+				if err := validateTopicIDInProfile(s.snapshotSettings().ProfilePath, topicID); err != nil {
+					writeError(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				correctedTopic = &topicID
+			}
 		}
 		sqliteStore, err := s.getWriteStore()
 		if err != nil {
@@ -137,7 +152,7 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		record, err := sqliteStore.CreateFeedback(payload.PaperID, payload.CorrectedRelevance, payload.Note, time.Now().UTC())
+		record, err := sqliteStore.CreateFeedback(payload.PaperID, payload.CorrectedRelevance, correctedTopic, payload.Note, time.Now().UTC())
 		if err != nil {
 			switch {
 			case errors.Is(err, store.ErrPaperNotFound):
@@ -154,6 +169,67 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST")
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed.")
 	}
+}
+
+func (s *Server) handleProfileTopicCreate(w http.ResponseWriter, r *http.Request) {
+	// 反馈弹窗的窄接口：往当前 profile 注册表追加一个主题（label 幂等）。
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var payload struct {
+		Label string `json:"label"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid JSON body.")
+		return
+	}
+	serverSettings := s.snapshotSettings()
+	currentProfile, err := profile.ReadCurrent(serverSettings.ProfilePath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if currentProfile == nil {
+		writeError(w, http.StatusBadRequest, "No classification profile exists yet.")
+		return
+	}
+	updated, topic, changed, err := profile.AppendTopicEntry(currentProfile, payload.Label, time.Now())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if changed {
+		if err := profile.WriteCurrent(serverSettings.ProfilePath, updated); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"topic":   map[string]any{"id": topic.ID, "label": topic.Label},
+		"created": changed,
+	})
+}
+
+// validateTopicIDInProfile 校验主题 id 存在于当前注册表中，feedback 只能引用已有主题。
+func validateTopicIDInProfile(profilePath string, topicID string) error {
+	current, err := profile.ReadCurrent(profilePath)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("No classification profile exists yet.")
+	}
+	rawTopics, _ := current["topic_taxonomy"].([]any)
+	for _, rawTopic := range rawTopics {
+		topic, ok := rawTopic.(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, _ := topic["id"].(string); strings.TrimSpace(id) == strings.TrimSpace(topicID) {
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown topic id: %s", topicID)
 }
 
 func (s *Server) handleProfileProposals(w http.ResponseWriter, r *http.Request) {

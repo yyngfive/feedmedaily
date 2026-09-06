@@ -28,6 +28,11 @@ const (
 	writeStoreMaxOpenConn = 1
 )
 
+// TopicNoneID 是 topic_tags_json 里的保留哨兵：主题判定过但无主题。
+// 空数组表示“从未做过主题判定”（存量记录或 unrelated），两者不得混淆。
+// profile 包内有同名保留字面量校验，改动时必须同步。
+const TopicNoneID = "none"
+
 var (
 	ErrPaperNotFound           = errors.New("paper not found")
 	ErrFeedbackNotFound        = errors.New("feedback not found")
@@ -112,8 +117,23 @@ type Report struct {
 	LastUpdatedAt *time.Time     `json:"last_updated_at"`
 	ReportDate    string         `json:"report_date"`
 	Totals        map[string]int `json:"totals"`
-	Papers        []ReportPaper  `json:"papers"`
-	Errors        []string       `json:"errors"`
+	// Topics 是报告 API 的主题展示块：注册表快照 + 每主题计数 + 未归类/未判定计数。
+	// 由 API 层结合当前 profile 注册表填充，store 单独构建的报告该字段为 nil。
+	Topics *ReportTopics `json:"topics,omitempty"`
+	Papers []ReportPaper `json:"papers"`
+	Errors []string      `json:"errors"`
+}
+
+type ReportTopic struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+type ReportTopics struct {
+	Items       []ReportTopic  `json:"items"`
+	Counts      map[string]int `json:"counts"`
+	Unassigned  int            `json:"unassigned"`
+	Unprocessed int            `json:"unprocessed"`
 }
 
 type FeedbackRecord struct {
@@ -122,6 +142,8 @@ type FeedbackRecord struct {
 	PaperTitle         string    `json:"paper_title"`
 	OriginalRelevance  string    `json:"original_relevance"`
 	CorrectedRelevance string    `json:"corrected_relevance"`
+	OriginalTopic      *string   `json:"original_topic"`
+	CorrectedTopic     *string   `json:"corrected_topic"`
 	Note               *string   `json:"note"`
 	State              string    `json:"state"`
 	UsedInProfile      bool      `json:"used_in_profile"`
@@ -137,6 +159,10 @@ type ProposalFeedbackContext struct {
 	OriginalRelevance  string
 	CorrectedRelevance string
 	Note               *string
+	// OriginalTopic 是纠正前存储的主题值（真实 id、哨兵 none 或空）；
+	// CorrectedTopic 是纠正后的主题 id，nil 表示“无主题”。
+	OriginalTopic  string
+	CorrectedTopic *string
 }
 
 type ProfileProposal struct {

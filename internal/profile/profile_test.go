@@ -109,8 +109,25 @@ func TestWriteCurrentCompactsPersistedShape(t *testing.T) {
 		t.Fatalf("unexpected meta: %#v", meta)
 	}
 	taxonomy := payload["topic_taxonomy"].([]any)
-	if len(taxonomy) != 0 {
+	// topic_taxonomy 是活的注册表：写回保留并做 trim/去重，不再清空。
+	if len(taxonomy) != 2 {
 		t.Fatalf("unexpected taxonomy: %#v", taxonomy)
+	}
+	first := taxonomy[0].(map[string]any)
+	second := taxonomy[1].(map[string]any)
+	if first["id"] != "rna-bio" || first["label"] != "RNA Bio" {
+		t.Fatalf("unexpected first topic: %#v", first)
+	}
+	if second["id"] != "rna bio" || second["label"] != "Duplicate" {
+		t.Fatalf("unexpected second topic: %#v", second)
+	}
+	directRules := payload["relevance_rules"].(map[string]any)["direct"].([]any)
+	if len(directRules) != 1 {
+		t.Fatalf("unexpected direct rules: %#v", directRules)
+	}
+	directRule := directRules[0].(map[string]any)
+	if directRule["text"] != "RNA chemistry" {
+		t.Fatalf("unexpected direct rule: %#v", directRule)
 	}
 	fewShots := payload["few_shots"].([]any)
 	if len(fewShots) != 0 {
@@ -235,8 +252,17 @@ func TestPrepareUpdatedProfilePreservesCreatedAtAndSourceDescription(t *testing.
 	if meta["source_description"] != "current profile" {
 		t.Fatalf("source_description = %#v", meta["source_description"])
 	}
-	if len(updated["topic_taxonomy"].([]any)) != 0 || len(updated["few_shots"].([]any)) != 0 {
-		t.Fatalf("deprecated profile fields should be cleared: %#v", updated)
+	// topic_taxonomy 是活的注册表：手动编辑保留它；few_shots 仍然清空。
+	taxonomy := updated["topic_taxonomy"].([]any)
+	if len(taxonomy) != 1 {
+		t.Fatalf("taxonomy should be preserved: %#v", updated)
+	}
+	topic := taxonomy[0].(map[string]any)
+	if topic["id"] != "rna_bio" || topic["label"] != "RNA Bio" {
+		t.Fatalf("unexpected topic: %#v", topic)
+	}
+	if len(updated["few_shots"].([]any)) != 0 {
+		t.Fatalf("few_shots should be cleared: %#v", updated)
 	}
 }
 
@@ -287,5 +313,191 @@ func TestValidateProposalChangesAcceptsScalarTextFields(t *testing.T) {
 	}
 	if len(changes[0].TextAfter) != 1 || !strings.Contains(changes[0].TextAfter[0], "Surface adjacency") {
 		t.Fatalf("expected scalar text_after to normalize to list, got %#v", changes)
+	}
+}
+
+func TestParseLegacyStringRulesMigratesToStructuredRules(t *testing.T) {
+	// 旧 profile：规则是纯字符串、taxonomy 为空。载入应透明迁移为结构化规则。
+	document, err := parseDocumentBytes([]byte(`{
+		"meta":{"name":"Legacy","version":24,"created_at":"2026-05-01T00:00:00Z","updated_at":"2026-05-01T00:00:00Z","source_description":"legacy"},
+		"scope":"RNA biology",
+		"relevance_rules":{"direct":["RNA chemistry"],"indirect":[],"unrelated":["Plant biology"]},
+		"topic_taxonomy":[],
+		"few_shots":[]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.RelevanceRules.Direct) != 1 || document.RelevanceRules.Direct[0].Text != "RNA chemistry" {
+		t.Fatalf("unexpected direct rules: %#v", document.RelevanceRules.Direct)
+	}
+	if document.RelevanceRules.Direct[0].TopicIDs == nil || len(document.RelevanceRules.Direct[0].TopicIDs) != 0 {
+		t.Fatalf("expected empty topic ids, got %#v", document.RelevanceRules.Direct[0].TopicIDs)
+	}
+}
+
+func TestProfileValidateRejectsUnknownTopicRefAndReservedID(t *testing.T) {
+	// 规则引用未注册主题 → 拒绝。
+	_, err := parseDocumentBytes([]byte(`{
+		"meta":{"name":"Bad","version":1,"created_at":"2026-05-01T00:00:00Z","updated_at":"2026-05-01T00:00:00Z","source_description":"x"},
+		"scope":"RNA biology",
+		"relevance_rules":{"direct":[{"text":"RNA","topics":["t-ghost01"]}],"indirect":[],"unrelated":[]},
+		"topic_taxonomy":[{"id":"t-real0001","label":"Real"}],
+		"few_shots":[]
+	}`))
+	if err == nil || !strings.Contains(err.Error(), "unknown topic id") {
+		t.Fatalf("expected unknown topic id error, got %v", err)
+	}
+	// 保留哨兵 id 不可作为注册表条目。
+	_, err = parseDocumentBytes([]byte(`{
+		"meta":{"name":"Bad","version":1,"created_at":"2026-05-01T00:00:00Z","updated_at":"2026-05-01T00:00:00Z","source_description":"x"},
+		"scope":"RNA biology",
+		"relevance_rules":{"direct":[],"indirect":[],"unrelated":[]},
+		"topic_taxonomy":[{"id":"none","label":"None"}],
+		"few_shots":[]
+	}`))
+	if err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("expected reserved id error, got %v", err)
+	}
+}
+
+func TestParseAssignsIDsToLabelOnlyTopics(t *testing.T) {
+	document, err := parseDocumentBytes([]byte(`{
+		"meta":{"name":"Bootstrap","version":1,"created_at":"2026-05-01T00:00:00Z","updated_at":"2026-05-01T00:00:00Z","source_description":"x"},
+		"scope":"RNA biology",
+		"relevance_rules":{"direct":[{"text":"RNA chemistry","topics":["RNA Bio"]}],"indirect":[],"unrelated":[]},
+		"topic_taxonomy":[{"label":"RNA Bio"}],
+		"few_shots":[]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.TopicTaxonomy) != 1 || document.TopicTaxonomy[0].ID == "" {
+		t.Fatalf("expected label-only topic to receive an id: %#v", document.TopicTaxonomy)
+	}
+}
+
+func TestAppendTopicEntryIsIdempotentByLabel(t *testing.T) {
+	now := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	current := map[string]any{
+		"meta": map[string]any{
+			"name": "Current", "version": 2, "created_at": "2026-05-01T00:00:00Z",
+			"updated_at": "2026-05-12T00:00:00Z", "source_description": "current",
+		},
+		"scope":           "RNA biology",
+		"relevance_rules": map[string]any{"direct": []any{}, "indirect": []any{}, "unrelated": []any{}},
+		"topic_taxonomy":  []any{map[string]any{"id": "t-aaa00001", "label": "RNA Bio"}},
+		"few_shots":       []any{},
+	}
+	updated, topic, changed, err := AppendTopicEntry(current, " Splicing ", now)
+	if err != nil || !changed {
+		t.Fatalf("expected new topic, changed=true, err=%v", err)
+	}
+	if topic.ID == "" || topic.Label != "Splicing" {
+		t.Fatalf("unexpected topic: %#v", topic)
+	}
+	if version := updated["meta"].(map[string]any)["version"]; version != float64(3) {
+		t.Fatalf("expected version bump, got %#v", version)
+	}
+	_, existing, changed, err := AppendTopicEntry(current, "rna bio", now)
+	if err != nil || changed {
+		t.Fatalf("expected existing label to be idempotent, changed=%v err=%v", changed, err)
+	}
+	if existing.ID != "t-aaa00001" || existing.Label != "RNA Bio" {
+		t.Fatalf("unexpected existing topic: %#v", existing)
+	}
+}
+
+func TestPrepareAppliedProfileFromChangesResolvesTopicLabels(t *testing.T) {
+	current := map[string]any{
+		"meta": map[string]any{
+			"name": "Current", "version": 4, "created_at": "2026-05-01T00:00:00Z",
+			"updated_at": "2026-05-12T00:00:00Z", "source_description": "current",
+		},
+		"scope": "RNA biology",
+		"relevance_rules": map[string]any{
+			"direct":    []any{map[string]any{"text": "RNA chemistry", "topics": []any{"t-aaa00001"}}},
+			"indirect":  []any{},
+			"unrelated": []any{"Plant biology"},
+		},
+		"topic_taxonomy": []any{map[string]any{"id": "t-aaa00001", "label": "RNA Bio"}},
+		"few_shots":      []any{},
+	}
+	changes, err := ValidateProposalChanges([]ProposalChange{
+		{
+			ID: "add-topic", Section: ProposalSectionTopic, Operation: ProposalOperationAdd,
+			Summary: "Add topic.", Rationale: "No existing topic covers splicing.",
+			TopicAfter: []topicDefinition{{Label: "Splicing"}},
+		},
+		{
+			ID: "tag-rule", Section: ProposalSectionIndirectRule, Operation: ProposalOperationAdd,
+			Summary: "Add splicing rule.", Rationale: "Topic feedback.",
+			TextAfter:   []string{"Splicing mechanism papers that inform RNA engineering."},
+			TopicsAfter: []string{"splicing"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err = FinalizeProposalChanges(changes, []string{"add-topic", "tag-rule"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, version, err := PrepareAppliedProfileFromChanges(current, changes, time.Date(2026, 5, 21, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != 5 {
+		t.Fatalf("version = %d", version)
+	}
+	taxonomy := applied["topic_taxonomy"].([]any)
+	if len(taxonomy) != 2 {
+		t.Fatalf("expected new topic appended: %#v", taxonomy)
+	}
+	splicing := taxonomy[1].(map[string]any)
+	if splicing["label"] != "Splicing" || splicing["id"] == "" {
+		t.Fatalf("unexpected splicing topic: %#v", splicing)
+	}
+	indirect := applied["relevance_rules"].(map[string]any)["indirect"].([]any)
+	if len(indirect) != 1 {
+		t.Fatalf("expected indirect rule added: %#v", indirect)
+	}
+	rule := indirect[0].(map[string]any)
+	if rule["text"] != "Splicing mechanism papers that inform RNA engineering." {
+		t.Fatalf("unexpected rule: %#v", rule)
+	}
+	if tags := rule["topics"].([]any); len(tags) != 1 || tags[0] != splicing["id"] {
+		t.Fatalf("expected rule tag resolved to new topic id: %#v", rule)
+	}
+}
+
+func TestPrepareAppliedProfileFromChangesRejectsUnknownTopicLabel(t *testing.T) {
+	current := map[string]any{
+		"meta": map[string]any{
+			"name": "Current", "version": 4, "created_at": "2026-05-01T00:00:00Z",
+			"updated_at": "2026-05-12T00:00:00Z", "source_description": "current",
+		},
+		"scope":           "RNA biology",
+		"relevance_rules": map[string]any{"direct": []any{}, "indirect": []any{}, "unrelated": []any{}},
+		"topic_taxonomy":  []any{},
+		"few_shots":       []any{},
+	}
+	changes, err := ValidateProposalChanges([]ProposalChange{
+		{
+			ID: "tag-rule", Section: ProposalSectionDirectRule, Operation: ProposalOperationAdd,
+			Summary: "Add rule.", Rationale: "x",
+			TextAfter:   []string{"RNA chemistry papers."},
+			TopicsAfter: []string{"Ghost Topic"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err = FinalizeProposalChanges(changes, []string{"tag-rule"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := PrepareAppliedProfileFromChanges(current, changes, time.Now()); err == nil || !strings.Contains(err.Error(), "unknown topic label") {
+		t.Fatalf("expected unknown topic label error, got %v", err)
 	}
 }

@@ -139,8 +139,8 @@ func TestProfileCurrentPutUpdatesExistingProfile(t *testing.T) {
 	if !contains(recorder.Body.String(), `"source_description":"current"`) {
 		t.Fatalf("expected source_description preserved: %s", recorder.Body.String())
 	}
-	if !contains(recorder.Body.String(), `"topic_taxonomy":[]`) || !contains(recorder.Body.String(), `"few_shots":[]`) {
-		t.Fatalf("expected deprecated profile fields cleared in response: %s", recorder.Body.String())
+	if !contains(recorder.Body.String(), `"topic_taxonomy":[{"id":"rna_bio","label":"RNA Bio"}]`) || !contains(recorder.Body.String(), `"few_shots":[]`) {
+		t.Fatalf("expected topic registry preserved and few_shots cleared in response: %s", recorder.Body.String())
 	}
 
 	saved, err := os.ReadFile(settings.ProfilePath)
@@ -150,8 +150,13 @@ func TestProfileCurrentPutUpdatesExistingProfile(t *testing.T) {
 	if !contains(string(saved), `"version": 3`) || !contains(string(saved), `"name": "Edited profile"`) {
 		t.Fatalf("saved profile = %s", saved)
 	}
-	if !contains(string(saved), `"topic_taxonomy": []`) || !contains(string(saved), `"few_shots": []`) {
-		t.Fatalf("expected deprecated profile fields cleared on disk: %s", saved)
+	if !contains(string(saved), `"topic_taxonomy": [
+    {
+      "id": "rna_bio",
+      "label": "RNA Bio"
+    }
+  ]`) || !contains(string(saved), `"few_shots": []`) {
+		t.Fatalf("expected topic registry preserved and few_shots cleared on disk: %s", saved)
 	}
 }
 

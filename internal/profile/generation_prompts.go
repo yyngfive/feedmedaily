@@ -26,6 +26,17 @@ Requirements:
 - Every change operation must be exactly one of: add, remove, rewrite, merge.
 - Do not invent operations such as restore, keep, retain, or update; express restored boundaries as add or rewrite changes.
 
+Topic handling:
+- Topics are optional user-facing buckets for related papers. Rules in the current profile carry topic labels; the topics list maps ids to labels.
+- Topic changes must use section "topic" with operation "add" and topic_after label-only entries. Never remove, rewrite, or merge existing topics.
+- Add a new topic only when the feedback points at a cluster of papers no existing topic label covers.
+- Topic minimality: reuse an existing topic label whenever it can cover the papers; do not create near-duplicate topics; do not create a topic for a single paper; prefer fewer topics.
+- Direct and indirect rule changes may carry topics_before/topics_after as topic LABEL lists. topics_after applies to every rule in text_after.
+- A rule change may modify only topic tags (text unchanged): use operation rewrite with identical text_before/text_after and the new topics_after.
+- Only retag rules when the feedback is about topic assignment; never retag rules as a side effect of relevance repairs.
+- Do not tag unrelated rules or the scope with topics.
+- In maintenance mode do not create topics and do not modify rule topic tags.
+
 Feedback error-type workflow:
 - Before proposing changes, classify each feedback item into one error type in your private analysis.
 - Error types are: surface-term false positive, indirect too broad, unrelated boundary missing, direct boundary missing, scope drift, and ambiguous or insufficient evidence.
@@ -106,7 +117,7 @@ Return:
 - text_before/text_after are only for scope and relevance rules
 - use empty source_feedback_ids and source_paper_ids when running maintenance mode without feedback
 - do not create a few_shot section in changes
-- do not create topic changes
+- topic changes are add-only and carry label-only topic_after entries
 
 Required JSON shape:
 %s
@@ -124,11 +135,11 @@ func compactProfileContract() string {
   },
   "scope": "one paragraph describing the reader's research interests",
   "relevance_rules": {
-    "direct": ["rule string"],
-    "indirect": ["rule string"],
-    "unrelated": ["rule string"]
+    "direct": [{"text": "rule string", "topics": ["topic label"]}],
+    "indirect": [{"text": "rule string", "topics": []}],
+    "unrelated": [{"text": "rule string", "topics": []}]
   },
-  "topic_taxonomy": [],
+  "topic_taxonomy": [{"id": "", "label": "short topic label"}],
   "few_shots": []
 }`
 }
@@ -144,9 +155,27 @@ func compactProposalContract() string {
       "summary": "merge overlapping direct rules",
       "text_before": ["old rule 1", "old rule 2"],
       "text_after": ["merged replacement rule"],
+      "topics_before": ["Old Topic"],
+      "topics_after": ["New Topic"],
       "topic_before": [],
       "topic_after": [],
       "rationale": "why this compaction improves future classification",
+      "source_feedback_ids": [],
+      "source_paper_ids": [],
+      "status": "proposed"
+    },
+    {
+      "id": "change_id_topic",
+      "section": "topic",
+      "operation": "add",
+      "summary": "add a missing topic bucket",
+      "text_before": [],
+      "text_after": [],
+      "topics_before": [],
+      "topics_after": [],
+      "topic_before": [],
+      "topic_after": [{"id": "", "label": "New Topic"}],
+      "rationale": "why no existing topic covers these papers",
       "source_feedback_ids": [],
       "source_paper_ids": [],
       "status": "proposed"

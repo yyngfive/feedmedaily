@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/yyngfive/scirssagent/internal/config"
@@ -97,6 +98,22 @@ func GenerateProfileProposal(settings config.Settings, progress ProgressFunc, co
 	if err != nil {
 		return nil, err
 	}
+	// 主题 id→label 解析表来自当前 profile：prompt 里主题一律用 label 表达，
+	// 哨兵 none 显示为 "none"，已删除主题显示为占位说明。
+	topicLabels := map[string]string{}
+	if rawTopics, ok := current["topic_taxonomy"].([]any); ok {
+		for _, rawTopic := range rawTopics {
+			topic, ok := rawTopic.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := topic["id"].(string)
+			label, _ := topic["label"].(string)
+			if id != "" && label != "" {
+				topicLabels[id] = label
+			}
+		}
+	}
 	feedbackItems := make([]profile.FeedbackProposalContext, 0, len(contexts))
 	for _, item := range contexts {
 		feedbackItems = append(feedbackItems, profile.FeedbackProposalContext{
@@ -108,6 +125,8 @@ func GenerateProfileProposal(settings config.Settings, progress ProgressFunc, co
 			OriginalRelevance:  item.OriginalRelevance,
 			CorrectedRelevance: item.CorrectedRelevance,
 			Note:               item.Note,
+			OriginalTopic:      displayTopicValue(item.OriginalTopic, topicLabels),
+			CorrectedTopic:     displayTopicPointer(item.CorrectedTopic, topicLabels),
 		})
 	}
 	EmitProgress(progress, StepProgress(
@@ -172,4 +191,25 @@ func firstJobUsageCollector(items []*llmusage.Collector) *llmusage.Collector {
 		return nil
 	}
 	return items[0]
+}
+
+// displayTopicValue 把存储的主题值翻译成 prompt 展示值：
+// 哨兵 none 与空值表示无主题，真实 id 尽量解析成 label，孤儿 id 降级为占位说明。
+func displayTopicValue(value string, topicLabels map[string]string) string {
+	clean := strings.TrimSpace(value)
+	if clean == "" || clean == profile.TopicNoneID {
+		return "none"
+	}
+	if label, ok := topicLabels[clean]; ok {
+		return label
+	}
+	return fmt.Sprintf("deleted topic %s", clean)
+}
+
+func displayTopicPointer(value *string, topicLabels map[string]string) *string {
+	if value == nil {
+		return nil
+	}
+	display := displayTopicValue(*value, topicLabels)
+	return &display
 }

@@ -133,6 +133,11 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		topicsCount, err := countTopicBackfillPapersFunc(serverSettings)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"paper_count":              paperCount,
 			"classified_paper_count":   classifiedCount,
@@ -143,6 +148,7 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 			"count_paper_count":        countTotal,
 			"count_classified_count":   countClassified,
 			"count_unclassified_count": countTotal - countClassified,
+			"topics_paper_count":       topicsCount,
 		})
 		return
 	}
@@ -160,8 +166,8 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(payload.Scope) == "" {
 		payload.Scope = "today"
 	}
-	if payload.Scope != "today" && payload.Scope != "feedback" && payload.Scope != "all" && payload.Scope != "count" && payload.Scope != "unclassified" {
-		writeError(w, http.StatusBadRequest, "scope must be today, feedback, all, count, or unclassified.")
+	if payload.Scope != "today" && payload.Scope != "feedback" && payload.Scope != "all" && payload.Scope != "count" && payload.Scope != "unclassified" && payload.Scope != "topics" {
+		writeError(w, http.StatusBadRequest, "scope must be today, feedback, all, count, unclassified, or topics.")
 		return
 	}
 	if payload.Scope == "count" {
@@ -182,6 +188,13 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "A sync or reclassification job is already running. Wait for it to finish.")
 		return
 	}
+	jobRun := reclassifyJobRunFunc(serverSettings, payload.Scope, func() ([]int64, error) {
+		return selectReclassifyPaperIDsFunc(serverSettings, payload.Scope, payload.Limit)
+	})
+	if payload.Scope == "topics" {
+		// topics 补跑走 topic-only 路径：不重新判相关性，只做主题路由。
+		jobRun = topicBackfillJobRunFunc(serverSettings)
+	}
 	job := launchLocalJob(
 		serverSettings,
 		"reclassify",
@@ -189,12 +202,35 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 		"Job queued.",
 		"pipeline.metadata.enriching",
 		"Getting metadata for papers to reclassify.",
-		reclassifyJobRunFunc(serverSettings, payload.Scope, func() ([]int64, error) {
-			return selectReclassifyPaperIDsFunc(serverSettings, payload.Scope, payload.Limit)
-		}),
+		jobRun,
 		func(context.Context) (func(), error) { return releasePipeline, nil },
 	)
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})
+}
+
+// topicBackfillJobRunFunc 执行 topics scope 的 topic-only 补跑并刷新报告。
+func topicBackfillJobRunFunc(serverSettings config.Settings) localJobFunc {
+	return func(ctx context.Context, progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
+		paperIDs, err := selectReclassifyPaperIDsFunc(serverSettings, "topics", 0)
+		if err != nil {
+			return nil, err
+		}
+		assigned, err := assignTopicsPaperIDsContextFunc(serverSettings, paperIDs, ctx, progress, usage)
+		result := map[string]any{
+			"scope":     "topics",
+			"paper_ids": paperIDs,
+			"assigned":  assigned,
+		}
+		if err != nil {
+			return result, err
+		}
+		reportCount, err := rebuildLatestReportFunc(serverSettings, progress)
+		if err != nil {
+			return result, err
+		}
+		result["report_papers"] = reportCount
+		return result, nil
+	}
 }
 
 // reclassifyJobRunFunc 把一段固定的 paper ids 或 scope 选择逻辑包装成可取消的 reclassify job。

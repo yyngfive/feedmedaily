@@ -43,8 +43,17 @@ func TestGenerateInitialProfileProposalCreatesDatabaseAndProposal(t *testing.T) 
 		t.Fatalf("unexpected bootstrap proposals: %#v", items)
 	}
 	proposedProfile := items[0].ProposedProfile
-	if len(proposedProfile["topic_taxonomy"].([]any)) != 0 || len(proposedProfile["few_shots"].([]any)) != 0 {
-		t.Fatalf("bootstrap proposal should clear deprecated profile fields: %#v", proposedProfile)
+	// 注册表是活的：bootstrap 提案保留模型给出的主题；few_shots 仍然清空。
+	taxonomy := proposedProfile["topic_taxonomy"].([]any)
+	if len(taxonomy) != 1 {
+		t.Fatalf("bootstrap proposal should keep the proposed topic registry: %#v", proposedProfile)
+	}
+	topic := taxonomy[0].(map[string]any)
+	if topic["id"] != "rna_bio" || topic["label"] != "RNA Bio" {
+		t.Fatalf("unexpected topic entry: %#v", topic)
+	}
+	if len(proposedProfile["few_shots"].([]any)) != 0 {
+		t.Fatalf("bootstrap proposal should clear few_shots: %#v", proposedProfile)
 	}
 }
 
@@ -107,7 +116,7 @@ func TestGenerateProfileProposalUsesOpenFeedback(t *testing.T) {
 	}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	record, err := sqliteStore.CreateFeedback(paperID, "direct", stringPtr("Should be direct"), time.Now().UTC())
+	record, err := sqliteStore.CreateFeedback(paperID, "direct", nil, stringPtr("Should be direct"), time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +200,7 @@ func TestGenerateProfileProposalReturnsHandledRejectionWithoutSaving(t *testing.
 	}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sqliteStore.CreateFeedback(paperID, "direct", stringPtr("Should be direct"), time.Now().UTC()); err != nil {
+	if _, err := sqliteStore.CreateFeedback(paperID, "direct", nil, stringPtr("Should be direct"), time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	if err := sqliteStore.Close(); err != nil {
@@ -279,7 +288,7 @@ func TestGenerateProfileProposalPromptIncludesConflictAwareCompactionGuidance(t 
 	}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sqliteStore.CreateFeedback(paperID, "direct", stringPtr("Should be direct"), time.Now().UTC()); err != nil {
+	if _, err := sqliteStore.CreateFeedback(paperID, "direct", nil, stringPtr("Should be direct"), time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	if err := sqliteStore.Close(); err != nil {

@@ -470,6 +470,60 @@ func firstNonNilString(primary *string, fallback *string) *string {
 	return &value
 }
 
+// RelatedPaperIDsWithoutTopic 返回最新相关性为 direct/indirect 且没有真实主题的
+// paper ids：topic_tags_json 为空（从未判定）、哨兵 none（判定过无主题）、
+// 或 id 已不在当前注册表中（孤儿）都算。供 topics 补跑 scope 使用。
+func (s *Store) RelatedPaperIDsWithoutTopic(validTopicIDs map[string]struct{}) ([]int64, error) {
+	rows, err := s.db.Query(`
+		SELECT lc.paper_id, lc.topic_tags_json
+		FROM (
+			SELECT paper_id, relevance, topic_tags_json,
+				ROW_NUMBER() OVER (
+					PARTITION BY paper_id
+					ORDER BY classified_at DESC, id DESC
+				) AS rn
+			FROM classifications
+		) lc
+		WHERE lc.rn = 1 AND lc.relevance IN ('direct', 'indirect')
+		ORDER BY lc.paper_id DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query related papers without topic: %w", err)
+	}
+	defer rows.Close()
+	result := []int64{}
+	for rows.Next() {
+		var paperID int64
+		var topicTagsJSON string
+		if err := rows.Scan(&paperID, &topicTagsJSON); err != nil {
+			return nil, fmt.Errorf("scan related papers without topic: %w", err)
+		}
+		if classificationHasRealTopic(topicTagsJSON, validTopicIDs) {
+			continue
+		}
+		result = append(result, paperID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate related papers without topic: %w", err)
+	}
+	return result, nil
+}
+
+func classificationHasRealTopic(topicTagsJSON string, validTopicIDs map[string]struct{}) bool {
+	tags := []string{}
+	if strings.TrimSpace(topicTagsJSON) != "" {
+		if err := json.Unmarshal([]byte(topicTagsJSON), &tags); err != nil {
+			return false
+		}
+	}
+	for _, tag := range tags {
+		if _, ok := validTopicIDs[tag]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func paperKey(paper Paper) string {
 	doi := normalizeDOI(stringValue(paper.DOI))
 	if doi != "" {
