@@ -2,7 +2,7 @@ import React from "react";
 import {flushSync} from "react-dom";
 
 import {createFeedback, createProfileTopic, deleteFeedback, fetchZoteroCollections, markPaperRead, saveToZotero} from "../../api/client";
-import {matchesDateFilter, paperTopicID, paperTopicState, relevanceCounts} from "../../app/utils";
+import {matchesDateFilter, matchesTopicFilter, paperTopicID, relevanceCounts} from "../../app/utils";
 import type {TopicFilterValue} from "../../app/utils";
 import type {AppData} from "../../app/useAppData";
 import type {AppState, MarkReadRequest} from "../../app/useAppState";
@@ -40,17 +40,12 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
       (selectedJournalSet.size === 0 || Boolean(paper.journal && selectedJournalSet.has(paper.journal))) &&
       (readFilter === "all" || (readFilter === "read" ? Boolean(paper.read_at) : !paper.read_at)) &&
       (feedbackFilter === "all" || (feedbackFilter === "marked" ? hasFeedback : !hasFeedback)) &&
+      matchesTopicFilter(paper, topicFilter, report.topics) &&
       matchesDateFilter(paper.published_date ?? paper.seen_date, report.report_date, dateFilter);
-  }), [dateFilter, deferredQuery, effectivePapers, feedbackFilter, readFilter, report.report_date, selectedJournalSet]);
-  const filtered = React.useMemo(() => filteredBase.filter((paper) => {
-    if (relevance !== "all" && paper.classification.relevance !== relevance) return false;
-    if (topicFilter === "all") return true;
-    // 主题过滤与相关性过滤 AND 叠加；选项含注册表主题 id 与未归类/未判定两个固定桶。
-    const state = paperTopicState(paper);
-    if (topicFilter === "unprocessed") return state === "unprocessed";
-    if (topicFilter === "unassigned") return state === "unassigned" || (state === "assigned" && paperTopicID(paper, report.topics) === null);
-    return state === "assigned" && paperTopicID(paper, report.topics) === topicFilter;
-  }), [filteredBase, relevance, report.topics, topicFilter]);
+  }), [dateFilter, deferredQuery, effectivePapers, feedbackFilter, readFilter, report.report_date, report.topics, selectedJournalSet, topicFilter]);
+  // 相关性标签页计数基于包含主题过滤的 filteredBase：选中某个主题后，
+  // 文章栏的 Direct/Indirect/All 计数应反映主题过滤后的范围。
+  const filtered = React.useMemo(() => filteredBase.filter((paper) => relevance === "all" || paper.classification.relevance === relevance), [filteredBase, relevance]);
   const sortedFiltered = React.useMemo(() => {
     const byDate = (paper: Paper) => paper.published_date ?? paper.seen_date;
     return [...filtered].sort((left, right) => {

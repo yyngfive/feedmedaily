@@ -132,6 +132,26 @@ export function topicLabelFor(topicID: string, topics: ReportTopics | null | und
   return topics.items.find((item) => item.id === topicID)?.label ?? null;
 }
 
+// matchesTopicFilter 判断论文是否命中主题过滤：注册表主题按 id 精确匹配，
+// 固定桶为 unassigned（哨兵或孤儿 id）与 unprocessed（从未判定）。
+export function matchesTopicFilter(
+  paper: Paper,
+  filter: TopicFilterValue,
+  topics: ReportTopics | null | undefined,
+): boolean {
+  if (filter === "all") {
+    return true;
+  }
+  const state = paperTopicState(paper);
+  if (filter === "unprocessed") {
+    return state === "unprocessed";
+  }
+  if (filter === "unassigned") {
+    return state === "unassigned" || (state === "assigned" && paperTopicID(paper, topics) === null);
+  }
+  return state === "assigned" && paperTopicID(paper, topics) === filter;
+}
+
 export function statusMessage(job: JobInfo): string {
   if (job.error) {
     return job.error;
