@@ -24,6 +24,7 @@ Changes since `0.6.0`:
 
 ### Changed
 
+- Saving the profile no longer automatically reclassifies feedback-linked papers. Profile edits only affect future classifications; to update existing papers, run one of the Dashboard reclassification ranges explicitly (for topic tags the `Topic backfill` range is the cheap, relevance-preserving option), or apply a profile proposal — applying one still reclassifies its linked feedback papers in the background.
 - Renamed the review detail panel's `DOI link` button to `Link`. It opens the DOI when present, falls back to the publisher URL from the feed when the DOI is missing, and hides when neither exists.
 
 ## 0.6.0 (2026-08-30)
