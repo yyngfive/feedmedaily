@@ -20,15 +20,18 @@ export function PaperCard({
 }) {
   const tone = relevanceTone[paper.classification.relevance];
   const feedbackText = feedbackLabel(paper);
-  // 主题 chip：真实主题显示 label；哨兵/孤儿显示“未归类”；未判定与 unrelated 不显示。
+  // 主题 chip：有主题判定的 related 论文一定显示——真实主题显示 label，
+  // 哨兵 none 与孤儿 id（注册表已不含该 id）统一显示“未归类”，与侧栏
+  // 计数、Topic 过滤的口径保持一致；未判定与 unrelated 不显示 chip。
   const topicState = paperTopicState(paper);
   const topicID = paperTopicID(paper, topics);
   const topicLabel = topicID ? topicLabelFor(topicID, topics) : null;
-  const topicChipText = topicID
-    ? topicLabel
-    : topicState === "unassigned"
-      ? "未归类"
-      : null;
+  const topicChipText =
+    topicState === null || topicState === "unprocessed"
+      ? null
+      : topicID && topicLabel
+        ? topicLabel
+        : "未归类";
   const handleSelectKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
