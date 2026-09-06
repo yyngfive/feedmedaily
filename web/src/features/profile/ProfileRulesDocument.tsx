@@ -84,68 +84,6 @@ function RuleSection({items, title, topicLabels}: {items: unknown[]; title: stri
   );
 }
 
-function RuleDraftRow({
-  allowTopics,
-  onChange,
-  onRemove,
-  rule,
-  topicLabels,
-  topics,
-}: {
-  allowTopics: boolean;
-  onChange: (next: ProfileRuleDraft) => void;
-  onRemove: () => void;
-  rule: ProfileRuleDraft;
-  topicLabels: Map<string, string>;
-  topics: TopicDefinition[];
-}) {
-  return (
-    <div className="space-y-1.5 rounded-md border border-(--line) bg-(--paper) p-2">
-      <div className="flex items-start gap-2">
-        <TextInputField
-          hideLabel
-          label="Rule"
-          value={rule.text}
-          onChange={(value) => onChange({...rule, text: value})}
-        />
-        <Button size="sm" variant="ghost" onPress={onRemove}>
-          Remove
-        </Button>
-      </div>
-      {allowTopics && topics.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1.5">
-          {topics.map((topic) => {
-            const tagged = rule.topics.includes(topic.id);
-            return (
-              <Chip
-                key={topic.id}
-                color={tagged ? "accent" : "default"}
-                size="sm"
-                variant={tagged ? "soft" : "tertiary"}
-                onClick={() =>
-                  onChange({
-                    ...rule,
-                    topics: tagged
-                      ? rule.topics.filter((id) => id !== topic.id)
-                      : [...rule.topics, topic.id],
-                  })
-                }
-              >
-                {topic.label}
-              </Chip>
-            );
-          })}
-        </div>
-      ) : null}
-      {allowTopics && topics.length === 0 && rule.topics.length > 0 ? (
-        <p className="text-xs text-muted">
-          Topics were removed from the registry: {rule.topics.map((id) => topicLabels.get(id) ?? id).join(", ")}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
 function RuleListEditor({
   allowTopics,
   items,
@@ -161,6 +99,25 @@ function RuleListEditor({
   topicLabels: Map<string, string>;
   topics: TopicDefinition[];
 }) {
+  // unrelated 不携带主题标签：保持原始整体多行文本框，一行一条规则。
+  if (!allowTopics) {
+    return (
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold text-(--ink)">{title}</h3>
+        <TextAreaField
+          hideLabel
+          label={title}
+          rows={9}
+          value={items.map((item) => item.text).join("\n")}
+          onChange={(value) =>
+            onChange(value.split(/\r?\n/).map((line) => ({text: line, topics: []})))
+          }
+        />
+      </section>
+    );
+  }
+  // direct/indirect 需要按条打标：每条规则一个多行文本框，主题 chip 与
+  // Remove 集中在文本框下方的一行，避免每条规则套边框盒子的视觉噪音。
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between gap-3">
@@ -176,17 +133,61 @@ function RuleListEditor({
       {items.length === 0 ? (
         <p className="text-sm text-muted">No rules yet.</p>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {items.map((rule, index) => (
-            <RuleDraftRow
-              key={`${title}-${index}`}
-              allowTopics={allowTopics}
-              rule={rule}
-              topicLabels={topicLabels}
-              topics={topics}
-              onChange={(next) => onChange(items.map((item, i) => (i === index ? next : item)))}
-              onRemove={() => onChange(items.filter((_, i) => i !== index))}
-            />
+            <div key={`${title}-${index}`} className="space-y-1.5">
+              <TextAreaField
+                hideLabel
+                label={title}
+                rows={2}
+                value={rule.text}
+                onChange={(text) =>
+                  onChange(items.map((item, i) => (i === index ? {...item, text} : item)))
+                }
+              />
+              <div className="flex flex-wrap items-center gap-1.5">
+                {topics.map((topic) => {
+                  const tagged = rule.topics.includes(topic.id);
+                  return (
+                    <Chip
+                      key={topic.id}
+                      color={tagged ? "accent" : "default"}
+                      size="sm"
+                      variant={tagged ? "soft" : "tertiary"}
+                      onClick={() =>
+                        onChange(
+                          items.map((item, i) =>
+                            i === index
+                              ? {
+                                  ...item,
+                                  topics: tagged
+                                    ? item.topics.filter((id) => id !== topic.id)
+                                    : [...item.topics, topic.id],
+                                }
+                              : item,
+                          ),
+                        )
+                      }
+                    >
+                      {topic.label}
+                    </Chip>
+                  );
+                })}
+                {topics.length === 0 && rule.topics.length > 0 ? (
+                  <span className="text-xs text-muted">
+                    Removed topics: {rule.topics.map((id) => topicLabels.get(id) ?? id).join(", ")}
+                  </span>
+                ) : null}
+                <Button
+                  className="ml-auto"
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => onChange(items.filter((_, i) => i !== index))}
+                >
+                  Remove
+                </Button>
+              </div>
+            </div>
           ))}
         </div>
       )}

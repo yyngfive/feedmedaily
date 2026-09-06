@@ -112,7 +112,7 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 - Admin 负责 feed 编辑、手动任务、反馈、Profile proposal 和应用配置。
 - Dashboard 优先展示运行中任务、验证状态和主要 Sync；定向 Sync、Reclassify、用量等低频项渐进披露。
 - Feeds 使用独立本地草稿；取消必须恢复已保存值，未保存修改不能污染阅读状态。
-- Profile 使用一个主要审阅文档；反馈队列位于下方作为次级区域。Profile 编辑态包含一个 Topics 章节：主题条支持新建、改名与删除（删除用 danger 样式），未被任何规则引用的主题在只读视图标注 `unused`；direct/indirect 规则行通过主题 chip 切换打标，unrelated 规则不提供打标入口。
+- Profile 使用一个主要审阅文档；反馈队列位于下方作为次级区域。Profile 编辑态包含一个 Topics 章节：主题条支持新建、改名与删除（删除用 danger 样式），未被任何规则引用的主题在只读视图标注 `unused`。规则编辑保持多行文本形态：unrelated 规则沿用整体多行文本框（一行一条）；direct/indirect 规则因需按条打标，每条规则一个多行文本框，主题 chip 切换与 Remove 集中在文本框下方同一行，不套边框盒子，unrelated 不提供打标入口。
 - Model 常显连接与默认模型，低频调优和价格进入 Advanced，并使用一个统一保存动作。
 - Model Advanced 中的分类思考只提供全局启用/关闭选择；启用后由后端映射到各供应商最低档，GLM 的说明必须明确其始终为 low、不能关闭。
 - App 顶部常显 About、更新和运行信息；Zotero、Scheduled sync、Local app 使用相同的独立 Disclosure。
