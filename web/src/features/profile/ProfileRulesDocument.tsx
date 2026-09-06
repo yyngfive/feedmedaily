@@ -20,22 +20,58 @@ type ProfileDraft = {
   topics: TopicDefinition[];
 };
 
-function draftRules(rules: unknown[]): ProfileRuleDraft[] {
+function draftRules(rules: unknown[], topicLabelsById: Map<string, string>): ProfileRuleDraft[] {
+  // 草稿统一用 label 标识主题引用：新建主题在保存前没有 id，若下拉用 id
+  // 作选项值，多个新主题会以空值互相冲突；label 在注册表内唯一，保存时
+  // 由后端 parse 再解析回 id（resolveRuleTopicLabels）。
   return rules.map((rule) => {
     const normalized = toProfileRule(rule);
-    return {text: normalized.text, topics: [...normalized.topics]};
+    return {
+      text: normalized.text,
+      topics: normalized.topics.map((id) => topicLabelsById.get(id) ?? id),
+    };
   });
 }
 
 function createDraft(profile: ClassificationProfile): ProfileDraft {
+  const topicLabelsById = new Map(profile.topic_taxonomy.map((topic) => [topic.id, topic.label]));
   return {
     name: profile.meta.name,
     scope: profile.scope,
-    directRules: draftRules(profile.relevance_rules.direct),
-    indirectRules: draftRules(profile.relevance_rules.indirect),
-    unrelatedRules: draftRules(profile.relevance_rules.unrelated),
+    directRules: draftRules(profile.relevance_rules.direct, topicLabelsById),
+    indirectRules: draftRules(profile.relevance_rules.indirect, topicLabelsById),
+    unrelatedRules: draftRules(profile.relevance_rules.unrelated, topicLabelsById),
     topics: profile.topic_taxonomy.map((topic) => ({...topic})),
   };
+}
+
+// relabelRuleTopics 在主题条变更时同步规则引用：重命名的主题改写为新 label，
+// 被删除的主题从规则上摘除；新追加的主题还没有任何规则引用。
+function relabelRuleTopics(
+  rules: ProfileRuleDraft[],
+  oldTopics: TopicDefinition[],
+  newTopics: TopicDefinition[],
+): ProfileRuleDraft[] {
+  const renames = new Map<string, string>();
+  const removals = new Set<string>();
+  for (let index = 0; index < oldTopics.length; index += 1) {
+    const oldLabel = oldTopics[index].label;
+    const next = newTopics[index];
+    if (!next) {
+      removals.add(oldLabel.toLowerCase());
+    } else if (next.label !== oldLabel) {
+      renames.set(oldLabel.toLowerCase(), next.label);
+    }
+  }
+  if (renames.size === 0 && removals.size === 0) {
+    return rules;
+  }
+  return rules.map((rule) => ({
+    ...rule,
+    topics: rule.topics
+      .map((label) => renames.get(label.toLowerCase()) ?? label)
+      .filter((label) => !removals.has(label.toLowerCase())),
+  }));
 }
 
 function TopicTagChips({
@@ -138,7 +174,7 @@ function RuleListEditor({
           {items.map((rule, index) => {
             const topicOptions = [
               {value: "", label: "No topic"},
-              ...topics.map((topic) => ({value: topic.id, label: topic.label})),
+              ...topics.map((topic) => ({value: topic.label, label: topic.label})),
             ];
             const selectedTopic = rule.topics[0] ?? "";
             const knownTopic = selectedTopic === "" || topicOptions.some((option) => option.value === selectedTopic);
@@ -156,7 +192,8 @@ function RuleListEditor({
                 <div className="flex items-end gap-2">
                   <div className="w-56">
                     <SelectField
-                      label="Topic"
+                      hideLabel
+                      label={`Topic for rule ${index + 1}`}
                       options={topicOptions}
                       value={knownTopic ? selectedTopic : ""}
                       onChange={(value) =>
@@ -170,7 +207,7 @@ function RuleListEditor({
                   </div>
                   {topics.length === 0 && rule.topics.length > 0 ? (
                     <p className="flex-1 pb-2 text-xs text-muted">
-                      Removed topic: {topicLabels.get(rule.topics[0]) ?? rule.topics[0]}
+                      Removed topic: {rule.topics[0]}
                     </p>
                   ) : null}
                   <Button
@@ -327,7 +364,12 @@ export function ProfileRulesDocument({
     }
     const cleanRules = (rules: ProfileRuleDraft[]) =>
       rules
-        .map((rule) => ({text: rule.text.trim(), topics: rule.topics.filter(Boolean)}))
+        .map((rule) => ({
+          text: rule.text.trim(),
+          // 规则引用的是主题 label；与 draftTopics 一致地 trim，保证后端
+          // 解析时能精确匹配注册表。
+          topics: rule.topics.map((label) => label.trim()).filter(Boolean),
+        }))
         .filter((rule) => rule.text);
     // 草稿里空 id 的新主题由后端保存时分配系统 id。
     const draftTopics = draft.topics
@@ -355,6 +397,18 @@ export function ProfileRulesDocument({
   const cancelEditing = () => {
     setDraft(createDraft(profile));
     setEditing(false);
+  };
+
+  // 主题条变更的统一入口：重命名/删除要同步传播到所有规则的引用上，
+  // 否则会出现规则引用已不存在主题的悬空标签。
+  const updateTopics = (nextTopics: TopicDefinition[]) => {
+    setDraft((current) => ({
+      ...current,
+      topics: nextTopics,
+      directRules: relabelRuleTopics(current.directRules, current.topics, nextTopics),
+      indirectRules: relabelRuleTopics(current.indirectRules, current.topics, nextTopics),
+      unrelatedRules: relabelRuleTopics(current.unrelatedRules, current.topics, nextTopics),
+    }));
   };
 
   return (
@@ -412,7 +466,7 @@ export function ProfileRulesDocument({
 
             <TopicsEditor
               topics={draft.topics}
-              onChange={(topics) => setDraft((current) => ({...current, topics}))}
+              onChange={updateTopics}
             />
 
             <div className="space-y-4">

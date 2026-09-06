@@ -4,7 +4,7 @@ import React from "react";
 import {TextAreaField, TextInputField} from "../../shared/components/FormFields";
 import {ModalShell} from "../../shared/components/ModalShell";
 import {SelectField} from "../../shared/components/SelectField";
-import type {Paper, Relevance, ReportTopics} from "../../shared/types";
+import type {Paper, Relevance, ReportTopics, TopicDefinition} from "../../shared/types";
 
 const feedbackOptions = [
   {value: "direct", label: "Direct"},
@@ -39,15 +39,23 @@ export function FeedbackModal({
 }) {
   const [newTopicLabel, setNewTopicLabel] = React.useState("");
   const [creatingTopic, setCreatingTopic] = React.useState(false);
-  React.useEffect(() => setNewTopicLabel(""), [paper?.id]);
+  // 弹窗内新建的主题立刻进入选项：report.topics 快照要等下一次刷新才含它，
+  // 不做本地合并会导致刚建的主题选中后下拉显示回落到"No topic"。
+  const [createdTopics, setCreatedTopics] = React.useState<TopicDefinition[]>([]);
+  React.useEffect(() => {
+    setNewTopicLabel("");
+    setCreatedTopics([]);
+  }, [paper?.id]);
   if (!paper) {
     return null;
   }
 
-  // 主题下拉：无主题 + 注册表全部主题。孤儿主题（已删除）不出现在选项里。
+  // 主题下拉：无主题 + 注册表主题（含本次会话新建）+ 会话内已建主题。孤儿主题（已删除）不出现。
+  const knownIDs = new Set((topics?.items ?? []).map((topic) => topic.id));
+  const mergedTopics = [...(topics?.items ?? []), ...createdTopics.filter((topic) => !knownIDs.has(topic.id))];
   const topicOptions = [
     {value: "", label: "No topic"},
-    ...(topics?.items ?? []).map((topic) => ({value: topic.id, label: topic.label})),
+    ...mergedTopics.map((topic) => ({value: topic.id, label: topic.label})),
   ];
   const knownTopic = topicOptions.some((option) => option.value === topicValue);
   const submitNewTopic = async () => {
@@ -57,6 +65,7 @@ export function FeedbackModal({
     const created = await createTopic(label);
     setCreatingTopic(false);
     if (created) {
+      setCreatedTopics((current) => [...current, created]);
       onTopicChange(created.id);
       setNewTopicLabel("");
     }
