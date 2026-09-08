@@ -239,64 +239,25 @@ func mustJSON(t *testing.T, value any) []byte {
 	return data
 }
 
-func TestClassifierModelOpenCodeZenFreeKeyless(t *testing.T) {
-	root := t.TempDir()
-	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
-
-	// The keyless catalog entry can be enabled without any credential.
-	response, err := UpdateLocalSettingsWithClassifierModels(root, nil, ClassifierModelsUpdate{
-		EnabledModelIDs: []string{ClassifierModelMiMoZenFree},
-		DefaultModelID:  ClassifierModelMiMoZenFree,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if response.ClassifierModels.DefaultModelID != ClassifierModelMiMoZenFree {
-		t.Fatalf("default = %q", response.ClassifierModels.DefaultModelID)
-	}
-	settings, err := Load(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	effective := settings.EffectiveClassifierModel()
-	if effective.APIKey != OpenCodeZenPublicAPIKey {
-		t.Fatalf("keyless OpenCode Zen model must fall back to the public token, got %q", effective.APIKey)
-	}
-	if effective.BaseURL != "https://opencode.ai/zen/v1" {
-		t.Fatalf("unexpected base URL %q", effective.BaseURL)
-	}
-	resolved, err := ClassifierModelConfigForID(settings, ClassifierModelMiMoZenFree)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved.APIKey != OpenCodeZenPublicAPIKey {
-		t.Fatalf("ConfigForID must fall back to the public token, got %q", resolved.APIKey)
-	}
-
-	view := ClassifierModelsForSettings(settings)
-	var zen *ClassifierModelView
-	for i := range view.Models {
-		if view.Models[i].ID == ClassifierModelMiMoZenFree {
-			zen = &view.Models[i]
+func TestClassifierModelRetiredOpenCodeSelection(t *testing.T) {
+	for _, enabled := range [][]string{{ClassifierModelMiMoZenFree}, {ClassifierModelMiMoZenFree, ClassifierModelMiMoV25}} {
+		ids, selected := normalizeResolvedClassifierModels(enabled, ClassifierModelMiMoZenFree, "", false)
+		if containsClassifierModel(ids, ClassifierModelMiMoZenFree) || selected == ClassifierModelMiMoZenFree {
+			t.Fatalf("retired model survived normalization: %v, %s", ids, selected)
+		}
+		if len(enabled) == 2 && selected != ClassifierModelMiMoV25 {
+			t.Fatalf("remaining official MiMo should be retained: %v, %s", ids, selected)
 		}
 	}
-	if zen == nil {
-		t.Fatal("OpenCode Zen model missing from the model view")
+	if _, ok := classifierModelSpec(ClassifierModelMiMoZenFree); ok {
+		t.Fatal("retired model remains selectable")
 	}
-	if !zen.Configured || !zen.KeyOptional || zen.Source != "builtin" {
-		t.Fatalf("unexpected OpenCode Zen view: %#v", *zen)
-	}
-
-	// Non-keyless providers still require credentials.
-	if _, err := UpdateLocalSettingsWithClassifierModels(root, nil, ClassifierModelsUpdate{
-		EnabledModelIDs: []string{ClassifierModelDeepSeekV4Flash},
-		DefaultModelID:  ClassifierModelDeepSeekV4Flash,
-	}); err == nil {
-		t.Fatal("DeepSeek without a key must still be rejected")
+	if id := classifierModelIDFromLegacy(ClassifierModelMiMoZenFree, "https://opencode.ai/zen/v1"); id != "" {
+		t.Fatalf("retired provider must not migrate credentials: %q", id)
 	}
 }
 
-func TestClassifierModelFreshDefaultsIncludeOpenCodeZen(t *testing.T) {
+func TestClassifierModelFreshDefaultsExcludeOpenCodeZen(t *testing.T) {
 	root := t.TempDir()
 	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
 	settings, err := Load(root)
@@ -304,8 +265,8 @@ func TestClassifierModelFreshDefaultsIncludeOpenCodeZen(t *testing.T) {
 		t.Fatal(err)
 	}
 	enabled := strings.Join(settings.ClassifierModels.EnabledModelIDs, ",")
-	if !strings.Contains(enabled, ClassifierModelDeepSeekV4Flash) || !strings.Contains(enabled, ClassifierModelMiMoZenFree) {
-		t.Fatalf("fresh defaults must include DeepSeek and the keyless OpenCode Zen entry, got %q", enabled)
+	if enabled != ClassifierModelDeepSeekV4Flash {
+		t.Fatalf("fresh defaults must only include DeepSeek, got %q", enabled)
 	}
 	if settings.ClassifierModels.DefaultModelID != ClassifierModelDeepSeekV4Flash {
 		t.Fatalf("fresh default must stay DeepSeek, got %q", settings.ClassifierModels.DefaultModelID)

@@ -120,14 +120,6 @@ var classifierModelCatalog = []ClassifierModelSpec{
 		Thinking:        "disabled",
 		ReasoningEffort: "",
 	},
-	{
-		ID:          ClassifierModelMiMoZenFree,
-		Provider:    "opencode",
-		Label:       "OpenCode MiMo V2.5 (Free)",
-		BaseURL:     "https://opencode.ai/zen/v1",
-		Thinking:    "disabled",
-		KeyOptional: true,
-	},
 }
 
 func classifierModelSpec(modelID string) (ClassifierModelSpec, bool) {
@@ -417,9 +409,7 @@ func normalizeResolvedClassifierModels(enabled []string, configuredDefault strin
 		if legacyConfigured && legacyID != "" {
 			validated = []string{legacyID}
 		} else {
-			// Fresh setups get the keyless OpenCode Zen entry available next to
-			// DeepSeek while keeping DeepSeek as the initial default classifier.
-			validated = []string{ClassifierModelDeepSeekV4Flash, ClassifierModelMiMoZenFree}
+			validated = []string{ClassifierModelDeepSeekV4Flash}
 		}
 	}
 	defaultID := strings.TrimSpace(configuredDefault)
@@ -447,7 +437,7 @@ func classifierModelIDFromLegacy(model string, baseURL string) string {
 		return ClassifierModelQwen38Flash
 	}
 	if normalizedModel == ClassifierModelMiMoZenFree || strings.Contains(normalizedModel, "mimo-v2.5-free") || strings.Contains(strings.ToLower(baseURL), "opencode.ai") {
-		return ClassifierModelMiMoZenFree
+		return "" // Retired provider: do not migrate its credentials to another provider.
 	}
 	if normalizedModel == ClassifierModelMiMoV25 || strings.Contains(normalizedModel, "mimo-v2.5") || strings.Contains(strings.ToLower(baseURL), "xiaomimimo.com") {
 		return ClassifierModelMiMoV25
