@@ -30,6 +30,28 @@
   --info-ink: #1d4ed8;
   --control-radius: 8px;
   --field-radius: var(--control-radius);
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --surface: var(--paper-accent);
+  --surface-foreground: var(--ink);
+  --surface-secondary: var(--paper);
+  --surface-secondary-foreground: var(--ink);
+  --surface-tertiary: var(--paper);
+  --surface-tertiary-foreground: var(--ink);
+  --overlay: var(--paper-accent);
+  --overlay-foreground: var(--ink);
+  --default: var(--paper);
+  --default-foreground: var(--ink);
+  --border: var(--line);
+  --separator: var(--line);
+  --focus: var(--accent);
+  --link: var(--accent);
+  --accent-foreground: #ffffff;
+  --field-background: var(--paper-accent);
+  --field-foreground: var(--ink);
+  --field-border: var(--line);
+  --field-border-width: 1px;
+  --surface-shadow: none;
 }
 
 :root[data-theme="dark"] {
@@ -42,6 +64,7 @@
   --line: #2b3a47;
   --line-strong: #3f5261;
   --accent: #4fd1c5;
+  --accent-foreground: #0f1720;
   --direct: #34d399;
   --indirect: #f6ad55;
   --unrelated: #94a3b8;
@@ -147,6 +170,34 @@ a {
 
 .select__popover {
   border-radius: var(--control-radius);
+}
+
+/* 普通容器和控件共享圆角，状态 Chip 保留胶囊形。 */
+.button,
+.card,
+.input-group,
+.rounded-md,
+.rounded-lg {
+  border-radius: var(--control-radius);
+}
+
+.paper-card {
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.paper-card:hover {
+  border-color: var(--line-strong);
+}
+
+.paper-card[data-selected="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.paper-card:has(:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .input::placeholder,

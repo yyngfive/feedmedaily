@@ -32,7 +32,7 @@ export function PaperCard({
       ? null
       : topicID && topicLabel
         ? topicLabel
-        : "未归类";
+        : "Unassigned";
   // 待生效的主题纠正（最近一条 open feedback）：仅在最新分类尚未满足纠正时，
   // chip 追加“原值 -> 纠正值”；落实后分类本身显示纠正值，chip 回到普通主题形态。
   // 未落实判定用原始值比较（空数组按哨兵 none），与后端对账口径一致。
@@ -42,10 +42,10 @@ export function PaperCard({
   const pendingTopicText = !topicPending
     ? null
     : pendingTopic === TOPIC_NONE
-      ? "无主题"
-      : topicLabelFor(pendingTopic, topics) ?? "未归类";
+      ? "No topic"
+      : topicLabelFor(pendingTopic, topics) ?? "Unassigned";
   const topicChipText = pendingTopicText
-    ? `${originalTopicText ?? (topicState === "unprocessed" ? "未判定" : null) ?? "未归类"} -> ${pendingTopicText}`
+    ? `${originalTopicText ?? (topicState === "unprocessed" ? "Not processed" : null) ?? "Unassigned"} -> ${pendingTopicText}`
     : originalTopicText;
   const handleSelectKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -56,21 +56,22 @@ export function PaperCard({
 
   return (
     <Card
-      className={`border-l-4 ${tone.ring} ${isSelected ? "outline outline-(--accent)" : ""}`}
+      className="paper-card" data-selected={isSelected}
     >
       <div
-        className="block w-full cursor-pointer text-left"
+        className="flex w-full cursor-pointer flex-col gap-3 text-left outline-none"
         role="button"
+        aria-pressed={isSelected}
         tabIndex={0}
         onClick={onSelect}
         onKeyDown={handleSelectKeyDown}
       >
-        <Card.Header className="gap-3">
-          <div className="flex flex-1 flex-wrap items-center gap-2 my-1">
+        <Card.Header className="order-2 gap-3">
+          <div className="flex flex-1 flex-wrap items-center gap-2">
             {isUnread ? (
               <span aria-label="Unread" className="size-2 rounded-full bg-(--unread)" title="Unread"></span>
             ) : null}
-            <span className={`text-sm font-semibold ${tone.text}`}>
+            <span className="order-last text-xs text-muted" title="Classification confidence">
               {Math.round(paper.classification.confidence * 100)}%
             </span>
             <Chip color={tone.chip} size="sm" variant="soft">
@@ -91,14 +92,14 @@ export function PaperCard({
         </Card.Header>
         <Card.Content className="gap-3">
           <div>
-            <Card.Title className="line-clamp-2 text-lg leading-6">{paper.title}</Card.Title>
+            <Card.Title className="line-clamp-2 text-lg font-semibold leading-6">{paper.title}</Card.Title>
             {paper.classification.translated_title_zh ? (
-              <Card.Description className="mt-1 line-clamp-2 text-base">
+              <Card.Description className="mt-1 line-clamp-2 text-base leading-7">
                 {paper.classification.translated_title_zh}
               </Card.Description>
             ) : null}
           </div>
-          <p className="text-base text-muted">{paper.journal || "Unknown journal"}</p>
+          <p className="text-sm text-muted">{paper.journal || "Unknown journal"}</p>
           <p className="text-sm text-muted">
             {paperDate(paper)} · {authorsLine(paper)}
           </p>

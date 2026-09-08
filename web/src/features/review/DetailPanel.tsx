@@ -46,28 +46,30 @@ export function DetailPanel({
   const authors = paper.authors ?? [];
 
   return (
-    <aside className="h-full space-y-5 overflow-auto rounded-lg border border-(--line) bg-(--paper-accent) p-5">
+    <aside className="h-full space-y-5 overflow-auto wrap-break-word rounded-lg border border-(--line) bg-(--paper-accent) p-5">
 
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-2 gap-2">
         {linkHref && (
-          <Button size="sm" variant="primary" onPress={() => window.open(linkHref, "_blank")}>
-            Link
+          <Button fullWidth size="sm" variant="primary" onPress={() => window.open(linkHref, "_blank")}>
+            Open article
           </Button>
         )}
         <Button
+          fullWidth
           size="sm"
           isDisabled={markReadBusy}
-          variant={isUnread ? "secondary" : "outline"}
+          variant="outline"
           onPress={onMarkRead}
         >
           {markReadBusy ? "Updating..." : isUnread ? "Mark as read" : "Mark as unread"}
         </Button>
-        <Button size="sm" variant={zoteroSaved ? "tertiary" : "tertiary"} onPress={onSave}>
+        <Button fullWidth size="sm" variant="outline" onPress={onSave}>
           {zoteroSaved ? "Saved" : "Save to Zotero"}
         </Button>
         <Button
+          fullWidth
           size="sm"
-          variant={feedbackText ? "danger-soft" : "tertiary"}
+          variant={feedbackText ? "danger-soft" : "outline"}
           onPress={onMarkWrong}
         >
           Mark wrong
@@ -76,7 +78,7 @@ export function DetailPanel({
 
       <div className="space-y-3">
         <h2 className="text-xl font-semibold leading-7 text-(--ink)">{paper.title}</h2>
-        {paper.classification.translated_title_zh ? <h2 className="line-clamp-2 text-base">{paper.classification.translated_title_zh}</h2> : null}
+        {paper.classification.translated_title_zh ? <p className="text-lg leading-7 text-(--subtle-ink)">{paper.classification.translated_title_zh}</p> : null}
         <p className="text-base leading-6 text-muted">{paper.journal || "Unknown journal"}</p>
         <p className="text-sm leading-6 text-muted">{paperDate(paper)}</p>
       </div>
@@ -86,7 +88,7 @@ export function DetailPanel({
         <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
           Authors {authors.length > 0 ? `(${authors.length})` : ""}
         </h3>
-        <p className="max-h-32 overflow-auto pr-1 text-sm leading-6 text-(--body)">
+        <p className="text-sm leading-6 text-(--body)">
           {authors.length > 0 ? authors.join(", ") : "Authors unavailable"}
         </p>
       </section>
@@ -106,11 +108,11 @@ export function DetailPanel({
         </h3>
         {hasAbstractHtml ? (
           <div
-            className="max-h-64 overflow-auto pr-1 text-sm leading-6 text-(--body) [&_a]:text-(--accent) [&_a]:underline [&_p+*]:mt-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+            className="text-sm leading-6 text-(--body) [&_img]:max-w-full [&_img]:h-auto [&_a]:text-(--accent) [&_a]:underline [&_p+*]:mt-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
             dangerouslySetInnerHTML={{ __html: abstractHtml }}
           />
         ) : paper.abstract ? (
-          <p className="max-h-64 overflow-auto pr-1 text-sm leading-6 text-(--body)">
+          <p className="text-sm leading-6 text-(--body)">
             {paper.abstract}
           </p>
         ) : (

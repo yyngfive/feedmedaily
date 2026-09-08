@@ -1,17 +1,17 @@
-import {Button, Chip, Spinner} from "@heroui/react";
+import { Button, Chip, Spinner } from "@heroui/react";
 import React from "react";
 
-import {fetchZoteroCollections} from "../../api/client";
-import {SelectField} from "../../shared/components/SelectField";
-import type {AppMeta, AppUpdate, SchedulerSettings, SettingsConfigField, SettingsConfigUpdate, ZoteroCollectionOption} from "../../shared/types";
-import {AdminDisclosure} from "./AdminDisclosure";
-import {SettingsConfigEditor, type SettingsConfigEditorHandle} from "./SettingsConfigEditor";
+import { fetchZoteroCollections } from "../../api/client";
+import { SelectField } from "../../shared/components/SelectField";
+import type { AppMeta, AppUpdate, SchedulerSettings, SettingsConfigField, SettingsConfigUpdate, ZoteroCollectionOption } from "../../shared/types";
+import { AdminDisclosure } from "./AdminDisclosure";
+import { SettingsConfigEditor, type SettingsConfigEditorHandle } from "./SettingsConfigEditor";
 
 function fieldValue(fields: SettingsConfigField[], key: string) {
   return fields.find((field) => field.key === key)?.value ?? "";
 }
 
-export function AppTab({appMeta, appUpdate, appUpdateChecking, configFields, configSaving, onCheckForUpdates, onDeleteScheduler, onSaveConfig, onSaveScheduler, scheduler, schedulerSaving}: {
+export function AppTab({ appMeta, appUpdate, appUpdateChecking, configFields, configSaving, onCheckForUpdates, onDeleteScheduler, onSaveConfig, onSaveScheduler, scheduler, schedulerSaving }: {
   appMeta: AppMeta | null;
   appUpdate: AppUpdate | null;
   appUpdateChecking: boolean;
@@ -64,7 +64,7 @@ export function AppTab({appMeta, appUpdate, appUpdateChecking, configFields, con
   const saveZotero = async () => {
     await onSaveConfig({
       ...(zoteroRef.current?.getPayload() ?? {}),
-      ...(collectionField ? {[collectionField.key]: {value: collectionKey}} : {}),
+      ...(collectionField ? { [collectionField.key]: { value: collectionKey } } : {}),
     });
     await loadCollections();
   };
@@ -115,7 +115,7 @@ export function AppTab({appMeta, appUpdate, appUpdateChecking, configFields, con
         <AdminDisclosure meta={<Chip color={zoteroColor} size="sm" variant="soft">{zoteroStatus}</Chip>} title="Zotero">
           {zoteroError ? <p className="mb-4 text-sm text-rose-700">{zoteroError}</p> : null}
           <SettingsConfigEditor ref={zoteroRef} fields={zoteroConnectionFields} hideGroupTitles saving={configSaving} showHeader={false} showSaveAction={false} title="Zotero" onSave={onSaveConfig} />
-          {zoteroConfigured ? <div className="mt-4 border-t border-(--line) pt-4"><SelectField disabled={collectionsLoading} label="Default collection" options={[{label: "Library root", value: ""}, ...collections.map((collection) => ({label: collection.path_label || collection.name, value: collection.key, depth: collection.depth}))]} value={collectionKey} onChange={setCollectionKey} /></div> : <p className="mt-3 text-sm text-muted">Save the connection first, then choose a default collection.</p>}
+          {zoteroConfigured ? <div className="mt-4 border-t border-(--line) pt-4"><SelectField disabled={collectionsLoading} label="Default collection" options={[{ label: "Library root", value: "" }, ...collections.map((collection) => ({ label: collection.path_label || collection.name, value: collection.key, depth: collection.depth }))]} value={collectionKey} onChange={setCollectionKey} /></div> : <p className="mt-3 text-sm text-muted">Save the connection first, then choose a default collection.</p>}
           <div className="mt-4 flex flex-wrap gap-2">
             <Button isDisabled={configSaving} size="sm" onPress={() => void saveZotero()}>{configSaving ? "Saving..." : "Save Zotero"}</Button>
             {zoteroConfigured ? <Button isDisabled={collectionsLoading} size="sm" variant="ghost" onPress={() => void loadCollections()}>{collectionsLoading ? <span className="inline-flex items-center gap-2"><Spinner color="current" size="sm" />Connecting...</span> : "Test connection"}</Button> : null}
@@ -127,8 +127,8 @@ export function AppTab({appMeta, appUpdate, appUpdateChecking, configFields, con
           {schedulerAdvisory ? <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900"><p className="font-medium">Automatic scheduling is unavailable on this platform.</p><p className="mt-1 leading-6">{schedulerAdvisory}</p></div> : null}
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <label className="block w-52"><span className="text-sm font-medium text-(--ink)">Daily time</span><input className="mt-2 w-full rounded-md border border-(--line) bg-(--paper-accent) px-3 py-2 text-sm text-(--ink)" type="time" value={schedulerTime} onChange={(event) => setSchedulerTime(event.target.value)} /></label>
-            <Button isDisabled={schedulerSaving || !schedulerTime} size="sm" onPress={() => void onSaveScheduler(schedulerTime)}>{schedulerSaving ? "Saving..." : scheduler?.installed ? "Update schedule" : "Enable schedule"}</Button>
-            {scheduler?.installed ? <Button isDisabled={schedulerSaving} size="sm" variant="danger" onPress={() => void onDeleteScheduler()}>Disable schedule</Button> : null}
+            <Button isDisabled={schedulerSaving || !schedulerTime} size="sm" onPress={() => void onSaveScheduler(schedulerTime)}>{schedulerSaving ? "Saving..." : scheduler?.installed ? "Update" : "Enable"}</Button>
+            {scheduler?.installed ? <Button isDisabled={schedulerSaving} size="sm" variant="danger" onPress={() => void onDeleteScheduler()}>Disable</Button> : null}
           </div>
           {scheduler?.installed ? <p className="mt-4 text-sm text-muted">Last run: {scheduler.last_run_time ? new Date(scheduler.last_run_time).toLocaleString() : "Never"}</p> : null}
         </AdminDisclosure>
@@ -136,7 +136,7 @@ export function AppTab({appMeta, appUpdate, appUpdateChecking, configFields, con
         <AdminDisclosure title="Local app">
           <p className="mb-3 text-sm text-muted">Host and port changes take effect after the local service restarts.</p>
           <SettingsConfigEditor ref={localAppRef} fields={localAppFields} hideGroupTitles saving={configSaving} showHeader={false} showSaveAction={false} title="Local app" onSave={onSaveConfig} />
-          <Button className="mt-4" isDisabled={configSaving} size="sm" onPress={() => void onSaveConfig(localAppRef.current?.getPayload() ?? {})}>{configSaving ? "Saving..." : "Save local app"}</Button>
+          <Button className="mt-4" isDisabled={configSaving} size="sm" onPress={() => void onSaveConfig(localAppRef.current?.getPayload() ?? {})}>{configSaving ? "Saving..." : "Save"}</Button>
         </AdminDisclosure>
       </div>
     </div>
