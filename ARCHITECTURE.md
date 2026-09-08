@@ -172,7 +172,7 @@ Behavioral baseline:
 - if a profile exists, the three-column review shell renders immediately and the paper list begins loading as soon as the report request starts
 - if a profile exists but no feeds exist, the app switches into a feed-initialization empty state once feed loading resolves
 - the default review view is `Unread + Last 30 days`
-- FiltersSidebar owns filters and report/profile context; relevance counts appear only in PaperListSection. The workspace has no footer; TopBar owns app exit, while Settings → App owns version/update information and directory-opening actions.
+- FiltersSidebar owns filters and report/profile context; relevance counts appear only in PaperListSection. The workspace has no footer; Settings → App owns app exit, version/update information, and directory-opening actions.
 - paper cards prioritize titles and metadata, with classification/feedback chips below; DetailPanel owns a two-column action group (`Open article`, read state, Zotero, feedback) and a single scrolling reading surface for authors and abstracts. Shared CSS maps HeroUI surfaces and controls to the app palette and 8px container/control radius.
 - Zotero collection loading (including Settings connection testing) fetches the library-wide collections endpoint in pages of 100 and reconstructs parent paths locally from `parentCollection`, without per-folder network requests. Collection data remains freshly fetched on each load.
 - paper cards stay summary-only

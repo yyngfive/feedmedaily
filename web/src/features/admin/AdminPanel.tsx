@@ -44,6 +44,8 @@ export type AdminPanelProps = {
   appMeta: AppMeta | null;
   appUpdate: AppUpdate | null;
   appUpdateChecking: boolean;
+  appControlBusy: boolean;
+  onExitApp: () => void;
   onOpenAppTarget: (target: "data_dir" | "logs_dir" | "install_dir") => void;
   configFields: SettingsConfigField[];
   configSaving: boolean;
@@ -251,7 +253,7 @@ export function AdminPanel(props: AdminPanelProps) {
               </AdminDisclosure>
             </div>
             <div hidden={props.activeTab !== "app"}>
-              <AppTab onOpenAppTarget={props.onOpenAppTarget} appMeta={props.appMeta} appUpdate={props.appUpdate} appUpdateChecking={props.appUpdateChecking} configFields={appFields} configSaving={props.configSaving} onCheckForUpdates={props.onCheckForUpdates} onDeleteScheduler={props.onDeleteScheduler} onSaveConfig={props.onSaveConfig} onSaveScheduler={props.onSaveScheduler} scheduler={props.scheduler} schedulerSaving={props.schedulerSaving} />
+              <AppTab appControlBusy={props.appControlBusy} onExitApp={props.onExitApp} onOpenAppTarget={props.onOpenAppTarget} appMeta={props.appMeta} appUpdate={props.appUpdate} appUpdateChecking={props.appUpdateChecking} configFields={appFields} configSaving={props.configSaving} onCheckForUpdates={props.onCheckForUpdates} onDeleteScheduler={props.onDeleteScheduler} onSaveConfig={props.onSaveConfig} onSaveScheduler={props.onSaveScheduler} scheduler={props.scheduler} schedulerSaving={props.schedulerSaving} />
             </div>
           </main>
         </div>

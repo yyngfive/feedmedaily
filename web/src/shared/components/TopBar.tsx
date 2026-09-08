@@ -5,16 +5,12 @@ import type {UiMessage} from "../../app/messages";
 
 export function TopBar({
   message,
-  exitBusy,
-  onExit,
   onOpenAdmin,
   onToggleTheme,
   resolvedTheme,
   usingSystemTheme,
 }: {
   message: UiMessage | null;
-  exitBusy: boolean;
-  onExit: () => void;
   onOpenAdmin: () => void;
   onToggleTheme: () => void;
   resolvedTheme: "light" | "dark";
@@ -44,9 +40,6 @@ export function TopBar({
           </Button>
           <Button size="sm" variant="primary" onPress={onOpenAdmin}>
             Settings
-          </Button>
-          <Button isDisabled={exitBusy} size="sm" variant="danger-soft" onPress={onExit}>
-            {exitBusy ? "Exiting..." : "Exit App"}
           </Button>
         </div>
       </div>

@@ -28,7 +28,7 @@ export function App() {
   if (!state.profileResolved) {
     return (
       <main className="flex min-h-screen flex-col bg-[--paper] text-[--ink]">
-        <TopBar exitBusy={state.appControlBusy} onExit={() => void admin.handleExitApp()} message={state.message} onOpenAdmin={() => state.setAdminOpen(true)} onToggleTheme={toggleTheme} resolvedTheme={state.resolvedTheme} usingSystemTheme={state.themePreference === "system"} />
+        <TopBar message={state.message} onOpenAdmin={() => state.setAdminOpen(true)} onToggleTheme={toggleTheme} resolvedTheme={state.resolvedTheme} usingSystemTheme={state.themePreference === "system"} />
         <div className="mx-auto flex w-full max-w-5xl flex-1 items-center justify-center px-4 py-8">
           <div className="rounded-lg border border-(--line) bg-(--paper-accent) px-5 py-4 text-sm text-muted">Loading your library...</div>
         </div>
@@ -59,7 +59,7 @@ export function App() {
 
   return (
     <main className="fixed inset-0 flex flex-col overflow-hidden bg-[--paper] text-[--ink]">
-      <TopBar exitBusy={state.appControlBusy} onExit={() => void admin.handleExitApp()} message={state.message} onOpenAdmin={() => state.setAdminOpen(true)} onToggleTheme={toggleTheme} resolvedTheme={state.resolvedTheme} usingSystemTheme={state.themePreference === "system"} />
+      <TopBar message={state.message} onOpenAdmin={() => state.setAdminOpen(true)} onToggleTheme={toggleTheme} resolvedTheme={state.resolvedTheme} usingSystemTheme={state.themePreference === "system"} />
       {state.adminHydrationWarning ? <StatusBanner className="mx-auto mt-3 w-full max-w-375 px-4" tone="warning">{state.adminHydrationWarning}</StatusBanner> : null}
       <AdminPanel
         activeTab={state.adminTab}
@@ -80,6 +80,8 @@ export function App() {
         proposalGenerating={Boolean(data.profileProposalJob)}
         proposals={state.profileProposals}
         onClose={() => state.setAdminOpen(false)}
+        appControlBusy={state.appControlBusy}
+        onExitApp={() => void admin.handleExitApp()}
         onOpenAppTarget={(target) => void admin.handleOpenAppTarget(target)}
         onCheckForUpdates={() => void data.handleCheckAppUpdate()}
         onSaveConfig={admin.handleSaveConfig}

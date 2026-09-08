@@ -19,7 +19,7 @@ Changes since `0.6.0`:
 
 ### Fixed
 
-- Simplified the reading workspace: removed duplicate sidebar counts, retained classification counts in the center tabs, and removed the footer. App exit is available in the main toolbar; version/update details and directory shortcuts live in Settings → App.
+- Simplified the reading workspace: removed duplicate sidebar counts, retained classification counts in the center tabs, and removed the footer. App exit, version/update details, and directory shortcuts live in Settings → App.
 
 - Reduced Zotero collection loading and connection-test requests by fetching the library's collections in pages and rebuilding parent paths locally, instead of querying every folder separately. Fixed long metadata URLs overflowing the save dialog, kept tall dialogs scrollable within the viewport, and aligned dropdown option highlights with the shared 8px radius.
 

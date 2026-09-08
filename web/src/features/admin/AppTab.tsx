@@ -11,7 +11,9 @@ function fieldValue(fields: SettingsConfigField[], key: string) {
   return fields.find((field) => field.key === key)?.value ?? "";
 }
 
-export function AppTab({ onOpenAppTarget, appMeta, appUpdate, appUpdateChecking, configFields, configSaving, onCheckForUpdates, onDeleteScheduler, onSaveConfig, onSaveScheduler, scheduler, schedulerSaving }: {
+export function AppTab({ appControlBusy, onExitApp, onOpenAppTarget, appMeta, appUpdate, appUpdateChecking, configFields, configSaving, onCheckForUpdates, onDeleteScheduler, onSaveConfig, onSaveScheduler, scheduler, schedulerSaving }: {
+  appControlBusy: boolean;
+  onExitApp: () => void;
   onOpenAppTarget: (target: "data_dir" | "logs_dir" | "install_dir") => void;
   appMeta: AppMeta | null;
   appUpdate: AppUpdate | null;
@@ -114,6 +116,7 @@ export function AppTab({ onOpenAppTarget, appMeta, appUpdate, appUpdateChecking,
           <Button size="sm" variant="outline" onPress={() => onOpenAppTarget("data_dir")}>Open Data</Button>
           <Button size="sm" variant="outline" onPress={() => onOpenAppTarget("logs_dir")}>Open Logs</Button>
           <Button size="sm" variant="outline" onPress={() => onOpenAppTarget("install_dir")}>Open Install</Button>
+          <Button isDisabled={appControlBusy} size="sm" variant="danger-soft" onPress={onExitApp}>{appControlBusy ? "Exiting..." : "Exit App"}</Button>
         </div>
       </section>
 
