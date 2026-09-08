@@ -12,18 +12,15 @@ import (
 )
 
 func TestListCollectionsBuildsPathLabelsAndDefaultFlags(t *testing.T) {
+	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
 		switch r.URL.Path {
-		case "/users/123/collections/top":
+		case "/users/123/collections":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"key": "CHILD", "data": map[string]any{"name": "RNA", "parentCollection": "PARENT"}},
 				{"key": "PARENT", "data": map[string]any{"name": "Inbox"}},
 			})
-		case "/users/123/collections/PARENT/collections":
-			_ = json.NewEncoder(w).Encode([]map[string]any{
-				{"key": "CHILD", "data": map[string]any{"name": "RNA"}},
-			})
-		case "/users/123/collections/CHILD/collections":
-			_ = json.NewEncoder(w).Encode([]map[string]any{})
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -51,6 +48,9 @@ func TestListCollectionsBuildsPathLabelsAndDefaultFlags(t *testing.T) {
 	if len(payload.Collections) != 2 {
 		t.Fatalf("collections = %#v", payload.Collections)
 	}
+	if requests != 1 {
+		t.Fatalf("expected one bulk request, got %d", requests)
+	}
 	if payload.DefaultCollectionKey == nil || *payload.DefaultCollectionKey != "CHILD" {
 		t.Fatalf("default collection key = %#v", payload.DefaultCollectionKey)
 	}
@@ -65,8 +65,9 @@ func TestListCollectionsBuildsPathLabelsAndDefaultFlags(t *testing.T) {
 func TestListCollectionsReadsAllPages(t *testing.T) {
 	requestStarts := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/users/123/collections/top" {
-			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		if r.URL.Path != "/users/123/collections" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusNotFound)
 			return
 		}
 		requestStarts = append(requestStarts, r.URL.Query().Get("start"))
@@ -77,7 +78,7 @@ func TestListCollectionsReadsAllPages(t *testing.T) {
 				items = append(items, map[string]any{"key": key, "data": map[string]any{"name": key}})
 			}
 		} else {
-			items = append(items, map[string]any{"key": "LAST", "data": map[string]any{"name": "Last"}})
+			items = append(items, map[string]any{"key": "LAST", "data": map[string]any{"name": "Last", "parentCollection": "COLL-000"}})
 		}
 		_ = json.NewEncoder(w).Encode(items)
 	}))
@@ -99,25 +100,23 @@ func TestListCollectionsReadsAllPages(t *testing.T) {
 	if len(payload.Collections) != 101 {
 		t.Fatalf("collections = %d", len(payload.Collections))
 	}
+	if payload.Collections[1].PathLabel != "COLL-000 / Last" || payload.Collections[1].Depth != 1 {
+		t.Fatalf("cross-page parent not resolved: %#v", payload.Collections[1])
+	}
 	if len(requestStarts) != 2 || requestStarts[0] != "0" || requestStarts[1] != "100" {
 		t.Fatalf("request starts = %#v", requestStarts)
 	}
 }
 
-func TestListCollectionsUsesRecursiveParentHierarchy(t *testing.T) {
+func TestListCollectionsUsesBulkParentHierarchy(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/users/123/collections/top":
+		case "/users/123/collections":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{"key": "XNA", "data": map[string]any{"name": "XNA"}},
+				{"key": "DNA", "data": map[string]any{"name": "dna walker", "parentCollection": "XNA"}},
+				{"key": "RNA", "data": map[string]any{"name": "RNA MB", "parentCollection": "XNA"}},
 			})
-		case "/users/123/collections/XNA/collections":
-			_ = json.NewEncoder(w).Encode([]map[string]any{
-				{"key": "DNA", "data": map[string]any{"name": "dna walker"}},
-				{"key": "RNA", "data": map[string]any{"name": "RNA MB"}},
-			})
-		case "/users/123/collections/DNA/collections", "/users/123/collections/RNA/collections":
-			_ = json.NewEncoder(w).Encode([]map[string]any{})
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -46,38 +45,40 @@ func ListCollections(settings config.Settings) (CollectionsResponse, error) {
 
 	defaultKey := optionalString(settings.ZoteroCollectionKey)
 	collections := []CollectionOption{}
-	seen := map[string]bool{}
-	var walk func(endpoint string, parentKey *string, parentPath []string, depth int) error
-	walk = func(endpoint string, parentKey *string, parentPath []string, depth int) error {
-		items, err := fetchCollections(settings, prefix, endpoint)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			collectionKey, name, ok := collectionSummary(item)
-			if !ok || seen[collectionKey] {
-				continue
-			}
-			seen[collectionKey] = true
-			path := append(append([]string{}, parentPath...), name)
-			collections = append(collections, CollectionOption{
-				Key:       collectionKey,
-				Name:      name,
-				PathLabel: strings.Join(path, " / "),
-				Depth:     depth,
-				ParentKey: parentKey,
-				IsDefault: defaultKey != nil && collectionKey == *defaultKey,
-			})
-			childEndpoint := "collections/" + url.PathEscape(collectionKey) + "/collections"
-			childParent := collectionKey
-			if err := walk(childEndpoint, &childParent, path, depth+1); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := walk("collections/top", nil, nil, 0); err != nil {
+	// 全库接口已包含 parentCollection，避免逐目录串行请求（包括叶子目录）。
+	items, err := fetchCollections(settings, prefix, "collections")
+	if err != nil {
 		return CollectionsResponse{}, err
+	}
+	byKey := map[string]CollectionOption{}
+	for _, item := range items {
+		key, name, ok := collectionSummary(item)
+		if !ok {
+			continue
+		}
+		data := item["data"].(map[string]any)
+		parent, _ := data["parentCollection"].(string)
+		byKey[key] = CollectionOption{Key: key, Name: name, ParentKey: optionalString(parent), IsDefault: defaultKey != nil && key == *defaultKey}
+	}
+	for key, collection := range byKey {
+		path := []string{collection.Name}
+		seen := map[string]bool{key: true}
+		for parent := collection.ParentKey; parent != nil; {
+			if seen[*parent] {
+				return CollectionsResponse{}, fmt.Errorf("Invalid Zotero collection hierarchy: cycle at %s", *parent)
+			}
+			seen[*parent] = true
+			ancestor, exists := byKey[*parent]
+			if !exists {
+				break
+			}
+			path = append(path, ancestor.Name)
+			parent = ancestor.ParentKey
+		}
+		slices.Reverse(path)
+		collection.PathLabel = strings.Join(path, " / ")
+		collection.Depth = len(path) - 1
+		collections = append(collections, collection)
 	}
 	slices.SortFunc(collections, func(left, right CollectionOption) int {
 		return strings.Compare(strings.ToLower(left.PathLabel), strings.ToLower(right.PathLabel))
