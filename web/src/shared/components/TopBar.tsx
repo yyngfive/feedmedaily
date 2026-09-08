@@ -5,12 +5,16 @@ import type {UiMessage} from "../../app/messages";
 
 export function TopBar({
   message,
+  exitBusy,
+  onExit,
   onOpenAdmin,
   onToggleTheme,
   resolvedTheme,
   usingSystemTheme,
 }: {
   message: UiMessage | null;
+  exitBusy: boolean;
+  onExit: () => void;
   onOpenAdmin: () => void;
   onToggleTheme: () => void;
   resolvedTheme: "light" | "dark";
@@ -22,7 +26,6 @@ export function TopBar({
     <header className="z-30 h-16 flex-none border-b border-(--line) bg-(--paper)">
       <div className="mx-auto flex h-full max-w-375 items-center gap-4 px-4">
         <div className="min-w-0 shrink-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">Feed</p>
           <h1 className="text-xl font-semibold leading-6 text-(--ink)">FeedMeDaily</h1>
         </div>
 
@@ -39,8 +42,11 @@ export function TopBar({
             {themeLabel}
             {usingSystemTheme ? " (Auto)" : ""}
           </Button>
-          <Button size="sm" variant="secondary" onPress={onOpenAdmin}>
+          <Button size="sm" variant="primary" onPress={onOpenAdmin}>
             Settings
+          </Button>
+          <Button isDisabled={exitBusy} size="sm" variant="danger-soft" onPress={onExit}>
+            {exitBusy ? "Exiting..." : "Exit App"}
           </Button>
         </div>
       </div>

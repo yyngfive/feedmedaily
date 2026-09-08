@@ -11,7 +11,8 @@ function fieldValue(fields: SettingsConfigField[], key: string) {
   return fields.find((field) => field.key === key)?.value ?? "";
 }
 
-export function AppTab({ appMeta, appUpdate, appUpdateChecking, configFields, configSaving, onCheckForUpdates, onDeleteScheduler, onSaveConfig, onSaveScheduler, scheduler, schedulerSaving }: {
+export function AppTab({ onOpenAppTarget, appMeta, appUpdate, appUpdateChecking, configFields, configSaving, onCheckForUpdates, onDeleteScheduler, onSaveConfig, onSaveScheduler, scheduler, schedulerSaving }: {
+  onOpenAppTarget: (target: "data_dir" | "logs_dir" | "install_dir") => void;
   appMeta: AppMeta | null;
   appUpdate: AppUpdate | null;
   appUpdateChecking: boolean;
@@ -109,6 +110,11 @@ export function AppTab({ appMeta, appUpdate, appUpdateChecking, configFields, co
             <div><dt className="text-xs">Config</dt><dd className="break-all text-(--ink)"><code>{appMeta.config_dir ?? "Unavailable"}</code></dd></div>
           </dl>
         ) : <p className="mt-4 text-sm text-muted">App metadata is unavailable.</p>}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onPress={() => onOpenAppTarget("data_dir")}>Open Data</Button>
+          <Button size="sm" variant="outline" onPress={() => onOpenAppTarget("logs_dir")}>Open Logs</Button>
+          <Button size="sm" variant="outline" onPress={() => onOpenAppTarget("install_dir")}>Open Install</Button>
+        </div>
       </section>
 
       <div className="space-y-4">

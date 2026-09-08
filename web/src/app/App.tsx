@@ -8,7 +8,6 @@ import {FiltersSidebar} from "../features/review/FiltersSidebar";
 import {PaperListSection} from "../features/review/PaperListSection";
 import {useReviewWorkspace} from "../features/review/useReviewWorkspace";
 import {ZoteroSaveModal} from "../features/review/ZoteroSaveModal";
-import {AppStatusBar} from "../shared/components/AppStatusBar";
 import {StatusBanner} from "../shared/components/StatusBanner";
 import {TopBar} from "../shared/components/TopBar";
 import {useAdminActions} from "./useAdminActions";
@@ -29,21 +28,10 @@ export function App() {
   if (!state.profileResolved) {
     return (
       <main className="flex min-h-screen flex-col bg-[--paper] text-[--ink]">
-        <TopBar message={state.message} onOpenAdmin={() => state.setAdminOpen(true)} onToggleTheme={toggleTheme} resolvedTheme={state.resolvedTheme} usingSystemTheme={state.themePreference === "system"} />
+        <TopBar exitBusy={state.appControlBusy} onExit={() => void admin.handleExitApp()} message={state.message} onOpenAdmin={() => state.setAdminOpen(true)} onToggleTheme={toggleTheme} resolvedTheme={state.resolvedTheme} usingSystemTheme={state.themePreference === "system"} />
         <div className="mx-auto flex w-full max-w-5xl flex-1 items-center justify-center px-4 py-8">
           <div className="rounded-lg border border-(--line) bg-(--paper-accent) px-5 py-4 text-sm text-muted">Loading your library...</div>
         </div>
-        <AppStatusBar
-          appMeta={state.appMeta}
-          appUpdate={state.appUpdate}
-          appUpdateChecking={state.appUpdateChecking}
-          busy={state.appControlBusy}
-          onCheckForUpdates={() => void data.handleCheckAppUpdate()}
-          onExit={() => void admin.handleExitApp()}
-          onOpenData={() => void admin.handleOpenAppTarget("data_dir")}
-          onOpenInstall={() => void admin.handleOpenAppTarget("install_dir")}
-          onOpenLogs={() => void admin.handleOpenAppTarget("logs_dir")}
-        />
       </main>
     );
   }
@@ -71,7 +59,7 @@ export function App() {
 
   return (
     <main className="fixed inset-0 flex flex-col overflow-hidden bg-[--paper] text-[--ink]">
-      <TopBar message={state.message} onOpenAdmin={() => state.setAdminOpen(true)} onToggleTheme={toggleTheme} resolvedTheme={state.resolvedTheme} usingSystemTheme={state.themePreference === "system"} />
+      <TopBar exitBusy={state.appControlBusy} onExit={() => void admin.handleExitApp()} message={state.message} onOpenAdmin={() => state.setAdminOpen(true)} onToggleTheme={toggleTheme} resolvedTheme={state.resolvedTheme} usingSystemTheme={state.themePreference === "system"} />
       {state.adminHydrationWarning ? <StatusBanner className="mx-auto mt-3 w-full max-w-375 px-4" tone="warning">{state.adminHydrationWarning}</StatusBanner> : null}
       <AdminPanel
         activeTab={state.adminTab}
@@ -92,6 +80,7 @@ export function App() {
         proposalGenerating={Boolean(data.profileProposalJob)}
         proposals={state.profileProposals}
         onClose={() => state.setAdminOpen(false)}
+        onOpenAppTarget={(target) => void admin.handleOpenAppTarget(target)}
         onCheckForUpdates={() => void data.handleCheckAppUpdate()}
         onSaveConfig={admin.handleSaveConfig}
         onTestClassifierModel={admin.handleTestClassifierModel}
@@ -135,13 +124,10 @@ export function App() {
           profileName={state.profile.meta.name}
           profileVersion={state.profile.meta.version}
           readFilter={state.readFilter}
-          shownCount={review.visibleList.length}
           sortOption={state.sortOption}
           topicFilter={state.topicFilter}
           onTopicFilterChange={state.setTopicFilter}
           topics={state.report.topics}
-          totalCount={review.needsFeedSetup ? 0 : state.report.papers.length}
-          visibleTotals={review.visibleTotals}
         />
         <PaperListSection
           hasNoFetchedPapers={review.hasNoFetchedPapers}
@@ -181,17 +167,6 @@ export function App() {
           onSave={() => review.selectedPaper && review.openZoteroModal(review.selectedPaper)}
         />
       </div>
-      <AppStatusBar
-        appMeta={state.appMeta}
-        appUpdate={state.appUpdate}
-        appUpdateChecking={state.appUpdateChecking}
-        busy={state.appControlBusy}
-        onCheckForUpdates={() => void data.handleCheckAppUpdate()}
-        onExit={() => void admin.handleExitApp()}
-        onOpenData={() => void admin.handleOpenAppTarget("data_dir")}
-        onOpenInstall={() => void admin.handleOpenAppTarget("install_dir")}
-        onOpenLogs={() => void admin.handleOpenAppTarget("logs_dir")}
-      />
     </main>
   );
 }

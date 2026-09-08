@@ -176,6 +176,7 @@ a {
 .button,
 .card,
 .input-group,
+.list-box-item,
 .rounded-md,
 .rounded-lg {
   border-radius: var(--control-radius);

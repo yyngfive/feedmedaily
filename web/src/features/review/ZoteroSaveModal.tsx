@@ -64,7 +64,7 @@ export function ZoteroSaveModal({
         onQueryChange={setQuery}
         onChange={onCollectionChange}
       />
-      <div className="space-y-2 rounded-md border border-(--line) bg-(--paper) p-3 text-sm">
+      <div className="min-w-0 space-y-2 rounded-md border border-(--line) bg-(--paper) p-3 text-sm [overflow-wrap:anywhere]">
         <div className="space-y-1 text-muted">
           <p>Title: {paper.title}</p>
           <p>Journal: {paper.journal || paper.feed_title || "Unknown journal"}</p>

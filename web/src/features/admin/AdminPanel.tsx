@@ -44,6 +44,7 @@ export type AdminPanelProps = {
   appMeta: AppMeta | null;
   appUpdate: AppUpdate | null;
   appUpdateChecking: boolean;
+  onOpenAppTarget: (target: "data_dir" | "logs_dir" | "install_dir") => void;
   configFields: SettingsConfigField[];
   configSaving: boolean;
   classifierModels: ClassifierModelsResponse;
@@ -250,7 +251,7 @@ export function AdminPanel(props: AdminPanelProps) {
               </AdminDisclosure>
             </div>
             <div hidden={props.activeTab !== "app"}>
-              <AppTab appMeta={props.appMeta} appUpdate={props.appUpdate} appUpdateChecking={props.appUpdateChecking} configFields={appFields} configSaving={props.configSaving} onCheckForUpdates={props.onCheckForUpdates} onDeleteScheduler={props.onDeleteScheduler} onSaveConfig={props.onSaveConfig} onSaveScheduler={props.onSaveScheduler} scheduler={props.scheduler} schedulerSaving={props.schedulerSaving} />
+              <AppTab onOpenAppTarget={props.onOpenAppTarget} appMeta={props.appMeta} appUpdate={props.appUpdate} appUpdateChecking={props.appUpdateChecking} configFields={appFields} configSaving={props.configSaving} onCheckForUpdates={props.onCheckForUpdates} onDeleteScheduler={props.onDeleteScheduler} onSaveConfig={props.onSaveConfig} onSaveScheduler={props.onSaveScheduler} scheduler={props.scheduler} schedulerSaving={props.schedulerSaving} />
             </div>
           </main>
         </div>

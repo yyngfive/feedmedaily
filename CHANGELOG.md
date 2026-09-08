@@ -19,6 +19,10 @@ Changes since `0.6.0`:
 
 ### Fixed
 
+- Simplified the reading workspace: removed duplicate sidebar counts, retained classification counts in the center tabs, and removed the footer. App exit is available in the main toolbar; version/update details and directory shortcuts live in Settings → App.
+
+- Reduced Zotero collection loading and connection-test requests by fetching the library's collections in pages and rebuilding parent paths locally, instead of querying every folder separately. Fixed long metadata URLs overflowing the save dialog, kept tall dialogs scrollable within the viewport, and aligned dropdown option highlights with the shared 8px radius.
+
 - Unified button, field, and card corners and aligned HeroUI surfaces with the app palette in both themes. Paper cards now prioritize titles with quieter classification metadata; paper details use a two-column action group with a clearer `Open article` label, emphasize saving to Zotero, and read authors and abstracts in one scrolling surface. Topic status labels in the reading workspace now consistently use English.
 
 - Fixed saved topic corrections disappearing from the `Mark wrong` modal. The topic dropdown used to pre-fill from the paper's current classification, so reopening a paper whose topic had just been corrected showed `No topic` again; it now pre-fills the pending open feedback's correction first, and paper cards show the pending correction as `original -> corrected` on the topic chip, mirroring the `Feedback -> ...` relevance chip. Explicitly choosing `No topic` is stored as a sentinel so that choice also survives reopening instead of looking like no topic opinion was recorded.

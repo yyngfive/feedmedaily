@@ -16,9 +16,9 @@ export function ModalShell({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4">
-      <div className="w-full max-w-xl rounded-lg border border-[var(--line)] bg-(--paper-accent) p-5 shadow-xl">
+      <div className="max-h-[calc(100dvh-2rem)] min-w-0 w-full max-w-xl overflow-y-auto rounded-lg border border-[var(--line)] bg-(--paper-accent) p-5 shadow-xl [overflow-wrap:anywhere]">
         <div className="flex items-start justify-between gap-4">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
               {eyebrow}
             </p>

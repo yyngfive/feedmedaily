@@ -4,15 +4,13 @@ import {
   dateFilterOptions,
   feedbackFilterOptions,
   readFilterOptions,
-  relevanceOrder,
-  relevanceTone,
   sortOptions,
 } from "../../app/constants";
 import type {TopicFilterValue} from "../../app/utils";
 import type {DateFilter, FeedbackFilter, ReadFilter, SortOption} from "../../app/constants";
 import {CheckboxRow} from "../../shared/components/FormFields";
 import {SelectField, type SelectOption} from "../../shared/components/SelectField";
-import type {Relevance, ReportTopics} from "../../shared/types";
+import type {ReportTopics} from "../../shared/types";
 
 export function FiltersSidebar({
   dateFilter,
@@ -31,12 +29,9 @@ export function FiltersSidebar({
   profileName,
   profileVersion,
   readFilter,
-  shownCount,
   sortOption,
   topicFilter,
   topics,
-  totalCount,
-  visibleTotals,
 }: {
   dateFilter: DateFilter;
   journalOptions: SelectOption[];
@@ -54,12 +49,9 @@ export function FiltersSidebar({
   profileName: string;
   profileVersion: number;
   readFilter: ReadFilter;
-  shownCount: number;
   sortOption: SortOption;
   topicFilter: TopicFilterValue;
   topics: ReportTopics | null | undefined;
-  totalCount: number;
-  visibleTotals: Record<Relevance, number>;
 }) {
   const selectedJournalSet = new Set(selectedJournals);
 
@@ -70,22 +62,8 @@ export function FiltersSidebar({
           Last Update: {lastUpdateLabel}
         </p>
         <p className="mt-1 text-sm leading-6 text-muted">
-          {shownCount} shown, {totalCount} total
-        </p>
-        <p className="mt-1 text-sm leading-6 text-muted">
           Profile: {profileName} · v{profileVersion}
         </p>
-      </div>
-
-      <div className="grid grid-cols-3 gap-2 text-center">
-        {relevanceOrder.map((item) => (
-          <div key={item} className="rounded-md border border-(--line) p-2">
-            <div className={`text-lg font-semibold ${relevanceTone[item].text}`}>
-              {visibleTotals[item] ?? 0}
-            </div>
-            <div className="text-xs uppercase text-muted">{item}</div>
-          </div>
-        ))}
       </div>
 
       <div className="space-y-3">
