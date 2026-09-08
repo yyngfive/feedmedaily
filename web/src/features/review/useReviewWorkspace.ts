@@ -1,4 +1,5 @@
 import React from "react";
+import {journalAlias, journalSelection, toggleJournalSelection} from "./journalAliases";
 import {flushSync} from "react-dom";
 
 import {createFeedback, createProfileTopic, deleteFeedback, fetchZoteroCollections, markPaperRead, saveToZotero} from "../../api/client";
@@ -30,14 +31,15 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
       ? {...paper, read_at: pendingReadOverrides[paper.id]}
       : paper,
   ), [pendingReadOverrides, report.papers]);
-  const journals = React.useMemo(() => Array.from(new Set(effectivePapers.map((paper) => paper.journal).filter(Boolean) as string[])).sort(), [effectivePapers]);
+  const journals = React.useMemo(() => Array.from(new Set(effectivePapers.map((paper) => journalAlias(paper.journal)).filter(Boolean) as string[])).sort(), [effectivePapers]);
   const journalOptions = React.useMemo(() => journals.map((item) => ({value: item, label: item})), [journals]);
-  const selectedJournalSet = React.useMemo(() => new Set(selectedJournals), [selectedJournals]);
+  const normalizedSelectedJournals = React.useMemo(() => journalSelection(selectedJournals), [selectedJournals]);
+  const selectedJournalSet = React.useMemo(() => new Set(normalizedSelectedJournals), [normalizedSelectedJournals]);
   const filteredBase = React.useMemo(() => effectivePapers.filter((paper) => {
-    const haystack = [paper.title, paper.classification.translated_title_zh ?? "", paper.abstract ?? "", paper.journal ?? "", paper.authors?.join(" ") ?? "", paper.feedback_status?.note ?? ""].join(" ").toLowerCase();
+    const haystack = [paper.title, paper.classification.translated_title_zh ?? "", paper.abstract ?? "", paper.journal ?? "", journalAlias(paper.journal), paper.authors?.join(" ") ?? "", paper.feedback_status?.note ?? ""].join(" ").toLowerCase();
     const hasFeedback = Boolean(paper.feedback_status?.has_feedback);
     return (!deferredQuery || haystack.includes(deferredQuery.toLowerCase())) &&
-      (selectedJournalSet.size === 0 || Boolean(paper.journal && selectedJournalSet.has(paper.journal))) &&
+      (selectedJournalSet.size === 0 || Boolean(paper.journal && selectedJournalSet.has(journalAlias(paper.journal)))) &&
       (readFilter === "all" || (readFilter === "read" ? Boolean(paper.read_at) : !paper.read_at)) &&
       (feedbackFilter === "all" || (feedbackFilter === "marked" ? hasFeedback : !hasFeedback)) &&
       matchesTopicFilter(paper, topicFilter, report.topics) &&
@@ -49,7 +51,7 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
   const sortedFiltered = React.useMemo(() => {
     const byDate = (paper: Paper) => paper.published_date ?? paper.seen_date;
     return [...filtered].sort((left, right) => {
-      if (sortOption === "journal-asc") return (left.journal ?? "").localeCompare(right.journal ?? "") || byDate(right).localeCompare(byDate(left));
+      if (sortOption === "journal-asc") return journalAlias(left.journal).localeCompare(journalAlias(right.journal)) || byDate(right).localeCompare(byDate(left));
       if (sortOption === "confidence-desc" || sortOption === "confidence-asc") {
         const difference = left.classification.confidence - right.classification.confidence;
         return difference ? (sortOption === "confidence-desc" ? -difference : difference) : byDate(right).localeCompare(byDate(left));
@@ -275,13 +277,13 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
       pushErrorMessage("feedback.delete.failed", error, "Could not delete feedback.");
     } finally { endLocalMutation(requestId); }
   };
-  const toggleJournalFilter = React.useCallback((value: string) => setSelectedJournals((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value].sort()), [setSelectedJournals]);
+  const toggleJournalFilter = React.useCallback((value: string) => setSelectedJournals((current) => toggleJournalSelection(current, value)), [setSelectedJournals]);
   const resetFilters = React.useCallback(() => {
     setSelectedJournals([]); setDateFilter("30d"); setReadFilter("unread"); setFeedbackFilter("all"); setSortOption("date-desc"); setRelevance("all"); setTopicFilter("all"); setQuery("");
   }, [setDateFilter, setFeedbackFilter, setQuery, setReadFilter, setRelevance, setSelectedJournals, setSortOption, setTopicFilter]);
 
   return {
-    effectivePapers, journalOptions, lastUpdateLabel, needsFeedSetup, hasNoFetchedPapers,
+    effectivePapers, journalOptions, normalizedSelectedJournals, lastUpdateLabel, needsFeedSetup, hasNoFetchedPapers,
     visibleBase, visibleList, visibleTotals, selectedPaper, selectedPaperId, selectedRangeUnreadPapers,
     persistReadStatus, persistVisibleReadStatus, persistSelectedRangeReadStatus,
     openZoteroModal, handleSaveToZotero, openFeedbackModal, submitFeedback, handleDeleteFeedback,

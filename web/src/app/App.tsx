@@ -114,7 +114,7 @@ export function App() {
           dateFilter={state.dateFilter}
           feedbackFilter={state.feedbackFilter}
           journalOptions={review.journalOptions}
-          selectedJournals={state.selectedJournals}
+          selectedJournals={review.normalizedSelectedJournals}
           lastUpdateLabel={review.lastUpdateLabel}
           onDateFilterChange={state.setDateFilter}
           onFeedbackFilterChange={state.setFeedbackFilter}

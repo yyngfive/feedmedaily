@@ -19,6 +19,7 @@ Changes since `0.6.0`:
 
 ### Fixed
 
+- Merged ACS journal `advanceAccess` aliases and Cell volume/issue names into single review journal filters. Filtering, journal sorting, and search share the aliases while original metadata, stored papers, and existing API formats remain unchanged; no migration or reclassification is required.
 - Fixed deleting a topic shifting or clearing other rules' topic assignments, including topics added in the current unsaved profile draft.
 - Fixed profile rule rewrites silently clearing existing topic tags when the proposal does not request a topic change. Ambiguous merges across different topics now require an explicit target.
 - Fixed saving feedback after its corrected topic was deleted: the submitted topic now matches the displayed `No topic` selection.
