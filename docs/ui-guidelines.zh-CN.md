@@ -110,7 +110,7 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 - 论文卡在相关性 chip 旁可显示主题 chip：中性色（default/soft），不与 direct/indirect 的语义色混用；真实主题显示当前 label，哨兵或孤儿 id 显示"未归类"，未判定与 unrelated 论文不显示主题 chip。存在待生效主题纠正（最近一条 open feedback）且最新分类尚未满足纠正时，chip 追加"原值 -> 纠正值"（显式"无主题"显示"无主题"，未判定的原值显示"未判定"），与相关性 `Feedback -> ...` chip 同语义；两类待生效 chip 都以"最新分类 ≠ 纠正值"为显示条件，纠正落实后 chip 自动消失，由 Dashboard 的重分类对账报告承担"已生效/未落实"的呈现。主题 chip 不可点击，主题过滤只发生在左侧栏。
 - 左侧栏 Topic 过滤与 Date 等过滤同形态：单选下拉（`All` + `Unassigned`（判定过无主题/孤儿）+ `Not processed`（从未判定）+ 注册表主题），不显示计数；与相关性过滤 AND 叠加。
 - `Link`（DOI 优先，缺失时回退出版社 URL；两者皆无则隐藏）、`Mark as read`、`Save to Zotero`、`Mark wrong` 由右侧详情面板负责。
-- Mark wrong 弹窗在相关性下拉之外提供主题下拉（当前值预选、含"无主题"）与一个内联新建主题输入；新建走窄接口写入 profile 注册表，不跳转设置页。重新打开时优先回填最近一条 open feedback 的主题纠正（显式"无主题"回填"无主题"），没有待生效纠正才回填当前分类值。
+- Mark wrong 弹窗在相关性下拉之外提供主题下拉（当前值预选、含"无主题"）与一个内联新建主题输入；新建走窄接口写入 profile 注册表，不跳转设置页。重新打开时优先回填最近一条 open feedback 的主题纠正（显式"无主题"回填"无主题"），没有待生效纠正才回填当前分类值。纠正引用的主题已删除时，显示与提交均按 No topic 处理。
 - 如果已有 Profile，三栏工作区应立即渲染，论文列表不得等待非关键 Admin 数据。
 - 如果没有 Profile，先显示 onboarding；如果没有 RSS feed，应等待 feed 加载结束后再进入 feed 初始化空状态。
 

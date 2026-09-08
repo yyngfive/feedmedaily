@@ -26,12 +26,12 @@ const (
 )
 
 type ProposalChange struct {
-	ID          string   `json:"id"`
-	Section     string   `json:"section"`
-	Operation   string   `json:"operation"`
-	Summary     string   `json:"summary"`
-	TextBefore  []string `json:"text_before"`
-	TextAfter   []string `json:"text_after"`
+	ID         string   `json:"id"`
+	Section    string   `json:"section"`
+	Operation  string   `json:"operation"`
+	Summary    string   `json:"summary"`
+	TextBefore []string `json:"text_before"`
+	TextAfter  []string `json:"text_after"`
 	// TopicsBefore/TopicsAfter 是规则变更携带的主题 label 列表（direct/indirect 专属），
 	// apply 时才解析为注册表 id；topic section 变更仍使用 topic_before/topic_after。
 	TopicsBefore      []string          `json:"topics_before"`
@@ -82,7 +82,7 @@ func (change *ProposalChange) UnmarshalJSON(data []byte) error {
 		TextBefore        flexibleStringList `json:"text_before"`
 		TextAfter         flexibleStringList `json:"text_after"`
 		TopicsBefore      flexibleStringList `json:"topics_before"`
-		TopicsAfter       flexibleStringList `json:"topics_after"`
+		TopicsAfter       json.RawMessage    `json:"topics_after"`
 		TopicBefore       []topicDefinition  `json:"topic_before"`
 		TopicAfter        []topicDefinition  `json:"topic_after"`
 		Rationale         string             `json:"rationale"`
@@ -93,6 +93,12 @@ func (change *ProposalChange) UnmarshalJSON(data []byte) error {
 	if err := decodeStrict(data, &payload); err != nil {
 		return err
 	}
+	var topicsAfter flexibleStringList
+	if len(payload.TopicsAfter) > 0 && strings.TrimSpace(string(payload.TopicsAfter)) != "null" {
+		if err := json.Unmarshal(payload.TopicsAfter, &topicsAfter); err != nil {
+			return err
+		}
+	}
 	*change = ProposalChange{
 		ID:                payload.ID,
 		Section:           payload.Section,
@@ -101,7 +107,7 @@ func (change *ProposalChange) UnmarshalJSON(data []byte) error {
 		TextBefore:        []string(payload.TextBefore),
 		TextAfter:         []string(payload.TextAfter),
 		TopicsBefore:      []string(payload.TopicsBefore),
-		TopicsAfter:       []string(payload.TopicsAfter),
+		TopicsAfter:       []string(topicsAfter),
 		TopicBefore:       payload.TopicBefore,
 		TopicAfter:        payload.TopicAfter,
 		Rationale:         payload.Rationale,
@@ -238,7 +244,9 @@ func normalizeProposalChanges(changes []ProposalChange) ([]ProposalChange, error
 		next.TextBefore = normalizeRuleList(next.TextBefore)
 		next.TextAfter = normalizeRuleList(next.TextAfter)
 		next.TopicsBefore = normalizeLabelList(next.TopicsBefore)
-		next.TopicsAfter = normalizeLabelList(next.TopicsAfter)
+		if next.TopicsAfter != nil {
+			next.TopicsAfter = normalizeLabelList(next.TopicsAfter)
+		}
 		// topic add 变更的 topic_after 允许缺 id（label-only），按 label 去重。
 		if next.Section == ProposalSectionTopic {
 			next.TopicBefore = normalizeLabelOnlyTopics(next.TopicBefore)
@@ -441,13 +449,13 @@ func applyProposalChanges(base profileDocument, changes []ProposalChange, includ
 			}
 			current.Scope = strings.TrimSpace(change.TextAfter[0])
 		case ProposalSectionDirectRule:
-			tags, err := resolveTopicTags(change, labelToID)
+			tags, err := ruleChangeTopicTags(current.RelevanceRules.Direct, change, labelToID)
 			if err != nil {
 				return profileDocument{}, err
 			}
 			current.RelevanceRules.Direct = applyRuleChange(current.RelevanceRules.Direct, change, tags)
 		case ProposalSectionIndirectRule:
-			tags, err := resolveTopicTags(change, labelToID)
+			tags, err := ruleChangeTopicTags(current.RelevanceRules.Indirect, change, labelToID)
 			if err != nil {
 				return profileDocument{}, err
 			}
@@ -482,6 +490,30 @@ func resolveTopicTags(change ProposalChange, labelToID map[string]string) ([]str
 		break
 	}
 	return result, nil
+}
+
+// 未表达主题意见的改写保留原标签；跨主题合并必须明确目标，避免静默丢失标签。
+func ruleChangeTopicTags(base []classificationRule, change ProposalChange, labelToID map[string]string) ([]string, error) {
+	if change.TopicsAfter != nil || (change.Operation != ProposalOperationRewrite && change.Operation != ProposalOperationMerge) {
+		return resolveTopicTags(change, labelToID)
+	}
+	targets := map[string]bool{}
+	for _, text := range normalizeRuleList(change.TextBefore) {
+		targets[text] = true
+	}
+	var inherited []string
+	found := false
+	for _, rule := range normalizeRuleObjects(base) {
+		if !targets[rule.Text] {
+			continue
+		}
+		if found && strings.Join(inherited, "\n") != strings.Join(rule.TopicIDs, "\n") {
+			return nil, fmt.Errorf("change %s combines rules with different topics; provide topics_after explicitly or rewrite them separately", change.ID)
+		}
+		inherited = append([]string{}, rule.TopicIDs...)
+		found = true
+	}
+	return inherited, nil
 }
 
 func applyRuleChange(base []classificationRule, change ProposalChange, tags []string) []classificationRule {

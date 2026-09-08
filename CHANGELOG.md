@@ -19,6 +19,10 @@ Changes since `0.6.0`:
 
 ### Fixed
 
+- Fixed deleting a topic shifting or clearing other rules' topic assignments, including topics added in the current unsaved profile draft.
+- Fixed profile rule rewrites silently clearing existing topic tags when the proposal does not request a topic change. Ambiguous merges across different topics now require an explicit target.
+- Fixed saving feedback after its corrected topic was deleted: the submitted topic now matches the displayed `No topic` selection.
+
 - Simplified the reading workspace: removed duplicate sidebar counts, retained classification counts in the center tabs, and removed the footer. App exit, version/update details, and directory shortcuts live in Settings → App.
 
 - Reduced Zotero collection loading and connection-test requests by fetching the library's collections in pages and rebuilding parent paths locally, instead of querying every folder separately. Fixed long metadata URLs overflowing the save dialog, kept tall dialogs scrollable within the viewport, and aligned dropdown option highlights with the shared 8px radius.

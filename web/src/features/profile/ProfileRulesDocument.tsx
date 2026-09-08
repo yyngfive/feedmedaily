@@ -5,6 +5,7 @@ import {TextAreaField, TextInputField} from "../../shared/components/FormFields"
 import {SelectField} from "../../shared/components/SelectField";
 import {toProfileRule} from "../../app/utils";
 import type {ClassificationProfile, TopicDefinition} from "../../shared/types";
+import {relabelRuleTopics, type DraftTopic} from "./topicDraft";
 
 type ProfileRuleDraft = {
   text: string;
@@ -17,7 +18,7 @@ type ProfileDraft = {
   directRules: ProfileRuleDraft[];
   indirectRules: ProfileRuleDraft[];
   unrelatedRules: ProfileRuleDraft[];
-  topics: TopicDefinition[];
+  topics: DraftTopic[];
 };
 
 function draftRules(rules: unknown[], topicLabelsById: Map<string, string>): ProfileRuleDraft[] {
@@ -41,37 +42,8 @@ function createDraft(profile: ClassificationProfile): ProfileDraft {
     directRules: draftRules(profile.relevance_rules.direct, topicLabelsById),
     indirectRules: draftRules(profile.relevance_rules.indirect, topicLabelsById),
     unrelatedRules: draftRules(profile.relevance_rules.unrelated, topicLabelsById),
-    topics: profile.topic_taxonomy.map((topic) => ({...topic})),
+    topics: profile.topic_taxonomy.map((topic) => ({...topic, draftKey: topic.id})),
   };
-}
-
-// relabelRuleTopics 在主题条变更时同步规则引用：重命名的主题改写为新 label，
-// 被删除的主题从规则上摘除；新追加的主题还没有任何规则引用。
-function relabelRuleTopics(
-  rules: ProfileRuleDraft[],
-  oldTopics: TopicDefinition[],
-  newTopics: TopicDefinition[],
-): ProfileRuleDraft[] {
-  const renames = new Map<string, string>();
-  const removals = new Set<string>();
-  for (let index = 0; index < oldTopics.length; index += 1) {
-    const oldLabel = oldTopics[index].label;
-    const next = newTopics[index];
-    if (!next) {
-      removals.add(oldLabel.toLowerCase());
-    } else if (next.label !== oldLabel) {
-      renames.set(oldLabel.toLowerCase(), next.label);
-    }
-  }
-  if (renames.size === 0 && removals.size === 0) {
-    return rules;
-  }
-  return rules.map((rule) => ({
-    ...rule,
-    topics: rule.topics
-      .map((label) => renames.get(label.toLowerCase()) ?? label)
-      .filter((label) => !removals.has(label.toLowerCase())),
-  }));
 }
 
 function TopicTagChips({
@@ -232,8 +204,8 @@ function TopicsEditor({
   onChange,
   topics,
 }: {
-  onChange: (topics: TopicDefinition[]) => void;
-  topics: TopicDefinition[];
+  onChange: (topics: DraftTopic[]) => void;
+  topics: DraftTopic[];
 }) {
   const [newLabel, setNewLabelLabel] = React.useState("");
   const addTopic = () => {
@@ -241,7 +213,7 @@ function TopicsEditor({
     if (!label) return;
     if (topics.some((topic) => topic.label.toLowerCase() === label.toLowerCase())) return;
     // 新主题的 id 由后端在保存时分配；草稿用空 id 占位。
-    onChange([...topics, {id: "", label}]);
+    onChange([...topics, {id: "", label, draftKey: crypto.randomUUID()}]);
     setNewLabelLabel("");
   };
   return (
@@ -259,7 +231,7 @@ function TopicsEditor({
       ) : (
         <div className="space-y-2">
           {topics.map((topic, index) => (
-            <div key={topic.id || `new-${topic.label}`} className="flex items-center gap-2">
+            <div key={topic.draftKey} className="flex items-center gap-2">
               <div className="flex-1">
                 <TextInputField
                   hideLabel
@@ -401,7 +373,7 @@ export function ProfileRulesDocument({
 
   // 主题条变更的统一入口：重命名/删除要同步传播到所有规则的引用上，
   // 否则会出现规则引用已不存在主题的悬空标签。
-  const updateTopics = (nextTopics: TopicDefinition[]) => {
+  const updateTopics = (nextTopics: DraftTopic[]) => {
     setDraft((current) => ({
       ...current,
       topics: nextTopics,

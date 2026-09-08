@@ -33,6 +33,7 @@ Topic handling:
 - Topic minimality: reuse an existing topic label whenever it can cover the papers; do not create near-duplicate topics; do not create a topic for a single paper; prefer fewer topics.
 - Direct and indirect rule changes may carry topics_before/topics_after with AT MOST ONE topic label each. topics_after applies to every rule in text_after. A rule carries at most one topic; express a retag as rewrite with identical text and the new single label.
 - Only retag rules when the feedback is about topic assignment; never retag rules as a side effect of relevance repairs.
+- Omit topics_after (or use null) to preserve existing tags on rewrite/merge. Use [] only to explicitly clear a topic in response to topic feedback. Do not merge rules with different topics unless topic feedback explicitly requests the target topic; rewrite them separately instead.
 - Do not tag unrelated rules or the scope with topics.
 - In maintenance mode do not create topics and do not modify rule topic tags.
 

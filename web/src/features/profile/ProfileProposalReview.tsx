@@ -56,7 +56,7 @@ function changeLines(change: ProposalChange, side: "before" | "after") {
   }
   const lines = side === "before" ? change.text_before : change.text_after;
   // 规则变更的主题标签并入 diff 行：topic-only 改标（文本不变）也能在预览中可见。
-  const topics = side === "before" ? change.topics_before : change.topics_after;
+  const topics = side === "before" ? change.topics_before : (change.topics_after ?? change.topics_before);
   if (topics && topics.length > 0) {
     const suffix = ` [topics: ${topics.join(", ")}]`;
     return lines.map((line) => `${line}${suffix}`);

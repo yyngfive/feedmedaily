@@ -318,7 +318,8 @@ export type ProposalChange = {
   text_after: string[];
   /** 规则变更携带的主题 label 列表（direct/indirect 专属）。 */
   topics_before?: string[];
-  topics_after?: string[];
+  /** Omitted/null preserves source tags; [] explicitly clears them. */
+  topics_after?: string[] | null;
   topic_before: TopicDefinition[];
   topic_after: TopicDefinition[];
   rationale: string;

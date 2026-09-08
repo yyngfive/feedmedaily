@@ -6,7 +6,6 @@ import {matchesDateFilter, matchesTopicFilter, paperTopicID, relevanceCounts} fr
 import type {TopicFilterValue} from "../../app/utils";
 import type {AppData} from "../../app/useAppData";
 import type {AppState, MarkReadRequest} from "../../app/useAppState";
-import {TOPIC_NONE} from "../../shared/types";
 import type {FeedbackRecord, Paper} from "../../shared/types";
 
 // 论文审阅 hook 管理筛选、选择和用户直接触发的论文变更。
@@ -202,11 +201,11 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
     setFeedbackValue(paper.feedback_status?.corrected_relevance ?? paper.classification.relevance);
     setFeedbackNote(paper.feedback_status?.note ?? "");
     // 主题下拉默认值：优先沿用最近一条 open feedback 的主题纠正（用户上次的选择），
-    // 哨兵 none 映射为“无主题”；否则回落到当前分类的主题（真实 id 预选，
+    // 哨兵 none 和已删除的纠正主题映射为“无主题”；否则回落到当前分类的主题（真实 id 预选，
     // 哨兵/孤儿/未判定预选“无主题”）。预填自纠正时视为已表态，再次保存不丢主题意见。
     const pendingTopic = paper.feedback_status?.corrected_topic ?? null;
     if (pendingTopic != null) {
-      setFeedbackTopic(pendingTopic === TOPIC_NONE ? "" : pendingTopic);
+      setFeedbackTopic(report.topics?.items.some((topic) => topic.id === pendingTopic) ? pendingTopic : "");
       setFeedbackTopicTouched(true);
     } else {
       const currentTopicID = paperTopicID(paper, report.topics);
