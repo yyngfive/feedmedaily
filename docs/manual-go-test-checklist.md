@@ -197,8 +197,8 @@ go run .\cmd\feedmedaily-tray --root .
 - environment override 状态清楚显示。
 - 停用模型保留 key；只有明确 `Clear key` 后才删除。
 - 保存后同一进程内启动的新 job 使用新设置。
-- Token pricing 表默认显示当前 DeepSeek Flash/Pro 峰谷价格和 GLM-5.3-Flash 限时价格，允许分别编辑缓存命中、缓存未命中和输出单价。
-- 保存定价后，新启动的 job 使用新价格；保存前已完成或正在运行的 job 继续显示原价格快照，不被回算。
+- Token pricing 费率由后端内置并按 provider/时段自动选择，不在 Settings 中提供编辑入口，也不读取价格环境变量。
+- 旧版本 `.env` 或 release `settings.json` 中的价格键在启动时被清理；已完成或正在运行的 job 继续显示其原有价格快照，不被回算。
 
 ### 7.5 App
 

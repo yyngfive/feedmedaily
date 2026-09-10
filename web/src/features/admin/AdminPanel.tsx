@@ -19,7 +19,6 @@ import type {
 import {AppTab} from "./AppTab";
 import {AdminDisclosure} from "./AdminDisclosure";
 import {DashboardTab} from "./DashboardTab";
-import {DeepSeekPricingEditor, type DeepSeekPricingEditorHandle} from "./DeepSeekPricingEditor";
 import {ClassifierModelsEditor, classifierModelsDraftHasRequiredKeys, classifierModelsUpdateFromDraft, createClassifierModelsDraft, type ClassifierModelsDraft} from "./ClassifierModelsEditor";
 import {FeedsTab} from "./FeedsTab";
 import {ProfileTab} from "./ProfileTab";
@@ -36,7 +35,6 @@ const adminTabs: Array<{id: AdminTab; label: string}> = [
 ];
 
 const modelSections = new Set(["Classifier tuning", "Profile model"]);
-const pricingSections = new Set(["DeepSeek pricing", "GLM pricing", "Qwen pricing", "MiMo pricing"]);
 const appSections = new Set(["Zotero", "Local app"]);
 
 export type AdminPanelProps = {
@@ -95,15 +93,9 @@ export function AdminPanel(props: AdminPanelProps) {
     () => props.configFields.filter((field) => appSections.has(field.section)),
     [props.configFields],
   );
-  const pricingFields = React.useMemo(
-    () => props.configFields.filter((field) => pricingSections.has(field.section)),
-    [props.configFields],
-  );
-
   const [classifierDraft, setClassifierDraft] = React.useState<ClassifierModelsDraft>(() => createClassifierModelsDraft(props.classifierModels));
   const profileModelRef = React.useRef<SettingsConfigEditorHandle | null>(null);
   const advancedModelRef = React.useRef<SettingsConfigEditorHandle | null>(null);
-  const pricingRef = React.useRef<DeepSeekPricingEditorHandle | null>(null);
   const dialogRef = React.useRef<HTMLElement | null>(null);
   const closeButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const restoreFocusRef = React.useRef<HTMLElement | null>(null);
@@ -158,7 +150,6 @@ export function AdminPanel(props: AdminPanelProps) {
     const fields = {
       ...(profileModelRef.current?.getPayload() ?? {}),
       ...(advancedModelRef.current?.getPayload() ?? {}),
-      ...(pricingRef.current?.getPayload() ?? {}),
     };
     return props.onSaveConfig(fields, classifierModelsUpdateFromDraft(classifierDraft));
   };
@@ -248,7 +239,6 @@ export function AdminPanel(props: AdminPanelProps) {
               <AdminDisclosure title="Advanced model settings">
                 <div>
                   <SettingsConfigEditor ref={advancedModelRef} fields={advancedModelFields} saving={props.configSaving} showHeader={false} showSaveAction={false} title="Advanced model settings" onSave={props.onSaveConfig} />
-                  <DeepSeekPricingEditor ref={pricingRef} fields={pricingFields} saving={props.configSaving} showSaveAction={false} onSave={props.onSaveConfig} />
                 </div>
               </AdminDisclosure>
             </div>

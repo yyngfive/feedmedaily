@@ -496,7 +496,7 @@ func TestSettingsConfigUpdateRefreshesSettingsForBootstrap(t *testing.T) {
 	}
 }
 
-func TestSettingsConfigUpdateAppliesManualPricingToNextJob(t *testing.T) {
+func TestSettingsConfigRejectsPricingUpdateAndUsesBuiltInPrice(t *testing.T) {
 	root := t.TempDir()
 	dataRoot := filepath.Join(root, "user-data")
 	t.Setenv("FEEDMEDAILY_RUNTIME_MODE", "release")
@@ -517,7 +517,7 @@ func TestSettingsConfigUpdateAppliesManualPricingToNextJob(t *testing.T) {
 	configRecorder := httptest.NewRecorder()
 	configBody := `{"fields":{"SCIRSS_DEEPSEEK_FLASH_PEAK_OUTPUT_CNY_PER_MILLION":{"value":"10"}}}`
 	handler.ServeHTTP(configRecorder, httptest.NewRequest(http.MethodPut, "/api/settings/config", strings.NewReader(configBody)))
-	if configRecorder.Code != http.StatusOK {
+	if configRecorder.Code != http.StatusBadRequest || !contains(configRecorder.Body.String(), "unsupported setting") {
 		t.Fatalf("settings update response = %d %s", configRecorder.Code, configRecorder.Body.String())
 	}
 
@@ -534,7 +534,7 @@ func TestSettingsConfigUpdateAppliesManualPricingToNextJob(t *testing.T) {
 	}
 	waitForJobCompletion(t, payload.Job.ID)
 	job, ok := jobByID(payload.Job.ID)
-	if !ok || job.LLMUsage == nil || job.LLMUsage.EstimatedCostCNY == nil || *job.LLMUsage.EstimatedCostCNY != "10.000000" {
+	if !ok || job.LLMUsage == nil || job.LLMUsage.EstimatedCostCNY == nil || *job.LLMUsage.EstimatedCostCNY != "8.000000" {
 		t.Fatalf("job pricing = %#v", job.LLMUsage)
 	}
 }

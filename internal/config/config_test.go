@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yyngfive/scirssagent/internal/llmusage"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 )
 
@@ -62,53 +61,76 @@ func TestLoadUsesCostOptimizedClassifierDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadUsesOfficialDeepSeekPricingDefaultsAndAcceptsManualOverrides(t *testing.T) {
+func TestPricingIsBuiltInAndNotConfigurable(t *testing.T) {
 	root := t.TempDir()
 	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
+	legacyKey := "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_MISS_CNY_PER_MILLION"
+	writeConfigTestFile(t, filepath.Join(root, ".env"), legacyKey+"=2.25\nSCIRSS_SERVER_PORT=8123\n")
 	t.Setenv("FEEDMEDAILY_RUNTIME_MODE", "")
+	t.Setenv(legacyKey, "9.9")
 
 	settings, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.LLMPricing.Flash.OffPeak.CacheMissNanoCNYPerToken != 1_000 || settings.LLMPricing.Pro.Peak.CompletionNanoCNYPerToken != 27_000 {
-		t.Fatalf("default DeepSeek pricing = %#v", settings.LLMPricing)
+	if settings.ServerPort != 8123 {
+		t.Fatalf("server port = %d, want 8123", settings.ServerPort)
 	}
-	if settings.LLMPricing.GLM53Flash.CacheHitNanoCNYPerToken != 230 || settings.LLMPricing.GLM53Flash.CacheMissNanoCNYPerToken != 800 || settings.LLMPricing.GLM53Flash.CompletionNanoCNYPerToken != 2_800 {
-		t.Fatalf("default GLM pricing = %#v", settings.LLMPricing.GLM53Flash)
+	response, err := SettingsConfig(root)
+	if err != nil {
+		t.Fatal(err)
 	}
-
+	for _, field := range response.Fields {
+		if _, legacy := legacyPricingKeys[field.Key]; legacy {
+			t.Fatalf("legacy pricing field exposed: %#v", field)
+		}
+	}
+	envText, err := os.ReadFile(filepath.Join(root, ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(envText), legacyKey) {
+		t.Fatalf("legacy pricing key was not removed from .env:\n%s", envText)
+	}
 	manual := "2.25"
-	updated, err := UpdateLocalSettings(root, map[string]SettingsConfigFieldUpdate{
-		"SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_MISS_CNY_PER_MILLION": {Value: &manual},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	field := fieldByKey(t, updated.Fields, "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_MISS_CNY_PER_MILLION")
-	if field.Value == nil || *field.Value != "2.25" {
-		t.Fatalf("manual pricing field = %#v", field)
-	}
-	settings, err = Load(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if settings.LLMPricing.Flash.OffPeak.CacheMissNanoCNYPerToken != 2_250 || settings.LLMPricing.Snapshot != "deepseek-cny-manual" {
-		t.Fatalf("manual DeepSeek pricing = %#v", settings.LLMPricing)
-	}
-
-	glmOutput := "2.8"
 	if _, err := UpdateLocalSettings(root, map[string]SettingsConfigFieldUpdate{
-		"SCIRSS_GLM_53_FLASH_OUTPUT_CNY_PER_MILLION": {Value: &glmOutput},
-	}); err != nil {
-		t.Fatal(err)
+		legacyKey: {Value: &manual},
+	}); err == nil || !strings.Contains(err.Error(), "unsupported setting") {
+		t.Fatalf("legacy pricing update error = %v", err)
 	}
-	settings, err = Load(root)
+}
+
+func TestLoadRemovesLegacyPricingFromReleaseSettings(t *testing.T) {
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "user-data")
+	writeConfigTestFile(t, filepath.Join(root, "app.exe"), "")
+	t.Setenv("FEEDMEDAILY_RUNTIME_MODE", "release")
+	t.Setenv("FEEDMEDAILY_DATA_ROOT", dataRoot)
+	legacyKey := "SCIRSS_GLM_53_FLASH_OUTPUT_CNY_PER_MILLION"
+	writeConfigTestFile(t, filepath.Join(dataRoot, "config", "settings.json"), `{"values":{"`+legacyKey+`":"99","SCIRSS_SERVER_PORT":"8123"}}`)
+
+	settings, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.LLMPricing.GLM53Flash.CompletionNanoCNYPerToken != 2_800 || settings.LLMPricing.GLM53FlashSnapshot != llmusage.PricingSnapshotGLMManual {
-		t.Fatalf("manual GLM pricing = %#v", settings.LLMPricing)
+	if settings.ServerPort != 8123 {
+		t.Fatalf("server port = %d, want 8123", settings.ServerPort)
+	}
+	settingsJSON, err := os.ReadFile(filepath.Join(dataRoot, "config", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(settingsJSON), legacyKey) || !strings.Contains(string(settingsJSON), "SCIRSS_SERVER_PORT") {
+		t.Fatalf("release settings migration result:\n%s", settingsJSON)
+	}
+	response, err := SettingsConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range response.Fields {
+		if _, legacy := legacyPricingKeys[field.Key]; legacy {
+			t.Fatalf("legacy pricing field exposed in release mode: %#v", field)
+		}
 	}
 }
 

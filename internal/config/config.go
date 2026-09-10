@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/yyngfive/scirssagent/internal/llmusage"
 	appruntime "github.com/yyngfive/scirssagent/internal/runtime"
 )
 
@@ -19,6 +18,30 @@ const (
 	defaultHost                = "127.0.0.1"
 	defaultPort                = 8000
 )
+
+var legacyPricingKeys = map[string]struct{}{
+	"SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_HIT_CNY_PER_MILLION":  {},
+	"SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_MISS_CNY_PER_MILLION": {},
+	"SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_OUTPUT_CNY_PER_MILLION":     {},
+	"SCIRSS_DEEPSEEK_FLASH_PEAK_CACHE_HIT_CNY_PER_MILLION":      {},
+	"SCIRSS_DEEPSEEK_FLASH_PEAK_CACHE_MISS_CNY_PER_MILLION":     {},
+	"SCIRSS_DEEPSEEK_FLASH_PEAK_OUTPUT_CNY_PER_MILLION":         {},
+	"SCIRSS_DEEPSEEK_PRO_OFF_PEAK_CACHE_HIT_CNY_PER_MILLION":    {},
+	"SCIRSS_DEEPSEEK_PRO_OFF_PEAK_CACHE_MISS_CNY_PER_MILLION":   {},
+	"SCIRSS_DEEPSEEK_PRO_OFF_PEAK_OUTPUT_CNY_PER_MILLION":       {},
+	"SCIRSS_DEEPSEEK_PRO_PEAK_CACHE_HIT_CNY_PER_MILLION":        {},
+	"SCIRSS_DEEPSEEK_PRO_PEAK_CACHE_MISS_CNY_PER_MILLION":       {},
+	"SCIRSS_DEEPSEEK_PRO_PEAK_OUTPUT_CNY_PER_MILLION":           {},
+	"SCIRSS_GLM_53_FLASH_CACHE_HIT_CNY_PER_MILLION":             {},
+	"SCIRSS_GLM_53_FLASH_CACHE_MISS_CNY_PER_MILLION":            {},
+	"SCIRSS_GLM_53_FLASH_OUTPUT_CNY_PER_MILLION":                {},
+	"SCIRSS_QWEN_38_FLASH_CACHE_HIT_CNY_PER_MILLION":            {},
+	"SCIRSS_QWEN_38_FLASH_CACHE_MISS_CNY_PER_MILLION":           {},
+	"SCIRSS_QWEN_38_FLASH_OUTPUT_CNY_PER_MILLION":               {},
+	"SCIRSS_MIMO_V25_CACHE_HIT_CNY_PER_MILLION":                 {},
+	"SCIRSS_MIMO_V25_CACHE_MISS_CNY_PER_MILLION":                {},
+	"SCIRSS_MIMO_V25_OUTPUT_CNY_PER_MILLION":                    {},
+}
 
 type Settings struct {
 	Mode                string
@@ -46,7 +69,6 @@ type Settings struct {
 	ProfileBaseURL      string
 	ProfileModel        string
 	ProfileThinking     string
-	LLMPricing          llmusage.PricingCatalog
 	ZoteroAPIKey        string
 	ZoteroLibraryType   string
 	ZoteroLibraryID     string
@@ -243,72 +265,6 @@ var Options = []Option{
 		},
 	},
 	{
-		Key: "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_HIT_CNY_PER_MILLION", Label: "Flash off-peak cache hit", Description: "CNY per million cached input tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "0.02",
-	},
-	{
-		Key: "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_MISS_CNY_PER_MILLION", Label: "Flash off-peak cache miss", Description: "CNY per million uncached input tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "1",
-	},
-	{
-		Key: "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_OUTPUT_CNY_PER_MILLION", Label: "Flash off-peak output", Description: "CNY per million output tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "4",
-	},
-	{
-		Key: "SCIRSS_DEEPSEEK_FLASH_PEAK_CACHE_HIT_CNY_PER_MILLION", Label: "Flash peak cache hit", Description: "CNY per million cached input tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "0.04",
-	},
-	{
-		Key: "SCIRSS_DEEPSEEK_FLASH_PEAK_CACHE_MISS_CNY_PER_MILLION", Label: "Flash peak cache miss", Description: "CNY per million uncached input tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "2",
-	},
-	{
-		Key: "SCIRSS_DEEPSEEK_FLASH_PEAK_OUTPUT_CNY_PER_MILLION", Label: "Flash peak output", Description: "CNY per million output tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "8",
-	},
-	{
-		Key: "SCIRSS_DEEPSEEK_PRO_OFF_PEAK_CACHE_HIT_CNY_PER_MILLION", Label: "Pro off-peak cache hit", Description: "CNY per million cached input tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "0.15",
-	},
-	{
-		Key: "SCIRSS_DEEPSEEK_PRO_OFF_PEAK_CACHE_MISS_CNY_PER_MILLION", Label: "Pro off-peak cache miss", Description: "CNY per million uncached input tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "4.5",
-	},
-	{
-		Key: "SCIRSS_DEEPSEEK_PRO_OFF_PEAK_OUTPUT_CNY_PER_MILLION", Label: "Pro off-peak output", Description: "CNY per million output tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "13.5",
-	},
-	{
-		Key: "SCIRSS_DEEPSEEK_PRO_PEAK_CACHE_HIT_CNY_PER_MILLION", Label: "Pro peak cache hit", Description: "CNY per million cached input tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "0.3",
-	},
-	{
-		Key: "SCIRSS_DEEPSEEK_PRO_PEAK_CACHE_MISS_CNY_PER_MILLION", Label: "Pro peak cache miss", Description: "CNY per million uncached input tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "9",
-	},
-	{
-		Key: "SCIRSS_DEEPSEEK_PRO_PEAK_OUTPUT_CNY_PER_MILLION", Label: "Pro peak output", Description: "CNY per million output tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "27",
-	},
-	{
-		Key: "SCIRSS_GLM_53_FLASH_CACHE_HIT_CNY_PER_MILLION", Label: "GLM-5.3-Flash cache hit", Description: "CNY per million cached input tokens.",
-		Section: "GLM pricing", InputType: "decimal", Default: "0.23",
-	},
-	{
-		Key: "SCIRSS_GLM_53_FLASH_CACHE_MISS_CNY_PER_MILLION", Label: "GLM-5.3-Flash input", Description: "CNY per million uncached input tokens.",
-		Section: "GLM pricing", InputType: "decimal", Default: "0.8",
-	},
-	{
-		Key: "SCIRSS_GLM_53_FLASH_OUTPUT_CNY_PER_MILLION", Label: "GLM-5.3-Flash output", Description: "CNY per million output tokens.",
-		Section: "GLM pricing", InputType: "decimal", Default: "2.8",
-	},
-	{Key: "SCIRSS_QWEN_38_FLASH_CACHE_HIT_CNY_PER_MILLION", Label: "Qwen3.8-Flash cache hit", Description: "CNY per million cached input tokens.", Section: "Qwen pricing", InputType: "decimal", Default: "0.1"},
-	{Key: "SCIRSS_QWEN_38_FLASH_CACHE_MISS_CNY_PER_MILLION", Label: "Qwen3.8-Flash input", Description: "CNY per million uncached input tokens.", Section: "Qwen pricing", InputType: "decimal", Default: "0.8"},
-	{Key: "SCIRSS_QWEN_38_FLASH_OUTPUT_CNY_PER_MILLION", Label: "Qwen3.8-Flash output", Description: "CNY per million output tokens, including thinking tokens.", Section: "Qwen pricing", InputType: "decimal", Default: "2.7"},
-	{Key: "SCIRSS_MIMO_V25_CACHE_HIT_CNY_PER_MILLION", Label: "MiMo-V2.5 cache hit", Description: "CNY per million cached input tokens.", Section: "MiMo pricing", InputType: "decimal", Default: "0.02"},
-	{Key: "SCIRSS_MIMO_V25_CACHE_MISS_CNY_PER_MILLION", Label: "MiMo-V2.5 input", Description: "CNY per million uncached input tokens.", Section: "MiMo pricing", InputType: "decimal", Default: "1"},
-	{Key: "SCIRSS_MIMO_V25_OUTPUT_CNY_PER_MILLION", Label: "MiMo-V2.5 output", Description: "CNY per million output tokens, including thinking tokens.", Section: "MiMo pricing", InputType: "decimal", Default: "2"},
-	{
 		Key:         "SCIRSS_ZOTERO_API_KEY",
 		Label:       "Zotero API key",
 		Description: "Used for Zotero collection lookup and paper save operations.",
@@ -420,7 +376,6 @@ func Load(root string) (Settings, error) {
 	settings.ProfileBaseURL = valueOrDefault(valueMap["SCIRSS_PROFILE_BASE_URL"], "https://api.deepseek.com")
 	settings.ProfileModel = valueOrDefault(valueMap["SCIRSS_PROFILE_MODEL"], "deepseek-v4-pro")
 	settings.ProfileThinking = valueOrDefault(strings.ToLower(strings.TrimSpace(valueMap["SCIRSS_PROFILE_THINKING"])), "enabled")
-	settings.LLMPricing = pricingFromValues(values, valueMap)
 	settings.ZoteroAPIKey = optionalValue(valueMap["SCIRSS_ZOTERO_API_KEY"])
 	settings.ZoteroLibraryType = valueOrDefault(strings.ToLower(strings.TrimSpace(valueMap["SCIRSS_ZOTERO_LIBRARY_TYPE"])), "user")
 	settings.ZoteroLibraryID = optionalValue(valueMap["SCIRSS_ZOTERO_LIBRARY_ID"])
@@ -437,6 +392,9 @@ func ResolvedValues(root string) ([]ResolvedValue, error) {
 		return nil, err
 	}
 	mode := appruntime.DetectMode(appRoot)
+	if err := cleanupLegacyPricingStorage(appRoot, mode); err != nil {
+		return nil, err
+	}
 	dotenvItems := map[string]string{}
 	if mode == appruntime.ModeSource {
 		dotenvItems = readDotEnv(projectEnvPath(appRoot))
@@ -535,8 +493,12 @@ func UpdateLocalSettings(root string, updates map[string]SettingsConfigFieldUpda
 		return SettingsConfigResponse{}, err
 	}
 	mode := appruntime.DetectMode(appRoot)
+	if err := cleanupLegacyPricingStorage(appRoot, mode); err != nil {
+		return SettingsConfigResponse{}, err
+	}
 	if mode == appruntime.ModeRelease {
 		ordinaryValues := readReleaseSettings(releaseSettingsPath())
+		removeLegacyPricingValues(ordinaryValues)
 		secretValues, err := loadSecretValues(releaseSecretsPath())
 		if err != nil {
 			return SettingsConfigResponse{}, err
@@ -575,6 +537,7 @@ func UpdateLocalSettings(root string, updates map[string]SettingsConfigFieldUpda
 
 	envPath := projectEnvPath(appRoot)
 	envValues := readDotEnv(envPath)
+	removeLegacyPricingValues(envValues)
 	for key, update := range updates {
 		option, ok := optionsByKey[key]
 		if !ok {
@@ -662,6 +625,64 @@ func releaseSecretsPath() string {
 	return filepath.Join(appruntime.DefaultUserDataDir(), "config", "secrets.json")
 }
 
+func cleanupLegacyPricingStorage(appRoot string, mode string) error {
+	if mode == appruntime.ModeSource {
+		return removeLegacyPricingFromDotEnv(projectEnvPath(appRoot))
+	}
+	if mode != appruntime.ModeRelease {
+		return nil
+	}
+
+	path := releaseSettingsPath()
+	values := readReleaseSettings(path)
+	if !removeLegacyPricingValues(values) {
+		return nil
+	}
+	if err := writeReleaseSettings(path, values); err != nil {
+		return fmt.Errorf("clean legacy pricing settings: %w", err)
+	}
+	return nil
+}
+
+func removeLegacyPricingFromDotEnv(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read legacy pricing settings: %w", err)
+	}
+
+	var builder strings.Builder
+	changed := false
+	for _, line := range strings.SplitAfter(string(data), "\n") {
+		clean := strings.TrimSpace(line)
+		key, _, ok := strings.Cut(clean, "=")
+		if ok {
+			if _, legacy := legacyPricingKeys[strings.TrimSpace(key)]; legacy {
+				changed = true
+				continue
+			}
+		}
+		builder.WriteString(line)
+	}
+	if !changed {
+		return nil
+	}
+	return os.WriteFile(path, []byte(builder.String()), 0o600)
+}
+
+func removeLegacyPricingValues(values map[string]string) bool {
+	changed := false
+	for key := range legacyPricingKeys {
+		if _, ok := values[key]; ok {
+			delete(values, key)
+			changed = true
+		}
+	}
+	return changed
+}
+
 func defaultValueForOption(option Option, root string, mode string) (string, bool) {
 	if option.Default == "" {
 		return "", false
@@ -695,6 +716,7 @@ func readReleaseSettings(path string) map[string]string {
 
 func writeReleaseSettings(path string, values map[string]string) error {
 	// 把 release 普通配置写成稳定的 JSON 文件。
+	removeLegacyPricingValues(values)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -728,6 +750,7 @@ func readDotEnv(path string) map[string]string {
 
 func writeDotEnv(path string, values map[string]string) error {
 	// 以固定顺序写回 .env，减少无意义 diff。
+	removeLegacyPricingValues(values)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -814,59 +837,6 @@ func normalizeSettingValue(option Option, value *string) (string, bool, error) {
 	default:
 		return clean, true, nil
 	}
-}
-
-func pricingFromValues(values []ResolvedValue, valueMap map[string]string) llmusage.PricingCatalog {
-	pricing := llmusage.DefaultPricing()
-	for _, value := range values {
-		if value.Option.Section == "DeepSeek pricing" && value.Source != "default" {
-			pricing.Snapshot = llmusage.PricingSnapshotDeepSeekManual
-			break
-		}
-	}
-	pricing.Flash.OffPeak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK", pricing.Flash.OffPeak)
-	pricing.Flash.Peak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_FLASH_PEAK", pricing.Flash.Peak)
-	pricing.Pro.OffPeak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_PRO_OFF_PEAK", pricing.Pro.OffPeak)
-	pricing.Pro.Peak = tokenRatesFromValues(valueMap, "SCIRSS_DEEPSEEK_PRO_PEAK", pricing.Pro.Peak)
-	pricing.GLM53Flash = tokenRatesFromValues(valueMap, "SCIRSS_GLM_53_FLASH", pricing.GLM53Flash)
-	pricing.Qwen38Flash = tokenRatesFromValues(valueMap, "SCIRSS_QWEN_38_FLASH", pricing.Qwen38Flash)
-	pricing.MiMoV25 = tokenRatesFromValues(valueMap, "SCIRSS_MIMO_V25", pricing.MiMoV25)
-	for _, value := range values {
-		if value.Option.Section == "GLM pricing" && value.Source != "default" {
-			pricing.GLM53FlashSnapshot = llmusage.PricingSnapshotGLMManual
-			break
-		}
-	}
-	for _, value := range values {
-		if value.Option.Section == "Qwen pricing" && value.Source != "default" {
-			pricing.Qwen38FlashSnapshot = llmusage.PricingSnapshotQwenManual
-			break
-		}
-	}
-	for _, value := range values {
-		if value.Option.Section == "MiMo pricing" && value.Source != "default" {
-			pricing.MiMoV25Snapshot = llmusage.PricingSnapshotMiMoManual
-			break
-		}
-	}
-	return pricing
-}
-
-func tokenRatesFromValues(values map[string]string, prefix string, fallback llmusage.TokenRates) llmusage.TokenRates {
-	return llmusage.TokenRates{
-		CacheHitNanoCNYPerToken:   priceNanoPerToken(values[prefix+"_CACHE_HIT_CNY_PER_MILLION"], fallback.CacheHitNanoCNYPerToken),
-		CacheMissNanoCNYPerToken:  priceNanoPerToken(values[prefix+"_CACHE_MISS_CNY_PER_MILLION"], fallback.CacheMissNanoCNYPerToken),
-		CompletionNanoCNYPerToken: priceNanoPerToken(values[prefix+"_OUTPUT_CNY_PER_MILLION"], fallback.CompletionNanoCNYPerToken),
-	}
-}
-
-func priceNanoPerToken(value string, fallback int64) int64 {
-	parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-	scaled := parsed * 1_000
-	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 || math.Abs(scaled-math.Round(scaled)) > 1e-9 {
-		return fallback
-	}
-	return int64(math.Round(scaled))
 }
 
 func optionalValue(value string) string {

@@ -244,13 +244,13 @@ func launchLocalJob(settings config.Settings, jobType string, queuedMessageKey s
 			release, err := wait(ctx)
 			if err != nil {
 				finished := nowFunc().UTC()
-				usage := llmusage.NewCollector(settings.LLMPricing)
+				usage := llmusage.NewCollector()
 				finishCancelledLocalJob(settings, &job, jobType, nil, usage, finished)
 				return
 			}
 			defer release()
 		}
-		usage := llmusage.NewCollector(settings.LLMPricing)
+		usage := llmusage.NewCollector()
 		started := nowFunc().UTC()
 		logJobEvent(settings.LogsDir, &job, "info", "started", runningMessageKey, runningMessage, "", nil)
 		updateJob(job.ID, func(current *jobInfo) {

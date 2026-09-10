@@ -11,13 +11,9 @@ import (
 
 const (
 	PricingSnapshotDeepSeekCNY    = "deepseek-cny-2026-09-10"
-	PricingSnapshotDeepSeekManual = "deepseek-cny-manual"
 	PricingSnapshotGLM53FlashCNY  = "zhipu-glm-5.3-flash-cny-2026-09-10"
-	PricingSnapshotGLMManual      = "zhipu-glm-cny-manual"
 	PricingSnapshotQwen38FlashCNY = "aliyun-qwen3.8-flash-cny-2026-08-29"
-	PricingSnapshotQwenManual     = "aliyun-qwen-cny-manual"
 	PricingSnapshotMiMoV25CNY     = "xiaomi-mimo-v2.5-cny-2026-08-29"
-	PricingSnapshotMiMoManual     = "xiaomi-mimo-cny-manual"
 	PricingSnapshotZenFreeCNY     = "opencode-zen-mimo-v2.5-free-cny-2026-09-04"
 )
 
@@ -59,26 +55,26 @@ type PricingBreakdown struct {
 	CompletionNanoCNYPerToken int64  `json:"completion_nano_cny_per_token"`
 }
 
-type TokenRates struct {
+type tokenRates struct {
 	CacheHitNanoCNYPerToken   int64
 	CacheMissNanoCNYPerToken  int64
 	CompletionNanoCNYPerToken int64
 }
 
-type TieredRates struct {
-	OffPeak TokenRates
-	Peak    TokenRates
+type tieredRates struct {
+	OffPeak tokenRates
+	Peak    tokenRates
 }
 
-type PricingCatalog struct {
+type pricingCatalog struct {
 	Snapshot            string
-	Flash               TieredRates
-	Pro                 TieredRates
-	GLM53Flash          TokenRates
+	Flash               tieredRates
+	Pro                 tieredRates
+	GLM53Flash          tokenRates
 	GLM53FlashSnapshot  string
-	Qwen38Flash         TokenRates
+	Qwen38Flash         tokenRates
 	Qwen38FlashSnapshot string
-	MiMoV25             TokenRates
+	MiMoV25             tokenRates
 	MiMoV25Snapshot     string
 }
 
@@ -99,35 +95,33 @@ type Summary struct {
 type Collector struct {
 	mu      sync.Mutex
 	events  []Event
-	pricing PricingCatalog
+	pricing pricingCatalog
 }
 
-func DefaultPricing() PricingCatalog {
-	return PricingCatalog{
+func builtInPricing() pricingCatalog {
+	return pricingCatalog{
 		Snapshot: PricingSnapshotDeepSeekCNY,
-		Flash: TieredRates{
-			OffPeak: TokenRates{CacheHitNanoCNYPerToken: 20, CacheMissNanoCNYPerToken: 1_000, CompletionNanoCNYPerToken: 4_000},
-			Peak:    TokenRates{CacheHitNanoCNYPerToken: 40, CacheMissNanoCNYPerToken: 2_000, CompletionNanoCNYPerToken: 8_000},
+		Flash: tieredRates{
+			OffPeak: tokenRates{CacheHitNanoCNYPerToken: 20, CacheMissNanoCNYPerToken: 1_000, CompletionNanoCNYPerToken: 4_000},
+			Peak:    tokenRates{CacheHitNanoCNYPerToken: 40, CacheMissNanoCNYPerToken: 2_000, CompletionNanoCNYPerToken: 8_000},
 		},
-		Pro: TieredRates{
-			OffPeak: TokenRates{CacheHitNanoCNYPerToken: 150, CacheMissNanoCNYPerToken: 4_500, CompletionNanoCNYPerToken: 13_500},
-			Peak:    TokenRates{CacheHitNanoCNYPerToken: 300, CacheMissNanoCNYPerToken: 9_000, CompletionNanoCNYPerToken: 27_000},
+		Pro: tieredRates{
+			OffPeak: tokenRates{CacheHitNanoCNYPerToken: 150, CacheMissNanoCNYPerToken: 4_500, CompletionNanoCNYPerToken: 13_500},
+			Peak:    tokenRates{CacheHitNanoCNYPerToken: 300, CacheMissNanoCNYPerToken: 9_000, CompletionNanoCNYPerToken: 27_000},
 		},
-		GLM53Flash:          TokenRates{CacheHitNanoCNYPerToken: 230, CacheMissNanoCNYPerToken: 800, CompletionNanoCNYPerToken: 2_800},
+		GLM53Flash:          tokenRates{CacheHitNanoCNYPerToken: 230, CacheMissNanoCNYPerToken: 800, CompletionNanoCNYPerToken: 2_800},
 		GLM53FlashSnapshot:  PricingSnapshotGLM53FlashCNY,
-		Qwen38Flash:         TokenRates{CacheHitNanoCNYPerToken: 100, CacheMissNanoCNYPerToken: 800, CompletionNanoCNYPerToken: 2_700},
+		Qwen38Flash:         tokenRates{CacheHitNanoCNYPerToken: 100, CacheMissNanoCNYPerToken: 800, CompletionNanoCNYPerToken: 2_700},
 		Qwen38FlashSnapshot: PricingSnapshotQwen38FlashCNY,
-		MiMoV25:             TokenRates{CacheHitNanoCNYPerToken: 20, CacheMissNanoCNYPerToken: 1_000, CompletionNanoCNYPerToken: 2_000},
+		MiMoV25:             tokenRates{CacheHitNanoCNYPerToken: 20, CacheMissNanoCNYPerToken: 1_000, CompletionNanoCNYPerToken: 2_000},
 		MiMoV25Snapshot:     PricingSnapshotMiMoV25CNY,
 	}
 }
 
-func NewCollector(overrides ...PricingCatalog) *Collector {
-	pricing := DefaultPricing()
-	if len(overrides) > 0 && strings.TrimSpace(overrides[0].Snapshot) != "" {
-		pricing = overrides[0]
-	}
-	return &Collector{pricing: pricing}
+// NewCollector creates a usage collector with the application-owned provider
+// rate card. Pricing is deliberately not configurable at runtime.
+func NewCollector() *Collector {
+	return &Collector{pricing: builtInPricing()}
 }
 
 func (c *Collector) Record(event Event) {
@@ -215,7 +209,7 @@ func cacheBreakdownForPricing(usage ResponseUsage) (ResponseUsage, bool) {
 	return usage, true
 }
 
-func providerRates(baseURL string, model string, occurredAt time.Time, pricing PricingCatalog) (PricingBreakdown, bool) {
+func providerRates(baseURL string, model string, occurredAt time.Time, pricing pricingCatalog) (PricingBreakdown, bool) {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil {
 		return PricingBreakdown{}, false
@@ -236,7 +230,7 @@ func providerRates(baseURL string, model string, occurredAt time.Time, pricing P
 	}
 	if strings.EqualFold(parsed.Hostname(), "opencode.ai") && strings.EqualFold(strings.TrimSpace(model), "mimo-v2.5-free") {
 		// The OpenCode Zen free tier costs nothing; report it at explicit zero rates.
-		return standardBreakdown(model, PricingSnapshotZenFreeCNY, TokenRates{}), true
+		return standardBreakdown(model, PricingSnapshotZenFreeCNY, tokenRates{}), true
 	}
 	if !strings.EqualFold(parsed.Hostname(), "api.deepseek.com") {
 		return PricingBreakdown{}, false
@@ -248,13 +242,13 @@ func providerRates(baseURL string, model string, occurredAt time.Time, pricing P
 	if weekday >= time.Monday && weekday <= time.Friday && ((hour >= 9 && hour < 12) || (hour >= 14 && hour < 18)) {
 		tier = PricingTierPeak
 	}
-	selectedRates := func(rates TieredRates) TokenRates {
+	selectedRates := func(rates tieredRates) tokenRates {
 		if tier == PricingTierPeak {
 			return rates.Peak
 		}
 		return rates.OffPeak
 	}
-	breakdown := func(rates TokenRates) PricingBreakdown {
+	breakdown := func(rates tokenRates) PricingBreakdown {
 		return PricingBreakdown{
 			Model: model, Snapshot: pricing.Snapshot, Tier: tier,
 			CacheHitNanoCNYPerToken:   rates.CacheHitNanoCNYPerToken,
@@ -280,7 +274,7 @@ func providerRates(baseURL string, model string, occurredAt time.Time, pricing P
 	}
 }
 
-func standardBreakdown(model string, snapshot string, rates TokenRates) PricingBreakdown {
+func standardBreakdown(model string, snapshot string, rates tokenRates) PricingBreakdown {
 	return PricingBreakdown{
 		Model: model, Snapshot: snapshot, Tier: "standard",
 		CacheHitNanoCNYPerToken:   rates.CacheHitNanoCNYPerToken,

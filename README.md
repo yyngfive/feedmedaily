@@ -28,6 +28,8 @@ FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载
 
 分类模型均使用各供应商官方的 OpenAI 兼容 API。在 `Settings → Model`（或首次引导）中录入对应 API Key 即可启用对应模型；源码模式下也可以通过 `.env` 中的 `SCIRSS_DEEPSEEK_API_KEY`、`SCIRSS_GLM_API_KEY`、`QWEN_API_KEY`、`MIMO_API_KEY` 提供。各模型 API Key 的获取方式：
 
+模型 token 价格由应用内置并按 provider/时段自动选择，不在 Settings 或环境变量中保存，也不允许修改。历史 usage 记录会保留实际采用的价格快照。
+
 #### DeepSeek V4.1 Flash
 
 1. 在 [DeepSeek Platform](https://platform.deepseek.com/) 注册并登录

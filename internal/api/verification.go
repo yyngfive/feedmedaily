@@ -102,7 +102,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(context.C
 			unregisterJobCancellation(job.ID)
 			cancel()
 		}()
-		usage := llmusage.NewCollector(settings.LLMPricing)
+		usage := llmusage.NewCollector()
 		started := nowFunc().UTC()
 		logJobEvent(settings.LogsDir, &job, "info", "started", "pipeline.feeds.fetching", "Fetching RSS feeds.", "", nil)
 		updateJob(job.ID, func(current *jobInfo) {

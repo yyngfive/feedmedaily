@@ -123,7 +123,7 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 - Dashboard 优先展示运行中任务、验证状态和主要 Sync；定向 Sync、Reclassify、用量等低频项渐进披露。Reclassify 作业完成后，Latest activity 面板展示 feedback 纠正对账：`已落实 n / 共 m` 汇总行 + 未落实清单的渐进披露（论文标题 + "纠正值 … ；当前值 …"，主题用后端解析好的 label）。
 - Feeds 使用独立本地草稿；取消必须恢复已保存值，未保存修改不能污染阅读状态。
 - Profile 使用一个主要审阅文档；反馈队列位于下方作为次级区域。Profile 编辑态包含一个 Topics 章节：主题条支持新建、改名与删除（删除用 danger 样式），未被任何规则引用的主题在只读视图标注 `unused`。规则编辑保持多行文本形态：unrelated 规则沿用整体多行文本框（一行一条）；direct/indirect 规则因需按条打标，每条规则一个多行文本框，主题用单选下拉（每条规则最多归属一个主题，选项含"无主题"），Remove 与下拉同行靠右，不套边框盒子，unrelated 不提供打标入口。
-- Model 常显连接与默认模型，低频调优和价格进入 Advanced，并使用一个统一保存动作。
+- Model 常显连接与默认模型，低频调优进入 Advanced，并使用一个统一保存动作；token 价格由后端内置且不可编辑。
 - Model Advanced 中的分类思考只提供全局启用/关闭选择；启用后由后端映射到各供应商最低档，GLM 的说明必须明确其始终为 low、不能关闭。
 - App 顶部常显 About、更新和运行信息；Zotero、Scheduled sync、Local app 使用相同的独立 Disclosure。
 - Zotero 使用 Web API 和应用内 collection picker，不依赖浏览器 connector。

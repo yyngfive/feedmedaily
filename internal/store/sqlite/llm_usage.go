@@ -118,8 +118,8 @@ var stalePricingRules = []stalePricingRule{
 }
 
 // repairSupersededPricing reprices only the rows whose stored snapshot is known to
-// have been superseded after they were written. Manually saved prices and every
-// other historical row are left untouched.
+// have been superseded after they were written. Rows with other historical
+// snapshots are left untouched.
 func repairSupersededPricing(db *sql.DB) error {
 	conditions := make([]string, 0, len(stalePricingRules))
 	arguments := make([]any, 0, len(stalePricingRules)*2)

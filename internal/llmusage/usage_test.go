@@ -90,34 +90,6 @@ func TestCollectorUsesOffPeakPricingOnBeijingWeekends(t *testing.T) {
 	}
 }
 
-func TestCollectorUsesManualPricingSnapshot(t *testing.T) {
-	pricing := llmusage.DefaultPricing()
-	pricing.Snapshot = "deepseek-cny-manual"
-	pricing.Flash.Peak = llmusage.TokenRates{
-		CacheHitNanoCNYPerToken:   200,
-		CacheMissNanoCNYPerToken:  4_000,
-		CompletionNanoCNYPerToken: 10_000,
-	}
-	collector := llmusage.NewCollector(pricing)
-	collector.Record(llmusage.Event{
-		BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash",
-		OccurredAt: time.Date(2026, 8, 24, 7, 0, 0, 0, time.UTC), // Monday 15:00 in Beijing.
-		Usage: llmusage.ResponseUsage{
-			PromptTokens: 3_000_000, PromptCacheHitTokens: 1_000_000,
-			PromptCacheMissTokens: 1_000_000, CompletionTokens: 1_000_000,
-			CacheBreakdownPresent: true,
-		},
-	})
-
-	summary := collector.Summary()
-	if summary.EstimatedCostCNY == nil || *summary.EstimatedCostCNY != "14.200000" {
-		t.Fatalf("manual cost = %#v, want 14.200000", summary.EstimatedCostCNY)
-	}
-	if len(summary.Pricing) != 1 || summary.Pricing[0].Snapshot != "deepseek-cny-manual" {
-		t.Fatalf("manual pricing snapshot = %#v", summary.Pricing)
-	}
-}
-
 func TestCollectorUsesDeepSeekProPricingAndAggregatesRequests(t *testing.T) {
 	collector := llmusage.NewCollector()
 	for _, operation := range []string{"profile_generation", "profile_validation"} {
