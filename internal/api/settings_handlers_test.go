@@ -67,7 +67,7 @@ func TestClassifierModelsConfigAPI(t *testing.T) {
 	if err := json.Unmarshal(getRecorder.Body.Bytes(), &getPayload); err != nil {
 		t.Fatal(err)
 	}
-	if getPayload.ClassifierModels.DefaultModelID != config.ClassifierModelDeepSeekV4Flash {
+	if getPayload.ClassifierModels.DefaultModelID != config.ClassifierModelDeepSeekFlash {
 		t.Fatalf("default classifier model = %q", getPayload.ClassifierModels.DefaultModelID)
 	}
 
@@ -159,7 +159,7 @@ func TestClassifierDefaultChangeOnlyAffectsLaterJobs(t *testing.T) {
 	firstJobID := launch()
 	select {
 	case model := <-seenModels:
-		if model != config.ClassifierModelDeepSeekV4Flash {
+		if model != config.ClassifierModelDeepSeekFlash {
 			t.Fatalf("first job model = %q", model)
 		}
 	case <-time.After(2 * time.Second):

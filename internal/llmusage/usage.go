@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	PricingSnapshotDeepSeekCNY    = "deepseek-cny-2026-08-23-weekdays"
+	PricingSnapshotDeepSeekCNY    = "deepseek-cny-2026-09-10"
 	PricingSnapshotDeepSeekManual = "deepseek-cny-manual"
-	PricingSnapshotGLM53FlashCNY  = "zhipu-glm-5.3-flash-cny-2026-08-28-promo"
+	PricingSnapshotGLM53FlashCNY  = "zhipu-glm-5.3-flash-cny-2026-09-10"
 	PricingSnapshotGLMManual      = "zhipu-glm-cny-manual"
 	PricingSnapshotQwen38FlashCNY = "aliyun-qwen3.8-flash-cny-2026-08-29"
 	PricingSnapshotQwenManual     = "aliyun-qwen-cny-manual"
@@ -27,6 +27,11 @@ const (
 )
 
 var chinaStandardTime = time.FixedZone("CST", 8*60*60)
+
+// deepSeekProRoutedToFlashSince is when api.deepseek.com started routing
+// deepseek-v4-pro requests to DeepSeek V4.1 Flash and billing them at Flash
+// rates, until the V4.1 Pro release takes over that call name.
+var deepSeekProRoutedToFlashSince = time.Date(2026, 9, 14, 4, 0, 0, 0, time.UTC) // 12:00 Beijing
 
 type ResponseUsage struct {
 	PromptTokens          int64 `json:"prompt_tokens"`
@@ -101,14 +106,14 @@ func DefaultPricing() PricingCatalog {
 	return PricingCatalog{
 		Snapshot: PricingSnapshotDeepSeekCNY,
 		Flash: TieredRates{
-			OffPeak: TokenRates{CacheHitNanoCNYPerToken: 50, CacheMissNanoCNYPerToken: 1_500, CompletionNanoCNYPerToken: 4_500},
-			Peak:    TokenRates{CacheHitNanoCNYPerToken: 100, CacheMissNanoCNYPerToken: 3_000, CompletionNanoCNYPerToken: 9_000},
+			OffPeak: TokenRates{CacheHitNanoCNYPerToken: 20, CacheMissNanoCNYPerToken: 1_000, CompletionNanoCNYPerToken: 4_000},
+			Peak:    TokenRates{CacheHitNanoCNYPerToken: 40, CacheMissNanoCNYPerToken: 2_000, CompletionNanoCNYPerToken: 8_000},
 		},
 		Pro: TieredRates{
 			OffPeak: TokenRates{CacheHitNanoCNYPerToken: 150, CacheMissNanoCNYPerToken: 4_500, CompletionNanoCNYPerToken: 13_500},
 			Peak:    TokenRates{CacheHitNanoCNYPerToken: 300, CacheMissNanoCNYPerToken: 9_000, CompletionNanoCNYPerToken: 27_000},
 		},
-		GLM53Flash:          TokenRates{CacheHitNanoCNYPerToken: 115, CacheMissNanoCNYPerToken: 400, CompletionNanoCNYPerToken: 1_400},
+		GLM53Flash:          TokenRates{CacheHitNanoCNYPerToken: 230, CacheMissNanoCNYPerToken: 800, CompletionNanoCNYPerToken: 2_800},
 		GLM53FlashSnapshot:  PricingSnapshotGLM53FlashCNY,
 		Qwen38Flash:         TokenRates{CacheHitNanoCNYPerToken: 100, CacheMissNanoCNYPerToken: 800, CompletionNanoCNYPerToken: 2_700},
 		Qwen38FlashSnapshot: PricingSnapshotQwen38FlashCNY,
@@ -258,11 +263,19 @@ func providerRates(baseURL string, model string, occurredAt time.Time, pricing P
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner":
+	case "deepseek-flash", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner":
 		return breakdown(selectedRates(pricing.Flash)), true
 	case "deepseek-v4-pro":
+		// DeepSeek routes Pro requests to V4.1 Flash at Flash pricing once the
+		// Pro model is retired, until the V4.1 Pro release inherits the name.
+		if !occurredAt.Before(deepSeekProRoutedToFlashSince) {
+			return breakdown(selectedRates(pricing.Flash)), true
+		}
 		return breakdown(selectedRates(pricing.Pro)), true
 	default:
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "deepseek-v4.1-flash") {
+			return breakdown(selectedRates(pricing.Flash)), true
+		}
 		return PricingBreakdown{}, false
 	}
 }

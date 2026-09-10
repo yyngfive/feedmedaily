@@ -167,11 +167,11 @@ func TestReclassifyUsesSavedThinkingPreferenceAndSafeTokenFloor(t *testing.T) {
 	}))
 	defer server.Close()
 	settings.ClassifierModels = config.ClassifierModels{
-		EnabledModelIDs: []string{config.ClassifierModelDeepSeekV4Flash},
-		DefaultModelID:  config.ClassifierModelDeepSeekV4Flash,
+		EnabledModelIDs: []string{config.ClassifierModelDeepSeekFlash},
+		DefaultModelID:  config.ClassifierModelDeepSeekFlash,
 		Models: map[string]config.ClassifierModelConfig{
-			config.ClassifierModelDeepSeekV4Flash: {
-				ClassifierModelSpec: config.ClassifierModelSpec{ID: config.ClassifierModelDeepSeekV4Flash, Provider: "deepseek", BaseURL: server.URL},
+			config.ClassifierModelDeepSeekFlash: {
+				ClassifierModelSpec: config.ClassifierModelSpec{ID: config.ClassifierModelDeepSeekFlash, Provider: "deepseek", BaseURL: server.URL},
 				APIKey:              "deepseek-key",
 			},
 		},

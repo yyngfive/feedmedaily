@@ -65,10 +65,10 @@ func TestClassifierModelTestAPIUsesUnsavedKeyWithoutChangingSettings(t *testing.
 	if job.Status != "completed" {
 		t.Fatalf("DeepSeek connection test job status = %s: %s", job.Status, job.Error)
 	}
-	if captured.Model != config.ClassifierModelDeepSeekV4Flash || captured.Thinking != "enabled" || captured.ReasoningEffort != "low" || captured.MinMaxTokens != classifier.ThinkingMaxTokensFloor {
+	if captured.Model != config.ClassifierModelDeepSeekFlash || captured.Thinking != "enabled" || captured.ReasoningEffort != "low" || captured.MinMaxTokens != classifier.ThinkingMaxTokensFloor {
 		t.Fatalf("captured DeepSeek config = %#v", captured)
 	}
-	if got := server.snapshotSettings().ClassifierModels.DefaultModelID; got != config.ClassifierModelDeepSeekV4Flash {
+	if got := server.snapshotSettings().ClassifierModels.DefaultModelID; got != config.ClassifierModelDeepSeekFlash {
 		t.Fatalf("connection test changed default model to %q", got)
 	}
 	envText, err := os.ReadFile(filepath.Join(root, ".env"))

@@ -71,10 +71,10 @@ func TestLoadUsesOfficialDeepSeekPricingDefaultsAndAcceptsManualOverrides(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.LLMPricing.Flash.OffPeak.CacheMissNanoCNYPerToken != 1_500 || settings.LLMPricing.Pro.Peak.CompletionNanoCNYPerToken != 27_000 {
+	if settings.LLMPricing.Flash.OffPeak.CacheMissNanoCNYPerToken != 1_000 || settings.LLMPricing.Pro.Peak.CompletionNanoCNYPerToken != 27_000 {
 		t.Fatalf("default DeepSeek pricing = %#v", settings.LLMPricing)
 	}
-	if settings.LLMPricing.GLM53Flash.CacheHitNanoCNYPerToken != 115 || settings.LLMPricing.GLM53Flash.CacheMissNanoCNYPerToken != 400 || settings.LLMPricing.GLM53Flash.CompletionNanoCNYPerToken != 1_400 {
+	if settings.LLMPricing.GLM53Flash.CacheHitNanoCNYPerToken != 230 || settings.LLMPricing.GLM53Flash.CacheMissNanoCNYPerToken != 800 || settings.LLMPricing.GLM53Flash.CompletionNanoCNYPerToken != 2_800 {
 		t.Fatalf("default GLM pricing = %#v", settings.LLMPricing.GLM53Flash)
 	}
 

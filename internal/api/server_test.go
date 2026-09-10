@@ -189,7 +189,7 @@ INSERT INTO llm_usage_jobs VALUES (
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].EstimatedCostCNY == nil || *items[0].EstimatedCostCNY != "0.123053" {
+	if len(items) != 1 || items[0].EstimatedCostCNY == nil || *items[0].EstimatedCostCNY != "0.093881" {
 		t.Fatalf("legacy usage was not repaired on server startup: %#v", items)
 	}
 }

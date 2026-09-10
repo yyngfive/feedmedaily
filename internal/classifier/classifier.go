@@ -916,7 +916,7 @@ func applyProviderControls(cfg LLMConfig, payload map[string]any, forceDisabled 
 		payload["do_sample"] = false
 		return
 	}
-	if provider == "deepseek" || model == "deepseek-v4-flash" {
+	if provider == "deepseek" || isDeepSeekFlashModel(model) {
 		payload["thinking"] = map[string]string{"type": "disabled"}
 		delete(payload, "reasoning_effort")
 		return
@@ -956,7 +956,7 @@ func supportsThinkingFallback(cfg LLMConfig) bool {
 	if provider == "zhipu" || provider == "deepseek" || provider == "qwen" || provider == "mimo" {
 		return false
 	}
-	if model == "glm-5.3-flash" || strings.Contains(model, "glm-5.3-flash") || model == "deepseek-v4-flash" || model == "qwen3.8-flash" || model == "mimo-v2.5" {
+	if model == "glm-5.3-flash" || strings.Contains(model, "glm-5.3-flash") || isDeepSeekFlashModel(model) || model == "qwen3.8-flash" || model == "mimo-v2.5" {
 		return false
 	}
 	return normalizedThinking(cfg.Thinking) != "disabled"
@@ -968,7 +968,14 @@ func isManagedClassifierProvider(cfg LLMConfig) bool {
 	}
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	model := strings.ToLower(strings.TrimSpace(cfg.Model))
-	return provider == "deepseek" || provider == "zhipu" || provider == "qwen" || provider == "mimo" || model == "deepseek-v4-flash" || model == "glm-5.3-flash" || model == "qwen3.8-flash" || model == "mimo-v2.5"
+	return provider == "deepseek" || provider == "zhipu" || provider == "qwen" || provider == "mimo" || isDeepSeekFlashModel(model) || model == "glm-5.3-flash" || model == "qwen3.8-flash" || model == "mimo-v2.5"
+}
+
+// isDeepSeekFlashModel covers the current Flash call name plus the retired
+// DeepSeek Flash call names that still route to the same model.
+func isDeepSeekFlashModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return normalized == "deepseek-flash" || normalized == "deepseek-v4-flash" || strings.HasPrefix(normalized, "deepseek-v4.1-flash")
 }
 
 func shouldRetryWithoutThinking(err error) bool {

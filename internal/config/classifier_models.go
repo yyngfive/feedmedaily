@@ -10,11 +10,14 @@ import (
 )
 
 const (
-	ClassifierModelDeepSeekV4Flash = "deepseek-v4-flash"
-	ClassifierModelGLM53Flash      = "glm-5.3-flash"
-	ClassifierModelQwen38Flash     = "qwen3.8-flash"
-	ClassifierModelMiMoV25         = "mimo-v2.5"
-	ClassifierModelMiMoZenFree     = "mimo-v2.5-free"
+	// ClassifierModelDeepSeekFlash is DeepSeek's current Flash call name. The
+	// provider retired the `deepseek-v4-flash` call name and serves the
+	// DeepSeek-V4.1-Flash model behind this one.
+	ClassifierModelDeepSeekFlash = "deepseek-flash"
+	ClassifierModelGLM53Flash    = "glm-5.3-flash"
+	ClassifierModelQwen38Flash   = "qwen3.8-flash"
+	ClassifierModelMiMoV25       = "mimo-v2.5"
+	ClassifierModelMiMoZenFree   = "mimo-v2.5-free"
 
 	classifierEnabledModelsKey = "SCIRSS_CLASSIFIER_ENABLED_MODELS"
 	classifierDefaultModelKey  = "SCIRSS_CLASSIFIER_DEFAULT_MODEL"
@@ -89,9 +92,9 @@ type ClassifierModelsUpdate struct {
 
 var classifierModelCatalog = []ClassifierModelSpec{
 	{
-		ID:              ClassifierModelDeepSeekV4Flash,
+		ID:              ClassifierModelDeepSeekFlash,
 		Provider:        "deepseek",
-		Label:           "DeepSeek V4 Flash",
+		Label:           "DeepSeek V4.1 Flash",
 		BaseURL:         "https://api.deepseek.com",
 		Thinking:        "disabled",
 		ReasoningEffort: "",
@@ -122,9 +125,28 @@ var classifierModelCatalog = []ClassifierModelSpec{
 	},
 }
 
+// classifierModelAliases maps provider call names that were retired onto the
+// catalog entry that now serves them, so saved selections, .env files, and API
+// callers written against an older name keep resolving to a live model.
+var classifierModelAliases = map[string]string{
+	"deepseek-v4-flash":                   ClassifierModelDeepSeekFlash,
+	"deepseek-v4.1-flash":                 ClassifierModelDeepSeekFlash,
+	"deepseek-v4.1-flash-expires-on-0910": ClassifierModelDeepSeekFlash,
+}
+
+// classifierModelIDFromAlias resolves a retired call name to its catalog entry.
+func classifierModelIDFromAlias(modelID string) string {
+	id := strings.TrimSpace(modelID)
+	if canonical, ok := classifierModelAliases[strings.ToLower(id)]; ok {
+		return canonical
+	}
+	return id
+}
+
 func classifierModelSpec(modelID string) (ClassifierModelSpec, bool) {
+	canonical := classifierModelIDFromAlias(modelID)
 	for _, spec := range classifierModelCatalog {
-		if spec.ID == modelID {
+		if spec.ID == canonical {
 			return spec, true
 		}
 	}
@@ -254,7 +276,7 @@ func classifierModelsFromResolvedValues(values []ResolvedValue) ClassifierModels
 		byKey[value.Option.Key] = value
 	}
 
-	legacyModel := valueOrDefault(strings.TrimSpace(byKey["SCIRSS_CLASSIFIER_MODEL"].Value), ClassifierModelDeepSeekV4Flash)
+	legacyModel := valueOrDefault(strings.TrimSpace(byKey["SCIRSS_CLASSIFIER_MODEL"].Value), ClassifierModelDeepSeekFlash)
 	legacyBaseURL := valueOrDefault(strings.TrimSpace(byKey["SCIRSS_CLASSIFIER_BASE_URL"].Value), "https://api.deepseek.com")
 	legacyKey := byKey["SCIRSS_CLASSIFIER_API_KEY"]
 	legacyConfigured := isNonDefaultResolvedValue(legacyKey) || isNonDefaultResolvedValue(byKey["SCIRSS_CLASSIFIER_MODEL"]) || isNonDefaultResolvedValue(byKey["SCIRSS_CLASSIFIER_BASE_URL"])
@@ -378,7 +400,7 @@ func parseClassifierModelIDs(raw string) []string {
 	seen := map[string]struct{}{}
 	result := make([]string, 0, len(classifierModelCatalog))
 	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' }) {
-		id := strings.TrimSpace(part)
+		id := classifierModelIDFromAlias(part)
 		if _, ok := classifierModelSpec(id); !ok {
 			continue
 		}
@@ -409,7 +431,7 @@ func normalizeResolvedClassifierModels(enabled []string, configuredDefault strin
 		if legacyConfigured && legacyID != "" {
 			validated = []string{legacyID}
 		} else {
-			validated = []string{ClassifierModelDeepSeekV4Flash}
+			validated = []string{ClassifierModelDeepSeekFlash}
 		}
 	}
 	defaultID := strings.TrimSpace(configuredDefault)
@@ -427,8 +449,8 @@ func normalizeResolvedClassifierModels(enabled []string, configuredDefault strin
 
 func classifierModelIDFromLegacy(model string, baseURL string) string {
 	normalizedModel := strings.ToLower(strings.TrimSpace(model))
-	if normalizedModel == ClassifierModelDeepSeekV4Flash || normalizedModel == "deepseek-chat" || normalizedModel == "deepseek-reasoner" || strings.Contains(normalizedModel, "deepseek") {
-		return ClassifierModelDeepSeekV4Flash
+	if normalizedModel == ClassifierModelDeepSeekFlash || normalizedModel == "deepseek-chat" || normalizedModel == "deepseek-reasoner" || strings.Contains(normalizedModel, "deepseek") {
+		return ClassifierModelDeepSeekFlash
 	}
 	if normalizedModel == ClassifierModelGLM53Flash || strings.Contains(normalizedModel, "glm-5.3-flash") || strings.Contains(strings.ToLower(baseURL), "bigmodel.cn") {
 		return ClassifierModelGLM53Flash
@@ -444,7 +466,7 @@ func classifierModelIDFromLegacy(model string, baseURL string) string {
 	}
 	// Unknown legacy OpenAI-compatible classifier models cannot be represented by
 	// the managed catalog; keep the migration deterministic by selecting DeepSeek.
-	return ClassifierModelDeepSeekV4Flash
+	return ClassifierModelDeepSeekFlash
 }
 
 // UpdateLocalSettingsWithClassifierModels applies the structured classifier update and
@@ -454,11 +476,20 @@ func UpdateLocalSettingsWithClassifierModels(root string, fields map[string]Sett
 	if err != nil {
 		return SettingsConfigResponse{}, err
 	}
+	// Credential keys follow the same retired-name aliases as the selection, so a
+	// client that still sends an older model id updates the live catalog entry.
+	if len(update.Credentials) > 0 {
+		credentials := make(map[string]SettingsConfigFieldUpdate, len(update.Credentials))
+		for modelID, credential := range update.Credentials {
+			credentials[classifierModelIDFromAlias(modelID)] = credential
+		}
+		update.Credentials = credentials
+	}
 	enabled, defaultID, err := validateClassifierModelsUpdate(update)
 	if err != nil {
 		return SettingsConfigResponse{}, err
 	}
-	if update.ReuseDeepSeekKeyForProfile && !containsClassifierModel(enabled, ClassifierModelDeepSeekV4Flash) {
+	if update.ReuseDeepSeekKeyForProfile && !containsClassifierModel(enabled, ClassifierModelDeepSeekFlash) {
 		return SettingsConfigResponse{}, fmt.Errorf("DeepSeek classifier model must be enabled to reuse its key for Profile generation")
 	}
 	for _, modelID := range enabled {
@@ -513,7 +544,7 @@ func UpdateLocalSettingsWithClassifierModels(root string, fields map[string]Sett
 			return SettingsConfigResponse{}, loadErr
 		}
 		if strings.TrimSpace(updated.ProfileAPIKey) == "" {
-			deepSeek := updated.ClassifierModels.Models[ClassifierModelDeepSeekV4Flash]
+			deepSeek := updated.ClassifierModels.Models[ClassifierModelDeepSeekFlash]
 			if strings.TrimSpace(deepSeek.APIKey) == "" {
 				return SettingsConfigResponse{}, fmt.Errorf("cannot reuse the DeepSeek classifier key because it is not configured")
 			}
@@ -529,8 +560,8 @@ func UpdateLocalSettingsWithClassifierModels(root string, fields map[string]Sett
 }
 
 func classifierCredentialKey(modelID string) (string, bool) {
-	switch modelID {
-	case ClassifierModelDeepSeekV4Flash:
+	switch classifierModelIDFromAlias(modelID) {
+	case ClassifierModelDeepSeekFlash:
 		return classifierDeepSeekAPIKey, true
 	case ClassifierModelGLM53Flash:
 		return classifierGLMAPIKey, true
@@ -660,7 +691,7 @@ func validateClassifierModelsUpdate(update ClassifierModelsUpdate) ([]string, st
 	seen := make(map[string]struct{}, len(update.EnabledModelIDs))
 	enabled := make([]string, 0, len(update.EnabledModelIDs))
 	for _, rawID := range update.EnabledModelIDs {
-		id := strings.TrimSpace(rawID)
+		id := classifierModelIDFromAlias(rawID)
 		if _, ok := classifierModelSpec(id); !ok {
 			return nil, "", fmt.Errorf("unsupported classifier model: %s", id)
 		}

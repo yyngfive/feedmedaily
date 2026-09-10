@@ -294,17 +294,17 @@ Query：
       "source": "settings",
       "stored_in_dotenv": false,
       "storage_label": "Local settings",
-      "value": "deepseek-v4-flash",
-      "default_value": "deepseek-v4-flash",
+      "value": "deepseek-flash",
+      "default_value": "deepseek-flash",
       "options": []
     }
   ],
   "classifier_models": {
     "models": [
       {
-        "id": "deepseek-v4-flash",
+        "id": "deepseek-flash",
         "provider": "deepseek",
-        "label": "DeepSeek V4 Flash",
+        "label": "DeepSeek V4.1 Flash",
         "base_url": "https://api.deepseek.com",
         "thinking": "disabled",
         "enabled": true,
@@ -329,17 +329,17 @@ Query：
         "environment_override": false
       }
     ],
-    "enabled_model_ids": ["deepseek-v4-flash"],
-    "default_model_id": "deepseek-v4-flash"
+    "enabled_model_ids": ["deepseek-flash"],
+    "default_model_id": "deepseek-flash"
   }
 }
 ```
 
 secret 字段和 `classifier_models` 中的 key 均不以明文返回。`source=environment` 且 `environment_override=true` 表示系统环境变量覆盖了本地值。
 
-当前固定分类目录为 DeepSeek V4 Flash、Zhipu GLM-5.3-Flash、Qwen3.8-Flash 和 MiMo-V2.5。`SCIRSS_CLASSIFIER_THINKING` 只控制最低思考档：GLM 始终为 low；DeepSeek/Qwen 开启时为 low；MiMo 开启时为 enabled。DeepSeek/MiMo 开启时使用至少 4096 completion tokens。分类器默认 batch size 为 `5`。模型响应不要求 `decision_trace` 或 `recommended_action`；报告 API 中保留的 `recommended_action` 由后端按 relevance 确定。
+当前固定分类目录为 DeepSeek V4.1 Flash、Zhipu GLM-5.3-Flash、Qwen3.8-Flash 和 MiMo-V2.5。`SCIRSS_CLASSIFIER_THINKING` 只控制最低思考档：GLM 始终为 low；DeepSeek/Qwen 开启时为 low；MiMo 开启时为 enabled。DeepSeek/MiMo 开启时使用至少 4096 completion tokens。分类器默认 batch size 为 `5`。模型响应不要求 `decision_trace` 或 `recommended_action`；报告 API 中保留的 `recommended_action` 由后端按 relevance 确定。
 
-`DeepSeek pricing` section 提供 Flash/Pro 各自的 off-peak/peak 价格；`GLM pricing` 提供 GLM-5.3-Flash 的缓存命中、普通输入和输出价格。单位均为 CNY / 1M tokens，价格允许 0 或最多三位小数。GLM 默认值为 2026-08-28 官方页面展示的限时 5 折价：`0.115 / 0.4 / 1.4`，促销结束后可在 UI 或 `SCIRSS_GLM_53_FLASH_<CACHE_HIT|CACHE_MISS|OUTPUT>_CNY_PER_MILLION` 更新。
+`DeepSeek pricing` section 提供 Flash/Pro 各自的 off-peak/peak 价格；`GLM pricing` 提供 GLM-5.3-Flash 的缓存命中、普通输入和输出价格。单位均为 CNY / 1M tokens，价格允许 0 或最多三位小数。GLM 默认值为促销结束后的刊例价：`0.23 / 0.8 / 2.8`；可在 UI 或 `SCIRSS_GLM_53_FLASH_<CACHE_HIT|CACHE_MISS|OUTPUT>_CNY_PER_MILLION` 更新。
 
 前端入口：`fetchSettingsConfig()`。
 
@@ -355,10 +355,10 @@ secret 字段和 `classifier_models` 中的 key 均不以明文返回。`source=
     "SCIRSS_ZOTERO_API_KEY": {"clear": true}
   },
   "classifier_models": {
-    "enabled_model_ids": ["deepseek-v4-flash", "glm-5.3-flash"],
-    "default_model_id": "deepseek-v4-flash",
+    "enabled_model_ids": ["deepseek-flash", "glm-5.3-flash"],
+    "default_model_id": "deepseek-flash",
     "credentials": {
-      "deepseek-v4-flash": {"value": "new-deepseek-key"},
+      "deepseek-flash": {"value": "new-deepseek-key"},
       "glm-5.3-flash": {"clear": true}
     },
     "reuse_deepseek_key_for_profile": false
@@ -887,9 +887,9 @@ LLM job 在完成或失败后包含可选 `llm_usage`：请求数、三类 token
 - `pricing_status`、`pricing` 单价快照
 - 可用时返回 `estimated_cost_nano_cny` 和 `estimated_cost_cny`
 
-费用仅对官方 `api.deepseek.com` 的已知模型计算，并按每个成功响应发生时的北京时间选择峰谷价格。高峰时段为周一至周五 9:00–12:00、14:00–18:00，其余时间（包括周末）为空闲时段。V4 Flash（以及兼容映射的 `deepseek-chat`、`deepseek-reasoner`）空闲价默认为命中 ¥0.05/M、未命中 ¥1.5/M、输出 ¥4.5/M，高峰价默认为 ¥0.10/M、¥3/M、¥9/M；V4 Pro 空闲价默认为 ¥0.15/M、¥4.5/M、¥13.5/M，高峰价默认为 ¥0.30/M、¥9/M、¥27/M。用户可以在 Settings → Model 手动调整这些默认值。每个 job 启动时锁定当时设置，ledger 保存实际采用的 `tier` 和费率快照，后续调价不回算历史。默认价格依据 DeepSeek 的[响应 usage 定义](https://api-docs.deepseek.com/api/create-chat-completion/)和[官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)。
+费用仅对官方 `api.deepseek.com` 的已知模型计算，并按每个成功响应发生时的北京时间选择峰谷价格。高峰时段为周一至周五 9:00–12:00、14:00–18:00，其余时间（包括周末）为空闲时段。V4.1 Flash（调用名 `deepseek-flash`，兼容映射的 `deepseek-v4-flash`、`deepseek-chat`、`deepseek-reasoner`）空闲价默认为命中 ¥0.02/M、未命中 ¥1/M、输出 ¥4/M，高峰价默认为 ¥0.04/M、¥2/M、¥8/M；V4 Pro 空闲价默认为 ¥0.15/M、¥4.5/M、¥13.5/M，高峰价默认为 ¥0.30/M、¥9/M、¥27/M。DeepSeek 自北京时间 2026-09-14 12:00 起把 `deepseek-v4-pro` 的请求路由到 V4.1 Flash 并按 Flash 价格计费，直到 V4.1 Pro 上线；该窗口内的 Pro 用量按 Flash 费率估算。GLM-5.3-Flash 的限时五折活动已于北京时间 2026-09-09 24:00 结束，默认值已改为刊例价命中 ¥0.23/M、未命中 ¥0.8/M、输出 ¥2.8/M。用户可以在 Settings → Model 手动调整这些默认值。每个 job 启动时锁定当时设置，ledger 保存实际采用的 `tier` 和费率快照，后续调价不回算历史。默认价格依据 DeepSeek 的[响应 usage 定义](https://api-docs.deepseek.com/api/create-chat-completion/)和[官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)。
 
-数据库启动修复会幂等纠正 2026-08-22 起误用 `deepseek-cny-2026-07-24` 的记录，以及曾使用 `deepseek-cny-2026-08-21` 高峰价计算的周末记录；其他历史快照不自动改写。用户之后手动调整价格也不会触发历史回算。
+数据库启动修复会幂等纠正 2026-08-22 起误用 `deepseek-cny-2026-07-24` 的记录、曾使用 `deepseek-cny-2026-08-21` 高峰价计算的周末记录、2026-09-10 12:00（北京时间）DeepSeek 降价后仍按旧快照计价的 Flash 记录，以及 2026-09-09 24:00（北京时间）GLM 五折结束后仍按促销快照计价的 GLM 记录；其他历史快照不自动改写。用户之后手动调整价格也不会触发历史回算。
 
 常见错误：
 

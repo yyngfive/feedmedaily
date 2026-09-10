@@ -22,13 +22,13 @@ FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载
 
 说明：
 
-- 分类模型目前固定提供 `DeepSeek V4 Flash (deepseek-v4-flash)`、`GLM-5.3-Flash (glm-5.3-flash)`、`Qwen3.8-Flash (qwen3.8-flash)`、`MiMo-V2.5 (mimo-v2.5)`；配置对应 key 即启用模型，默认模型菜单只显示已可用的模型，每个 sync/reclassify job 只使用入队时的默认模型。
+- 分类模型目前固定提供 `DeepSeek V4.1 Flash (deepseek-flash)`、`GLM-5.3-Flash (glm-5.3-flash)`、`Qwen3.8-Flash (qwen3.8-flash)`、`MiMo-V2.5 (mimo-v2.5)`；配置对应 key 即启用模型，默认模型菜单只显示已可用的模型，每个 sync/reclassify job 只使用入队时的默认模型。DeepSeek 已下线旧的 `deepseek-v4-flash` 调用名，旧配置会自动指向同一模型继续使用。
 
 ### 模型设置
 
 分类模型均使用各供应商官方的 OpenAI 兼容 API。在 `Settings → Model`（或首次引导）中录入对应 API Key 即可启用对应模型；源码模式下也可以通过 `.env` 中的 `SCIRSS_DEEPSEEK_API_KEY`、`SCIRSS_GLM_API_KEY`、`QWEN_API_KEY`、`MIMO_API_KEY` 提供。各模型 API Key 的获取方式：
 
-#### DeepSeek V4 Flash
+#### DeepSeek V4.1 Flash
 
 1. 在 [DeepSeek Platform](https://platform.deepseek.com/) 注册并登录
 2. 在 [API Keys](https://platform.deepseek.com/api_keys) 页面创建 API Key

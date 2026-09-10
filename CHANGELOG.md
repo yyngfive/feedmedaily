@@ -8,6 +8,15 @@ The latest released version is `0.6.1`. The next planned release is `0.6.2`, so 
 
 Changes since `0.6.1`:
 
+### Changed
+
+- Switched the DeepSeek classifier entry to DeepSeek V4.1 Flash and to DeepSeek's current call name `deepseek-flash`. DeepSeek retired the `deepseek-v4-flash` call name on 2026-09-10 and now serves the V4.1 Flash model behind the new one, so saved selections, `.env` files, and structured settings updates that still name `deepseek-v4-flash`, `deepseek-v4.1-flash`, or the `deepseek-v4.1-flash-expires-on-0910` beta keep resolving to the same model instead of being dropped. Classifier requests, connection tests, and thinking controls keep the same request shape and behavior; verified against the live API in both thinking-disabled and thinking-enabled modes.
+- Updated the default token pricing to the providers' current CNY rate cards. DeepSeek cut Flash prices at 12:00 Beijing on 2026-09-10 (off-peak cache hit `0.02`, cache miss `1`, output `4` CNY per 1M tokens, with peak at double), and Zhipu's GLM-5.3-Flash limited-time 50% promotion ended at 24:00 Beijing on 2026-09-09 (now cache hit `0.23`, input `0.8`, output `2.8`). DeepSeek also routes `deepseek-v4-pro` requests to V4.1 Flash at Flash pricing from 12:00 Beijing on 2026-09-14 until V4.1 Pro ships, and Profile-model estimates follow that routing.
+
+### Fixed
+
+- Repriced usage-ledger rows that were recorded with a price snapshot a later official price change replaced: DeepSeek Flash rows completed at or after the 2026-09-10 cutover and GLM-5.3-Flash rows completed after the 2026-09-09 promotion ended now carry the current default rates instead of the superseded ones. The repair runs idempotently at startup alongside the existing legacy-snapshot repairs, and rows recorded while their snapshot was still current keep their historical estimate.
+
 ## 0.6.1 (2026-09-08)
 
 Changes since `0.6.0`:

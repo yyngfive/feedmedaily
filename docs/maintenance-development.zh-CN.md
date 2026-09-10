@@ -146,7 +146,7 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 
 `.env.example` 是推荐配置模板，配置变更时应与 README 和设置 UI 同步。主要配置组：
 
-- 分类器模型：固定目录包含 `deepseek-v4-flash`、`glm-5.3-flash`、`qwen3.8-flash` 和 `mimo-v2.5`；UI 以已配置 key 推导启用集合和默认模型候选。batch size 为 `SCIRSS_CLASSIFIER_BATCH_SIZE`（默认 `5`），`SCIRSS_CLASSIFIER_THINKING` 在高级设置中控制最低思考档。GLM 始终为 low；DeepSeek/Qwen 开启时为 low；MiMo 开启时为其 Chat API 的 enabled。DeepSeek/MiMo 开启时使用至少 4096 completion tokens。
+- 分类器模型：固定目录包含 `deepseek-flash`、`glm-5.3-flash`、`qwen3.8-flash` 和 `mimo-v2.5`；UI 以已配置 key 推导启用集合和默认模型候选。batch size 为 `SCIRSS_CLASSIFIER_BATCH_SIZE`（默认 `5`），`SCIRSS_CLASSIFIER_THINKING` 在高级设置中控制最低思考档。GLM 始终为 low；DeepSeek/Qwen 开启时为 low；MiMo 开启时为其 Chat API 的 enabled。DeepSeek/MiMo 开启时使用至少 4096 completion tokens。
 - 旧分类变量 `SCIRSS_CLASSIFIER_API_KEY/BASE_URL/MODEL/THINKING` 仅用于兼容迁移；首次在 UI 保存结构化模型设置时会迁移可控的本地值，系统环境覆盖仍优先且显示 warning。
 - Profile 模型：`SCIRSS_PROFILE_API_KEY`、`SCIRSS_PROFILE_BASE_URL`、`SCIRSS_PROFILE_MODEL`、`SCIRSS_PROFILE_THINKING`
 - DeepSeek 计价：Settings → Model 维护 Flash/Pro 的缓存命中、缓存未命中和输出峰谷单价，对应 `SCIRSS_DEEPSEEK_*_CNY_PER_MILLION` 配置；默认值与当前官方人民币价格一致

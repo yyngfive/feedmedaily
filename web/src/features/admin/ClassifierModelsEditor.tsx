@@ -1,6 +1,7 @@
 import {Button} from "@heroui/react";
 import React from "react";
 
+import {DEEPSEEK_CLASSIFIER_MODEL_ID} from "../../shared/classifierModels";
 import {TextInputField, CheckboxRow} from "../../shared/components/FormFields";
 import {SelectField} from "../../shared/components/SelectField";
 import {StatusBanner} from "../../shared/components/StatusBanner";
@@ -94,8 +95,8 @@ export function ClassifierModelsEditor({
       ? draft.defaultModelId
       : enabledModelIds[0] ?? "";
     let reuseDeepSeekKeyForProfile = draft.reuseDeepSeekKeyForProfile;
-    const deepSeek = models.models.find((model) => model.id === "deepseek-v4-flash");
-    if (modelID === "deepseek-v4-flash" && !profileConfigured && enabledModelIds.includes(modelID)) {
+    const deepSeek = models.models.find((model) => model.id === DEEPSEEK_CLASSIFIER_MODEL_ID);
+    if (modelID === DEEPSEEK_CLASSIFIER_MODEL_ID && !profileConfigured && enabledModelIds.includes(modelID)) {
       // Once a newly entered DeepSeek key becomes available, opt into the
       // one-time Profile reuse by default. Removing an unsaved key disables
       // the option again; an explicit user uncheck remains respected while
@@ -180,7 +181,7 @@ export function ClassifierModelsEditor({
       {showReuse ? (
         <CheckboxRow
           checked={draft.reuseDeepSeekKeyForProfile}
-          disabled={!models.models.some((model) => model.id === "deepseek-v4-flash" && enabledSet.has(model.id) && (model.configured || Boolean(draft.credentials[model.id]?.value))) || profileConfigured}
+          disabled={!models.models.some((model) => model.id === DEEPSEEK_CLASSIFIER_MODEL_ID && enabledSet.has(model.id) && (model.configured || Boolean(draft.credentials[model.id]?.value))) || profileConfigured}
           onChange={(checked) => {
             reuseDeepSeekTouchedRef.current = true;
             onChange({...draft, reuseDeepSeekKeyForProfile: checked});

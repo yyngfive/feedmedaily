@@ -2,6 +2,7 @@ import {Button, Card, Spinner} from "@heroui/react";
 import React from "react";
 
 import {statusMessage, toProfileRule} from "../../app/utils";
+import {DEEPSEEK_CLASSIFIER_MODEL_ID} from "../../shared/classifierModels";
 import type {
   ClassifierModelsResponse,
   ClassificationProfile,
@@ -493,15 +494,15 @@ export function Onboarding({
   React.useEffect(() => {
     const next = createClassifierModelsDraft(classifierModels);
     next.reuseDeepSeekKeyForProfile = !profileApiKeyField?.configured &&
-      next.enabledModelIds.includes("deepseek-v4-flash") &&
-      Boolean(classifierModels.models.find((model) => model.id === "deepseek-v4-flash")?.configured);
+      next.enabledModelIds.includes(DEEPSEEK_CLASSIFIER_MODEL_ID) &&
+      Boolean(classifierModels.models.find((model) => model.id === DEEPSEEK_CLASSIFIER_MODEL_ID)?.configured);
     setClassifierDraft(next);
   }, [classifierModels, profileApiKeyField?.configured]);
 
   const profileReady = Boolean(profileApiKey.trim()) || Boolean(profileApiKeyField?.configured);
-  const deepSeekModel = classifierModels.models.find((model) => model.id === "deepseek-v4-flash");
-  const deepSeekReady = classifierDraft.enabledModelIds.includes("deepseek-v4-flash") &&
-    (Boolean(deepSeekModel?.configured) || Boolean(classifierDraft.credentials["deepseek-v4-flash"]?.value));
+  const deepSeekModel = classifierModels.models.find((model) => model.id === DEEPSEEK_CLASSIFIER_MODEL_ID);
+  const deepSeekReady = classifierDraft.enabledModelIds.includes(DEEPSEEK_CLASSIFIER_MODEL_ID) &&
+    (Boolean(deepSeekModel?.configured) || Boolean(classifierDraft.credentials[DEEPSEEK_CLASSIFIER_MODEL_ID]?.value));
   const classifierSelectionValid = classifierDraft.enabledModelIds.length > 0 && classifierDraft.enabledModelIds.includes(classifierDraft.defaultModelId);
   const classifierKeysReady = classifierModelsDraftHasRequiredKeys(classifierDraft, classifierModels);
   const canGenerate = classifierSelectionValid && classifierKeysReady && Boolean(interestDescription.trim()) && (profileReady || (classifierDraft.reuseDeepSeekKeyForProfile && deepSeekReady));

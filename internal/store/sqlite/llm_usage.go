@@ -27,7 +27,8 @@ type LLMUsageRecord struct {
 	CompletedAt           time.Time                   `json:"completed_at"`
 }
 
-var legacyDeepSeekPricingRepairSince = time.Date(2026, 8, 21, 16, 0, 0, 0, time.UTC)
+// chinaStandardTime matches the provider billing timezone used for peak hours.
+var chinaStandardTime = time.FixedZone("CST", 8*60*60)
 
 func repairIncompleteCacheBreakdownPricing(db *sql.DB) error {
 	rows, err := db.Query(`
@@ -92,54 +93,97 @@ WHERE job_id = ? AND pricing_status = 'unavailable'
 	return nil
 }
 
-func repairLegacyDeepSeekPricing(db *sql.DB) error {
+// stalePricingRule describes a default price snapshot that a later official price
+// change replaced. Usage rows that were priced with that snapshot after the change
+// happened are repriced with the current default rates; rows recorded while the
+// snapshot was still current keep their historical estimate.
+type stalePricingRule struct {
+	snapshot string
+	since    time.Time
+	// peakWeekendOnly limits the rule to rows whose recorded tier was peak on a
+	// weekend, the only rows one superseded snapshot mispriced.
+	peakWeekendOnly bool
+}
+
+var stalePricingRules = []stalePricingRule{
+	// The 2026-07-24 snapshot priced every request at off-peak rates, before the
+	// weekday peak/off-peak model arrived with the 2026-08-21 snapshot.
+	{snapshot: "deepseek-cny-2026-07-24", since: time.Date(2026, 8, 21, 16, 0, 0, 0, time.UTC)},
+	// The 2026-08-21 snapshot charged weekend peak hours at weekday peak rates.
+	{snapshot: "deepseek-cny-2026-08-21", since: time.Date(2026, 8, 21, 16, 0, 0, 0, time.UTC), peakWeekendOnly: true},
+	// DeepSeek cut Flash prices at 12:00 Beijing on 2026-09-10.
+	{snapshot: "deepseek-cny-2026-08-23", since: time.Date(2026, 9, 10, 4, 0, 0, 0, time.UTC)},
+	// Zhipu's GLM-5.3-Flash promotional rates ended at 24:00 Beijing on 2026-09-09.
+	{snapshot: "zhipu-glm-5.3-flash-cny-2026-08-28-promo", since: time.Date(2026, 9, 9, 16, 0, 0, 0, time.UTC)},
+}
+
+// repairSupersededPricing reprices only the rows whose stored snapshot is known to
+// have been superseded after they were written. Manually saved prices and every
+// other historical row are left untouched.
+func repairSupersededPricing(db *sql.DB) error {
+	conditions := make([]string, 0, len(stalePricingRules))
+	arguments := make([]any, 0, len(stalePricingRules)*2)
+	for _, rule := range stalePricingRules {
+		conditions = append(conditions, `(pricing_json LIKE ? AND completed_at >= ?)`)
+		arguments = append(arguments, "%"+rule.snapshot+"%", rule.since.Format(time.RFC3339Nano))
+	}
 	rows, err := db.Query(`
 SELECT job_id, model, request_count, prompt_tokens,
        prompt_cache_hit_tokens, prompt_cache_miss_tokens, completion_tokens, pricing_json, completed_at
 FROM llm_usage_jobs
-WHERE (pricing_json LIKE '%deepseek-cny-2026-07-24%' AND completed_at >= ?)
-   OR (pricing_json LIKE '%deepseek-cny-2026-08-21%' AND pricing_json LIKE '%"tier":"peak"%')
+WHERE `+strings.Join(conditions, " OR ")+`
 ORDER BY completed_at
-`, legacyDeepSeekPricingRepairSince.Format(time.RFC3339Nano))
+`, arguments...)
 	if err != nil {
-		return fmt.Errorf("query legacy DeepSeek pricing: %w", err)
+		return fmt.Errorf("query superseded pricing: %w", err)
 	}
-	type legacyUsage struct {
+	type staleUsage struct {
 		jobID, model, pricingJSON, completedAt              string
 		requestCount                                        int
 		promptTokens, cacheHit, cacheMiss, completionTokens int64
 	}
-	legacy := []legacyUsage{}
+	stale := []staleUsage{}
 	for rows.Next() {
-		var item legacyUsage
+		var item staleUsage
 		if err := rows.Scan(&item.jobID, &item.model, &item.requestCount, &item.promptTokens, &item.cacheHit, &item.cacheMiss, &item.completionTokens, &item.pricingJSON, &item.completedAt); err != nil {
 			_ = rows.Close()
-			return fmt.Errorf("scan legacy DeepSeek pricing: %w", err)
+			return fmt.Errorf("scan superseded pricing: %w", err)
 		}
-		legacy = append(legacy, item)
+		stale = append(stale, item)
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return fmt.Errorf("iterate legacy DeepSeek pricing: %w", err)
+		return fmt.Errorf("iterate superseded pricing: %w", err)
 	}
 	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close legacy DeepSeek pricing rows: %w", err)
+		return fmt.Errorf("close superseded pricing rows: %w", err)
 	}
 
-	for _, item := range legacy {
+	for _, item := range stale {
 		completedAt, err := parseTime(item.completedAt)
 		if err != nil {
-			return fmt.Errorf("parse legacy DeepSeek completed_at: %w", err)
+			return fmt.Errorf("parse superseded pricing completed_at: %w", err)
 		}
-		if !strings.Contains(item.pricingJSON, "deepseek-cny-2026-07-24") {
-			weekday := completedAt.In(time.FixedZone("CST", 8*60*60)).Weekday()
+		rule, ok := matchingStalePricingRule(item.pricingJSON, completedAt)
+		if !ok {
+			continue
+		}
+		if rule.peakWeekendOnly {
+			weekday := completedAt.In(chinaStandardTime).Weekday()
 			if weekday != time.Saturday && weekday != time.Sunday {
 				continue
 			}
+			if !strings.Contains(item.pricingJSON, `"tier":"peak"`) {
+				continue
+			}
+		}
+		baseURL, ok := pricingRepairBaseURL(item.model)
+		if !ok {
+			continue
 		}
 		collector := llmusage.NewCollector()
 		collector.Record(llmusage.Event{
-			BaseURL: "https://api.deepseek.com", Model: item.model, OccurredAt: completedAt,
+			BaseURL: baseURL, Model: item.model, OccurredAt: completedAt,
 			Usage: llmusage.ResponseUsage{
 				PromptTokens: item.promptTokens, PromptCacheHitTokens: item.cacheHit,
 				PromptCacheMissTokens: item.cacheMiss, CompletionTokens: item.completionTokens,
@@ -153,17 +197,37 @@ ORDER BY completed_at
 		summary.RequestCount = item.requestCount
 		pricingJSON, err := json.Marshal(summary.Pricing)
 		if err != nil {
-			return fmt.Errorf("encode repaired DeepSeek pricing: %w", err)
+			return fmt.Errorf("encode repaired pricing: %w", err)
 		}
 		if _, err := db.Exec(`
 UPDATE llm_usage_jobs
 SET pricing_status = ?, pricing_json = ?, estimated_cost_nano_cny = ?, estimated_cost_cny = ?
 WHERE job_id = ?
 `, summary.PricingStatus, string(pricingJSON), summary.EstimatedCostNanoCNY, summary.EstimatedCostCNY, item.jobID); err != nil {
-			return fmt.Errorf("repair DeepSeek pricing for job %s: %w", item.jobID, err)
+			return fmt.Errorf("repair pricing for job %s: %w", item.jobID, err)
 		}
 	}
 	return nil
+}
+
+func matchingStalePricingRule(pricingJSON string, completedAt time.Time) (stalePricingRule, bool) {
+	for _, rule := range stalePricingRules {
+		if strings.Contains(pricingJSON, rule.snapshot) && !completedAt.Before(rule.since) {
+			return rule, true
+		}
+	}
+	return stalePricingRule{}, false
+}
+
+func pricingRepairBaseURL(model string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "glm-5.3-flash" {
+		return "https://open.bigmodel.cn/api/paas/v4", true
+	}
+	if strings.Contains(normalized, "deepseek") {
+		return "https://api.deepseek.com", true
+	}
+	return "", false
 }
 
 func (s *Store) SaveLLMUsage(jobID string, jobType string, status string, summary llmusage.Summary, completedAt time.Time) error {

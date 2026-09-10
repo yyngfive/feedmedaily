@@ -15,11 +15,11 @@ func TestClassifierModelsStructuredSourceConfigKeepsDisabledKeys(t *testing.T) {
 	deepSeekKey := "deepseek-test-key"
 	glmKey := "glm-test-key"
 	response, err := UpdateLocalSettingsWithClassifierModels(root, nil, ClassifierModelsUpdate{
-		EnabledModelIDs: []string{ClassifierModelDeepSeekV4Flash, ClassifierModelGLM53Flash},
+		EnabledModelIDs: []string{ClassifierModelDeepSeekFlash, ClassifierModelGLM53Flash},
 		DefaultModelID:  ClassifierModelGLM53Flash,
 		Credentials: map[string]SettingsConfigFieldUpdate{
-			ClassifierModelDeepSeekV4Flash: {Value: &deepSeekKey},
-			ClassifierModelGLM53Flash:      {Value: &glmKey},
+			ClassifierModelDeepSeekFlash: {Value: &deepSeekKey},
+			ClassifierModelGLM53Flash:    {Value: &glmKey},
 		},
 	})
 	if err != nil {
@@ -47,13 +47,13 @@ func TestClassifierModelsStructuredSourceConfigKeepsDisabledKeys(t *testing.T) {
 	}
 
 	updated, err := UpdateLocalSettingsWithClassifierModels(root, nil, ClassifierModelsUpdate{
-		EnabledModelIDs: []string{ClassifierModelDeepSeekV4Flash},
+		EnabledModelIDs: []string{ClassifierModelDeepSeekFlash},
 		DefaultModelID:  ClassifierModelGLM53Flash,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.ClassifierModels.DefaultModelID != ClassifierModelDeepSeekV4Flash {
+	if updated.ClassifierModels.DefaultModelID != ClassifierModelDeepSeekFlash {
 		t.Fatalf("single enabled model should become default, got %q", updated.ClassifierModels.DefaultModelID)
 	}
 	settings, err = Load(root)
@@ -66,8 +66,8 @@ func TestClassifierModelsStructuredSourceConfigKeepsDisabledKeys(t *testing.T) {
 
 	clear := true
 	_, err = UpdateLocalSettingsWithClassifierModels(root, nil, ClassifierModelsUpdate{
-		EnabledModelIDs: []string{ClassifierModelDeepSeekV4Flash},
-		DefaultModelID:  ClassifierModelDeepSeekV4Flash,
+		EnabledModelIDs: []string{ClassifierModelDeepSeekFlash},
+		DefaultModelID:  ClassifierModelDeepSeekFlash,
 		Credentials: map[string]SettingsConfigFieldUpdate{
 			ClassifierModelGLM53Flash: {Clear: clear},
 		},
@@ -123,7 +123,7 @@ func TestClassifierModelConfigForIDAppliesGlobalThinkingPreference(t *testing.T)
 	for _, test := range []struct {
 		id, thinking, effort string
 	}{
-		{ClassifierModelDeepSeekV4Flash, "enabled", "low"},
+		{ClassifierModelDeepSeekFlash, "enabled", "low"},
 		{ClassifierModelQwen38Flash, "enabled", "low"},
 		{ClassifierModelMiMoV25, "enabled", ""},
 	} {
@@ -157,7 +157,7 @@ func TestClassifierModelsMigrateLegacyAndRespectEnvironmentOverride(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	model := settings.ClassifierModels.Models[ClassifierModelDeepSeekV4Flash]
+	model := settings.ClassifierModels.Models[ClassifierModelDeepSeekFlash]
 	if model.APIKey != "environment-deepseek" || model.APIKeySource != "environment" || !model.StoredLocally {
 		t.Fatalf("environment priority was not reported: %#v", model)
 	}
@@ -176,10 +176,10 @@ func TestClassifierModelsHonorCrossGenerationPriority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := settings.ClassifierModels.Models[ClassifierModelDeepSeekV4Flash].APIKey; got != "environment-legacy" {
+	if got := settings.ClassifierModels.Models[ClassifierModelDeepSeekFlash].APIKey; got != "environment-legacy" {
 		t.Fatalf("legacy environment key must outrank new local key, got %q", got)
 	}
-	if source := settings.ClassifierModels.Models[ClassifierModelDeepSeekV4Flash].APIKeySource; source != "environment" {
+	if source := settings.ClassifierModels.Models[ClassifierModelDeepSeekFlash].APIKeySource; source != "environment" {
 		t.Fatalf("legacy environment source = %q", source)
 	}
 
@@ -188,7 +188,7 @@ func TestClassifierModelsHonorCrossGenerationPriority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := settings.ClassifierModels.Models[ClassifierModelDeepSeekV4Flash].APIKey; got != "environment-new" {
+	if got := settings.ClassifierModels.Models[ClassifierModelDeepSeekFlash].APIKey; got != "environment-new" {
 		t.Fatalf("same-level new environment key must win, got %q", got)
 	}
 }
@@ -202,10 +202,10 @@ func TestClassifierModelsStructuredReleaseStoresSecretOutsideSettings(t *testing
 
 	key := "release-deepseek-key"
 	if _, err := UpdateLocalSettingsWithClassifierModels(root, nil, ClassifierModelsUpdate{
-		EnabledModelIDs: []string{ClassifierModelDeepSeekV4Flash},
-		DefaultModelID:  ClassifierModelDeepSeekV4Flash,
+		EnabledModelIDs: []string{ClassifierModelDeepSeekFlash},
+		DefaultModelID:  ClassifierModelDeepSeekFlash,
 		Credentials: map[string]SettingsConfigFieldUpdate{
-			ClassifierModelDeepSeekV4Flash: {Value: &key},
+			ClassifierModelDeepSeekFlash: {Value: &key},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -225,7 +225,7 @@ func TestClassifierModelsStructuredReleaseStoresSecretOutsideSettings(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.ClassifierModels.Models[ClassifierModelDeepSeekV4Flash].APIKey != key {
+	if settings.ClassifierModels.Models[ClassifierModelDeepSeekFlash].APIKey != key {
 		t.Fatalf("release key did not round-trip: %#v", settings.ClassifierModels)
 	}
 }
@@ -257,6 +257,32 @@ func TestClassifierModelRetiredOpenCodeSelection(t *testing.T) {
 	}
 }
 
+func TestClassifierModelsMigrateRetiredDeepSeekFlashNames(t *testing.T) {
+	for _, retired := range []string{"deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4.1-flash-expires-on-0910"} {
+		root := t.TempDir()
+		writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
+		writeConfigTestFile(t, filepath.Join(root, ".env"),
+			"SCIRSS_CLASSIFIER_ENABLED_MODELS="+retired+"\nSCIRSS_CLASSIFIER_DEFAULT_MODEL="+retired+"\nSCIRSS_DEEPSEEK_API_KEY=retained-key\n")
+
+		settings, err := Load(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(settings.ClassifierModels.EnabledModelIDs) != 1 || settings.ClassifierModels.EnabledModelIDs[0] != ClassifierModelDeepSeekFlash {
+			t.Fatalf("%s enabled models = %#v", retired, settings.ClassifierModels.EnabledModelIDs)
+		}
+		if settings.ClassifierModels.DefaultModelID != ClassifierModelDeepSeekFlash {
+			t.Fatalf("%s default = %q", retired, settings.ClassifierModels.DefaultModelID)
+		}
+		if key := settings.ClassifierModels.Models[ClassifierModelDeepSeekFlash].APIKey; key != "retained-key" {
+			t.Fatalf("%s migrated key = %q", retired, key)
+		}
+		if resolved := settings.EffectiveClassifierModel(); resolved.ID != ClassifierModelDeepSeekFlash || resolved.Provider != "deepseek" {
+			t.Fatalf("%s resolved model = %#v", retired, resolved)
+		}
+	}
+}
+
 func TestClassifierModelFreshDefaultsExcludeOpenCodeZen(t *testing.T) {
 	root := t.TempDir()
 	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
@@ -265,10 +291,10 @@ func TestClassifierModelFreshDefaultsExcludeOpenCodeZen(t *testing.T) {
 		t.Fatal(err)
 	}
 	enabled := strings.Join(settings.ClassifierModels.EnabledModelIDs, ",")
-	if enabled != ClassifierModelDeepSeekV4Flash {
+	if enabled != ClassifierModelDeepSeekFlash {
 		t.Fatalf("fresh defaults must only include DeepSeek, got %q", enabled)
 	}
-	if settings.ClassifierModels.DefaultModelID != ClassifierModelDeepSeekV4Flash {
+	if settings.ClassifierModels.DefaultModelID != ClassifierModelDeepSeekFlash {
 		t.Fatalf("fresh default must stay DeepSeek, got %q", settings.ClassifierModels.DefaultModelID)
 	}
 }

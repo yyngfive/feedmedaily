@@ -120,7 +120,7 @@ var Options = []Option{
 		Description: "Comma-separated IDs of the classifier models enabled for selection.",
 		Section:     "Managed classifier models",
 		InputType:   "text",
-		Default:     ClassifierModelDeepSeekV4Flash,
+		Default:     ClassifierModelDeepSeekFlash,
 	},
 	{
 		Key:         classifierDefaultModelKey,
@@ -128,12 +128,12 @@ var Options = []Option{
 		Description: "Model used by new sync and reclassification jobs.",
 		Section:     "Managed classifier models",
 		InputType:   "text",
-		Default:     ClassifierModelDeepSeekV4Flash,
+		Default:     ClassifierModelDeepSeekFlash,
 	},
 	{
 		Key:         classifierDeepSeekAPIKey,
 		Label:       "DeepSeek classifier API key",
-		Description: "Used for deepseek-v4-flash classification requests.",
+		Description: "Used for deepseek-flash classification requests.",
 		Section:     "Managed classifier models",
 		InputType:   "password",
 		Secret:      true,
@@ -184,7 +184,7 @@ var Options = []Option{
 		Description: "Model name used for paper classification.",
 		Section:     "Legacy classifier model",
 		InputType:   "text",
-		Default:     "deepseek-v4-flash",
+		Default:     ClassifierModelDeepSeekFlash,
 	},
 	{
 		Key:         "SCIRSS_CLASSIFIER_THINKING",
@@ -244,27 +244,27 @@ var Options = []Option{
 	},
 	{
 		Key: "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_HIT_CNY_PER_MILLION", Label: "Flash off-peak cache hit", Description: "CNY per million cached input tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "0.05",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "0.02",
 	},
 	{
 		Key: "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_CACHE_MISS_CNY_PER_MILLION", Label: "Flash off-peak cache miss", Description: "CNY per million uncached input tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "1.5",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "1",
 	},
 	{
 		Key: "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK_OUTPUT_CNY_PER_MILLION", Label: "Flash off-peak output", Description: "CNY per million output tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "4.5",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "4",
 	},
 	{
 		Key: "SCIRSS_DEEPSEEK_FLASH_PEAK_CACHE_HIT_CNY_PER_MILLION", Label: "Flash peak cache hit", Description: "CNY per million cached input tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "0.1",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "0.04",
 	},
 	{
 		Key: "SCIRSS_DEEPSEEK_FLASH_PEAK_CACHE_MISS_CNY_PER_MILLION", Label: "Flash peak cache miss", Description: "CNY per million uncached input tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "3",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "2",
 	},
 	{
 		Key: "SCIRSS_DEEPSEEK_FLASH_PEAK_OUTPUT_CNY_PER_MILLION", Label: "Flash peak output", Description: "CNY per million output tokens.",
-		Section: "DeepSeek pricing", InputType: "decimal", Default: "9",
+		Section: "DeepSeek pricing", InputType: "decimal", Default: "8",
 	},
 	{
 		Key: "SCIRSS_DEEPSEEK_PRO_OFF_PEAK_CACHE_HIT_CNY_PER_MILLION", Label: "Pro off-peak cache hit", Description: "CNY per million cached input tokens.",
@@ -291,16 +291,16 @@ var Options = []Option{
 		Section: "DeepSeek pricing", InputType: "decimal", Default: "27",
 	},
 	{
-		Key: "SCIRSS_GLM_53_FLASH_CACHE_HIT_CNY_PER_MILLION", Label: "GLM-5.3-Flash cache hit", Description: "Promotional CNY per million cached input tokens.",
-		Section: "GLM pricing", InputType: "decimal", Default: "0.115",
+		Key: "SCIRSS_GLM_53_FLASH_CACHE_HIT_CNY_PER_MILLION", Label: "GLM-5.3-Flash cache hit", Description: "CNY per million cached input tokens.",
+		Section: "GLM pricing", InputType: "decimal", Default: "0.23",
 	},
 	{
-		Key: "SCIRSS_GLM_53_FLASH_CACHE_MISS_CNY_PER_MILLION", Label: "GLM-5.3-Flash input", Description: "Promotional CNY per million uncached input tokens.",
-		Section: "GLM pricing", InputType: "decimal", Default: "0.4",
+		Key: "SCIRSS_GLM_53_FLASH_CACHE_MISS_CNY_PER_MILLION", Label: "GLM-5.3-Flash input", Description: "CNY per million uncached input tokens.",
+		Section: "GLM pricing", InputType: "decimal", Default: "0.8",
 	},
 	{
-		Key: "SCIRSS_GLM_53_FLASH_OUTPUT_CNY_PER_MILLION", Label: "GLM-5.3-Flash output", Description: "Promotional CNY per million output tokens.",
-		Section: "GLM pricing", InputType: "decimal", Default: "1.4",
+		Key: "SCIRSS_GLM_53_FLASH_OUTPUT_CNY_PER_MILLION", Label: "GLM-5.3-Flash output", Description: "CNY per million output tokens.",
+		Section: "GLM pricing", InputType: "decimal", Default: "2.8",
 	},
 	{Key: "SCIRSS_QWEN_38_FLASH_CACHE_HIT_CNY_PER_MILLION", Label: "Qwen3.8-Flash cache hit", Description: "CNY per million cached input tokens.", Section: "Qwen pricing", InputType: "decimal", Default: "0.1"},
 	{Key: "SCIRSS_QWEN_38_FLASH_CACHE_MISS_CNY_PER_MILLION", Label: "Qwen3.8-Flash input", Description: "CNY per million uncached input tokens.", Section: "Qwen pricing", InputType: "decimal", Default: "0.8"},
@@ -408,7 +408,7 @@ func Load(root string) (Settings, error) {
 	// Populate legacy fields first so unknown legacy models remain runnable during migration.
 	settings.ClassifierAPIKey = optionalValue(valueMap["SCIRSS_CLASSIFIER_API_KEY"])
 	settings.ClassifierBaseURL = valueOrDefault(valueMap["SCIRSS_CLASSIFIER_BASE_URL"], "https://api.deepseek.com")
-	settings.ClassifierModel = valueOrDefault(valueMap["SCIRSS_CLASSIFIER_MODEL"], ClassifierModelDeepSeekV4Flash)
+	settings.ClassifierModel = valueOrDefault(valueMap["SCIRSS_CLASSIFIER_MODEL"], ClassifierModelDeepSeekFlash)
 	settings.ClassifierThinking = valueOrDefault(strings.ToLower(strings.TrimSpace(valueMap["SCIRSS_CLASSIFIER_THINKING"])), "disabled")
 	settings.ClassifierModels = classifierModelsFromResolvedValues(values)
 	effectiveClassifier := settings.EffectiveClassifierModel()

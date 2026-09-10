@@ -13,7 +13,7 @@ func TestCollectorSummarizesOfficialDeepSeekFlashUsage(t *testing.T) {
 		Role:       "classifier",
 		Operation:  "classification",
 		BaseURL:    "https://api.deepseek.com",
-		Model:      "deepseek-v4-flash",
+		Model:      "deepseek-flash",
 		OccurredAt: time.Date(2026, 8, 22, 4, 36, 0, 0, time.UTC),
 		Usage: llmusage.ResponseUsage{
 			PromptTokens:          95_249,
@@ -28,17 +28,43 @@ func TestCollectorSummarizesOfficialDeepSeekFlashUsage(t *testing.T) {
 	if summary.RequestCount != 1 || summary.PromptCacheHitTokens != 52_608 || summary.PromptCacheMissTokens != 42_641 || summary.CompletionTokens != 12_547 {
 		t.Fatalf("unexpected summary: %#v", summary)
 	}
-	if summary.PricingStatus != "estimated" || summary.EstimatedCostNanoCNY == nil || *summary.EstimatedCostNanoCNY != 123_053_400 {
+	if summary.PricingStatus != "estimated" || summary.EstimatedCostNanoCNY == nil || *summary.EstimatedCostNanoCNY != 93_881_160 {
 		t.Fatalf("unexpected pricing: %#v", summary)
 	}
-	if summary.EstimatedCostCNY == nil || *summary.EstimatedCostCNY != "0.123053" {
+	if summary.EstimatedCostCNY == nil || *summary.EstimatedCostCNY != "0.093881" {
 		t.Fatalf("estimated cost display = %#v", summary.EstimatedCostCNY)
 	}
-	if len(summary.Models) != 1 || summary.Models[0] != "deepseek-v4-flash" {
+	if len(summary.Models) != 1 || summary.Models[0] != "deepseek-flash" {
 		t.Fatalf("models = %#v", summary.Models)
 	}
-	if len(summary.Pricing) != 1 || summary.Pricing[0].Snapshot != llmusage.PricingSnapshotDeepSeekCNY || summary.Pricing[0].Tier != "off_peak" || summary.Pricing[0].CacheHitNanoCNYPerToken != 50 {
+	if len(summary.Pricing) != 1 || summary.Pricing[0].Snapshot != llmusage.PricingSnapshotDeepSeekCNY || summary.Pricing[0].Tier != "off_peak" || summary.Pricing[0].CacheHitNanoCNYPerToken != 20 {
 		t.Fatalf("pricing snapshot = %#v", summary.Pricing)
+	}
+}
+
+func TestCollectorPricesRetiredDeepSeekFlashNamesAsFlash(t *testing.T) {
+	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4.1-flash-expires-on-0910"} {
+		t.Run(model, func(t *testing.T) {
+			collector := llmusage.NewCollector()
+			collector.Record(llmusage.Event{
+				BaseURL: "https://api.deepseek.com", Model: model,
+				// Monday 20:00 in Beijing, so the off-peak rates apply.
+				OccurredAt: time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC),
+				Usage: llmusage.ResponseUsage{
+					PromptTokens: 2_000_000, PromptCacheHitTokens: 1_000_000,
+					PromptCacheMissTokens: 1_000_000, CompletionTokens: 1_000_000,
+					CacheBreakdownPresent: true,
+				},
+			})
+
+			summary := collector.Summary()
+			if summary.EstimatedCostCNY == nil || *summary.EstimatedCostCNY != "5.020000" {
+				t.Fatalf("retired Flash name cost = %#v", summary.EstimatedCostCNY)
+			}
+			if len(summary.Pricing) != 1 || summary.Pricing[0].Snapshot != llmusage.PricingSnapshotDeepSeekCNY {
+				t.Fatalf("retired Flash name pricing = %#v", summary.Pricing)
+			}
+		})
 	}
 }
 
@@ -56,8 +82,8 @@ func TestCollectorUsesOffPeakPricingOnBeijingWeekends(t *testing.T) {
 	})
 
 	summary := collector.Summary()
-	if summary.EstimatedCostCNY == nil || *summary.EstimatedCostCNY != "0.038940" {
-		t.Fatalf("weekend cost = %#v, want 0.038940", summary.EstimatedCostCNY)
+	if summary.EstimatedCostCNY == nil || *summary.EstimatedCostCNY != "0.029800" {
+		t.Fatalf("weekend cost = %#v, want 0.029800", summary.EstimatedCostCNY)
 	}
 	if len(summary.Pricing) != 1 || summary.Pricing[0].Tier != llmusage.PricingTierOffPeak {
 		t.Fatalf("weekend pricing = %#v", summary.Pricing)
@@ -114,6 +140,36 @@ func TestCollectorUsesDeepSeekProPricingAndAggregatesRequests(t *testing.T) {
 	}
 }
 
+func TestCollectorPricesProAtFlashRatesAfterDeepSeekRetiresPro(t *testing.T) {
+	newCollector := func(occurredAt time.Time) *llmusage.Collector {
+		collector := llmusage.NewCollector()
+		collector.Record(llmusage.Event{
+			Role: "profile", Operation: "profile_generation", BaseURL: "https://api.deepseek.com",
+			Model: "deepseek-v4-pro", OccurredAt: occurredAt,
+			Usage: llmusage.ResponseUsage{
+				PromptTokens: 2_000_000, PromptCacheHitTokens: 1_000_000,
+				PromptCacheMissTokens: 1_000_000, CompletionTokens: 1_000_000,
+				CacheBreakdownPresent: true,
+			},
+		})
+		return collector
+	}
+
+	// Sunday 21:00 in Beijing, still billed on the Pro off-peak rates.
+	before := newCollector(time.Date(2026, 9, 13, 13, 0, 0, 0, time.UTC)).Summary()
+	if before.EstimatedCostCNY == nil || *before.EstimatedCostCNY != "18.150000" {
+		t.Fatalf("pro cost before the routing change = %#v", before.EstimatedCostCNY)
+	}
+	// Monday 21:00 in Beijing, after DeepSeek started routing Pro to V4.1 Flash.
+	after := newCollector(time.Date(2026, 9, 14, 13, 0, 0, 0, time.UTC)).Summary()
+	if after.EstimatedCostCNY == nil || *after.EstimatedCostCNY != "5.020000" {
+		t.Fatalf("pro cost after the routing change = %#v", after.EstimatedCostCNY)
+	}
+	if len(after.Pricing) != 1 || after.Pricing[0].Tier != llmusage.PricingTierOffPeak {
+		t.Fatalf("pro pricing after the routing change = %#v", after.Pricing)
+	}
+}
+
 func TestCollectorPricesOfficialGLM53FlashUsage(t *testing.T) {
 	collector := llmusage.NewCollector()
 	collector.Record(llmusage.Event{
@@ -126,7 +182,7 @@ func TestCollectorPricesOfficialGLM53FlashUsage(t *testing.T) {
 	})
 
 	summary := collector.Summary()
-	if summary.PricingStatus != "estimated" || summary.EstimatedCostCNY == nil || *summary.EstimatedCostCNY != "1.915000" {
+	if summary.PricingStatus != "estimated" || summary.EstimatedCostCNY == nil || *summary.EstimatedCostCNY != "3.830000" {
 		t.Fatalf("GLM estimate = %#v", summary)
 	}
 	if len(summary.Pricing) != 1 || summary.Pricing[0].Snapshot != llmusage.PricingSnapshotGLM53FlashCNY || summary.Pricing[0].Tier != "standard" {

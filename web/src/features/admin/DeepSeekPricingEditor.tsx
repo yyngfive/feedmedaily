@@ -9,11 +9,11 @@ export type DeepSeekPricingEditorHandle = {
 };
 
 const pricingRows = [
-  {model: "V4 Flash", tier: "Off-peak", prefix: "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK"},
-  {model: "V4 Flash", tier: "Peak", prefix: "SCIRSS_DEEPSEEK_FLASH_PEAK"},
+  {model: "V4.1 Flash", tier: "Off-peak", prefix: "SCIRSS_DEEPSEEK_FLASH_OFF_PEAK"},
+  {model: "V4.1 Flash", tier: "Peak", prefix: "SCIRSS_DEEPSEEK_FLASH_PEAK"},
   {model: "V4 Pro", tier: "Off-peak", prefix: "SCIRSS_DEEPSEEK_PRO_OFF_PEAK"},
   {model: "V4 Pro", tier: "Peak", prefix: "SCIRSS_DEEPSEEK_PRO_PEAK"},
-  {model: "GLM-5.3-Flash", tier: "Current promotion", prefix: "SCIRSS_GLM_53_FLASH"},
+  {model: "GLM-5.3-Flash", tier: "Standard", prefix: "SCIRSS_GLM_53_FLASH"},
   {model: "Qwen3.8-Flash", tier: "Standard", prefix: "SCIRSS_QWEN_38_FLASH"},
   {model: "MiMo-V2.5", tier: "Standard", prefix: "SCIRSS_MIMO_V25"},
 ] as const;
@@ -62,8 +62,9 @@ export const DeepSeekPricingEditor = React.forwardRef<DeepSeekPricingEditorHandl
         <div className="max-w-3xl space-y-1">
           <h3 className="text-sm font-semibold text-(--ink)">Token pricing</h3>
           <p className="text-sm leading-6 text-muted">
-            CNY per 1M tokens. DeepSeek uses Beijing-time peak/off-peak rates. GLM defaults to
-            its current promotion; Qwen and MiMo use mainland-China standard pay-as-you-go rates.
+            CNY per 1M tokens. DeepSeek uses Beijing-time peak/off-peak rates, and since 2026-09-14
+            it bills V4 Pro requests at Flash rates until V4.1 Pro ships. GLM, Qwen, and MiMo use
+            mainland-China standard pay-as-you-go rates.
           </p>
           <p className="text-xs leading-5 text-muted">
             Changes apply only to jobs started after saving. Existing usage records keep their saved price snapshots.

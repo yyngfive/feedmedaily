@@ -133,7 +133,7 @@ func OpenOrCreate(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := repairLegacyDeepSeekPricing(db); err != nil {
+	if err := repairSupersededPricing(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

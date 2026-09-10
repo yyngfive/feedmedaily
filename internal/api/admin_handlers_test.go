@@ -59,7 +59,7 @@ func TestAdminSyncJob(t *testing.T) {
 
 	jobRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(jobRecorder, httptest.NewRequest(http.MethodGet, "/api/admin/jobs/"+runPayload.Job.ID, nil))
-	if jobRecorder.Code != http.StatusOK || !contains(jobRecorder.Body.String(), `"status":"completed"`) || !contains(jobRecorder.Body.String(), `"fetched":2`) || !contains(jobRecorder.Body.String(), `"estimated_cost_cny":"0.000029"`) {
+	if jobRecorder.Code != http.StatusOK || !contains(jobRecorder.Body.String(), `"status":"completed"`) || !contains(jobRecorder.Body.String(), `"fetched":2`) || !contains(jobRecorder.Body.String(), `"estimated_cost_cny":"0.000022"`) {
 		t.Fatalf("job detail = %d %s", jobRecorder.Code, jobRecorder.Body.String())
 	}
 
