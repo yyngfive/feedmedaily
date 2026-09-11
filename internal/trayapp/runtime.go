@@ -29,6 +29,7 @@ var (
 	procShellExecuteW  = shell32Runtime.NewProc("ShellExecuteW")
 	lookPath           = exec.LookPath
 	ensureSourceBinary = appruntime.EnsureSourceBinary
+	processRunningCall = ProcessRunning
 )
 
 type RuntimeState struct {
@@ -353,14 +354,14 @@ func stopService(layout Layout) error {
 		_ = httpPostJSON(baseURL+"/api/app/exit", nil)
 		deadline := time.Now().Add(5 * time.Second)
 		for time.Now().Before(deadline) {
-			if !ProcessRunning(state.PID) {
+			if !processRunningCall(state.PID) {
 				return ClearRuntimeState(layout.RuntimeStatePath)
 			}
 			time.Sleep(250 * time.Millisecond)
 		}
 	}
 
-	if ProcessRunning(state.PID) {
+	if processRunningCall(state.PID) {
 		cmd := exec.Command("taskkill", "/PID", strconv.Itoa(state.PID), "/T", "/F")
 		cmd.SysProcAttr = hiddenSysProcAttr()
 		if err := cmd.Run(); err != nil {

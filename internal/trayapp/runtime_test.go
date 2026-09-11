@@ -133,3 +133,11 @@ func replaceEnsureSourceBinary(next func(string, string, string) (string, error)
 		ensureSourceBinary = previous
 	}
 }
+
+func replaceProcessRunningCall(next func(int) bool) func() {
+	previous := processRunningCall
+	processRunningCall = next
+	return func() {
+		processRunningCall = previous
+	}
+}
