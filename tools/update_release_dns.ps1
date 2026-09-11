@@ -249,14 +249,16 @@ $recordsResponse = Invoke-AliyunAlidns `
 
 $records = @()
 if ($recordsResponse.DomainRecords -and $recordsResponse.DomainRecords.Record) {
+  # Disabled historical records do not participate in DNS resolution and must
+  # not block updates to the single enabled record.
   $records = @($recordsResponse.DomainRecords.Record) | Where-Object {
-    $_.RR -eq $rr -and $_.Type -eq $recordType
+    $_.RR -eq $rr -and $_.Type -eq $recordType -and $_.Status -eq "ENABLE"
   }
 }
 
 if ($records.Count -gt 1) {
   $ids = ($records | ForEach-Object { $_.RecordId }) -join ", "
-  throw "Found multiple $recordType records for $fqdn. Clean duplicate records first. RecordIds: $ids"
+  throw "Found multiple enabled $recordType records for $fqdn. Clean duplicate records first. RecordIds: $ids"
 }
 
 if ($records.Count -eq 1) {
