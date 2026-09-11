@@ -108,9 +108,12 @@ func requestJobCancellation(id string) (jobInfo, bool, bool) {
 			}
 			current.CancelRequested = true
 			current.MessageKey = job.JobType + ".cancelling"
-			if job.JobType == "reclassify" {
+			switch job.JobType {
+			case "reclassify":
 				current.Message = "Stopping reclassification."
-			} else {
+			case "cleanup", "cleanup-review":
+				current.Message = "Stopping database cleanup."
+			default:
 				current.Message = "Stopping sync."
 			}
 		})
@@ -121,7 +124,7 @@ func requestJobCancellation(id string) (jobInfo, bool, bool) {
 
 type localJobFunc func(context.Context, jobruntime.ProgressFunc, *llmusage.Collector) (map[string]any, error)
 
-// pipelineWork serializes classification work: at most one sync or reclassify
+// pipelineWork serializes classification work: at most one sync, reclassify, or cleanup
 // job may execute at a time. Manual launches take it synchronously (TryLock)
 // and reject with 409; apply-launched reclassify jobs wait for it while queued.
 // It is a pointer so tests can replace a lock left held by a job parked in
@@ -316,6 +319,8 @@ func finishCancelledLocalJob(settings config.Settings, job *jobInfo, jobType str
 	message := "Job stopped."
 	if jobType == "reclassify" {
 		message = "Reclassification stopped."
+	} else if jobType == "cleanup" || jobType == "cleanup-review" {
+		message = "Database cleanup stopped."
 	}
 	summary := finalizeLLMUsage(settings, job.ID, jobType, "cancelled", usage, finished)
 	logJobEvent(settings.LogsDir, job, "info", "cancelled", jobType+".cancelled", message, "", result)
@@ -337,7 +342,7 @@ func finalizeLLMUsage(settings config.Settings, jobID string, jobType string, st
 	summary := collector.Summary()
 	if len(summary.Models) == 0 {
 		switch jobType {
-		case "sync", "reclassify", "model-test":
+		case "sync", "reclassify", "cleanup", "cleanup-review", "model-test":
 			summary.Models = []string{settings.EffectiveClassifierModelName()}
 		case "profile-bootstrap", "profile-proposal":
 			summary.Models = []string{settings.ProfileModel}
@@ -386,7 +391,7 @@ func isActiveJobStatus(status string) bool {
 }
 
 func isCancellableJobType(jobType string) bool {
-	return jobType == "sync" || jobType == "reclassify"
+	return jobType == "sync" || jobType == "reclassify" || jobType == "cleanup" || jobType == "cleanup-review"
 }
 
 func updateJob(id string, apply func(*jobInfo)) {
@@ -499,6 +504,28 @@ func summarizeResult(jobType string, result map[string]any) string {
 			message += fmt.Sprintf(" Feedback corrections fulfilled: %d of %d.", reconciliation.Fulfilled, reconciliation.Checked)
 		}
 		return message
+	case "cleanup":
+		if awaitingReview, ok := result["awaiting_review"].(bool); ok && awaitingReview {
+			return fmt.Sprintf(
+				"Cleanup paused for manual review. scanned=%v deleted_duplicates=%v repaired_doi=%v needs_review=%v; run cleanup again after review.",
+				result["scanned"], result["deleted_duplicates"], result["repaired_doi"], result["needs_review"],
+			)
+		}
+		return fmt.Sprintf(
+			"Cleanup completed. scanned=%v deleted_duplicates=%v repaired_doi=%v reclassified=%v needs_review=%v.",
+			result["scanned"], result["deleted_duplicates"], result["repaired_doi"], result["reclassified"], result["needs_review"],
+		)
+	case "cleanup-review":
+		if queued, ok := result["queued_for_classification"].(bool); ok && queued {
+			return fmt.Sprintf(
+				"Cleanup review completed. decision=%v deleted=%v doi_cleared=%v; article remains unclassified for the next cleanup batch.",
+				result["decision"], result["deleted"], result["doi_cleared"],
+			)
+		}
+		return fmt.Sprintf(
+			"Cleanup review completed. decision=%v deleted=%v doi_cleared=%v reclassified=%v.",
+			result["decision"], result["deleted"], result["doi_cleared"], result["reclassified"],
+		)
 	case "profile-bootstrap":
 		return fmt.Sprintf("Initial profile proposal completed. proposal_id=%v.", result["proposal_id"])
 	case "profile-proposal":

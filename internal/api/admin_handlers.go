@@ -64,7 +64,7 @@ func (s *Server) handleAdminRun(w http.ResponseWriter, r *http.Request) {
 		},
 	)
 	if !reserved {
-		writeError(w, http.StatusConflict, "A reclassification job is running. Wait for it to finish before syncing.")
+		writeError(w, http.StatusConflict, "A reclassification job is running, or a database cleanup job is running. Wait for it to finish before syncing.")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"job": job, "reused": reused})
@@ -186,7 +186,7 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 	}
 	releasePipeline, locked := tryLockPipeline()
 	if !locked {
-		writeError(w, http.StatusConflict, "A sync or reclassification job is already running. Wait for it to finish.")
+		writeError(w, http.StatusConflict, "A sync, reclassification, or database cleanup job is already running. Wait for it to finish.")
 		return
 	}
 	jobRun := reclassifyJobRunFunc(serverSettings, payload.Scope, func() ([]int64, error) {
@@ -326,7 +326,7 @@ func (s *Server) handleAdminJobCancel(w http.ResponseWriter, r *http.Request, jo
 		return
 	}
 	if !isCancellableJobType(job.JobType) {
-		writeError(w, http.StatusBadRequest, "Only sync and reclassify jobs can be stopped.")
+		writeError(w, http.StatusBadRequest, "Only sync, reclassify, cleanup, and cleanup-review jobs can be stopped.")
 		return
 	}
 	if !isActiveJobStatus(job.Status) {

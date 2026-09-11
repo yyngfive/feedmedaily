@@ -1,7 +1,7 @@
 import {Button} from "@heroui/react";
 import React from "react";
 
-import {type ReclassifyScope} from "../../api/client";
+import {type CleanupReviewDecision, type ReclassifyScope} from "../../api/client";
 import type {
   AppMeta,
   AppUpdate,
@@ -60,10 +60,12 @@ export type AdminPanelProps = {
   onDeleteScheduler: () => Promise<void>;
   onGenerateProposal: () => void;
   onOpenVerificationInBrowser: (job: JobInfo) => void;
+  onCleanup: () => Promise<void> | void;
+  onCleanupReview: (reviewID: number, decision: CleanupReviewDecision) => Promise<void> | void;
   onReclassify: (scope: ReclassifyScope, limit?: number) => Promise<void> | void;
   onRejectProposal: (id: number) => void;
   onRunSync: (feedURLs?: string[]) => void;
-  onStopJob: (jobID: string, jobType: "sync" | "reclassify") => Promise<void> | void;
+  onStopJob: (jobID: string, jobType: "sync" | "reclassify" | "cleanup" | "cleanup-review") => Promise<void> | void;
   onSaveConfig: (fields: Record<string, SettingsConfigUpdate>, classifierModels?: ClassifierModelsUpdate) => Promise<void>;
   onTestClassifierModel: (modelID: string, apiKey?: string) => Promise<JobInfo>;
   onSaveFeeds: (feeds?: FeedSubscription[]) => Promise<boolean | void> | boolean | void;
@@ -193,6 +195,8 @@ export function AdminPanel(props: AdminPanelProps) {
               hasFeeds={props.hasFeeds}
               jobs={props.jobs}
               onOpenVerificationInBrowser={props.onOpenVerificationInBrowser}
+              onCleanup={props.onCleanup}
+              onCleanupReview={props.onCleanupReview}
               onReclassify={props.onReclassify}
               onRunSync={props.onRunSync}
               onStopJob={props.onStopJob}

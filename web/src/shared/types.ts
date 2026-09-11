@@ -379,6 +379,35 @@ export type JobInfo = {
   llm_usage?: LLMUsageSummary | null;
 };
 
+export type CleanupPaperSummary = {
+  id: number;
+  title: string;
+  url: string;
+  doi?: string | null;
+  journal?: string | null;
+  published_date?: string | null;
+  first_seen_at: string;
+  classified: boolean;
+};
+
+export type CleanupReview = {
+  id: number;
+  candidate: CleanupPaperSummary;
+  matched?: CleanupPaperSummary | null;
+  match_type: "title_duplicate" | "doi_conflict" | "doi_uncertain" | string;
+  reason: string;
+  suggested_action: "keep" | "delete" | "delete_match" | "clear_doi" | "clear_match_doi" | string;
+  state: "pending" | "kept" | "deleted" | "doi_cleared" | string;
+  decision?: "keep" | "delete" | "delete_match" | "clear_doi" | "clear_match_doi" | string | null;
+  created_at: string;
+  decided_at?: string | null;
+};
+
+export type CleanupStatus = {
+  unclassified_paper_count: number;
+  pending_review_count: number;
+};
+
 // 重分类后的 feedback 纠正对账：主题字段是后端解析好的展示 label。
 export type CorrectionStatus = {
   feedback_id: number;

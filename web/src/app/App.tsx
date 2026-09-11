@@ -95,6 +95,8 @@ export function App() {
         onStartVerification={(job) => void admin.handleStartVerification(job)}
         onOpenVerificationInBrowser={(job) => void admin.handleOpenVerificationInBrowser(job)}
         onSubmitVerificationXML={admin.handleSubmitVerificationXML}
+        onCleanup={admin.handleCleanup}
+        onCleanupReview={admin.handleCleanupReview}
         onApplyProposal={(id, selection) => void admin.handleApplyProposal(id, selection)}
         onRejectProposal={(id) => void admin.handleRejectProposal(id)}
         onRunSync={(feedURLs) => void admin.handleRunAdminJob("/api/admin/run", feedURLs)}

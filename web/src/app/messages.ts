@@ -1,5 +1,5 @@
 import type {StatusTone} from "../shared/components/StatusBanner";
-import type {JobInfo} from "../shared/types";
+import type {AppUpdate, JobInfo} from "../shared/types";
 
 export type UiMessage = {
   name: string;
@@ -30,6 +30,7 @@ const catalog = {
   "settings.config.load.failed": {text: "Could not load local settings.", tone: "danger"},
   "settings.config.save.failed": {text: "Could not save local settings.", tone: "danger"},
   "app.update.load.failed": {text: "Could not check for updates.", tone: "danger"},
+  "app.update.available": {text: "A new version is available.", tone: "warning"},
   "admin.hydration.partial": {
     text: "The paper list is ready, but some admin data did not finish loading.",
     tone: "warning",
@@ -56,6 +57,9 @@ const catalog = {
   "profile.current.save.succeeded": {text: "Classification profile saved.", tone: "success"},
   "job.started": {text: "Job started.", tone: "info"},
   "job.reclassify.started": {text: "Reclassification job started.", tone: "info"},
+  "cleanup.started": {text: "Database cleanup job started.", tone: "info"},
+  "cleanup.review.started": {text: "Cleanup review job started.", tone: "info"},
+  "cleanup.review.applied": {text: "Cleanup review decision applied.", tone: "success"},
   "job.verification.started": {text: "Opened the feed verification window.", tone: "info"},
   "job.verification.browser.started": {text: "Opened the protected feed in your browser.", tone: "info"},
   "job.verification.manual.accepted": {text: "Submitted protected feed XML.", tone: "info"},
@@ -69,6 +73,10 @@ const catalog = {
   "reclassify.cancel.requested": {text: "Stopping reclassification…", tone: "info"},
   "reclassify.cancelling": {text: "Stopping reclassification.", tone: "info"},
   "reclassify.cancelled": {text: "Reclassification stopped.", tone: "info"},
+  "cleanup.cancelling": {text: "Stopping database cleanup.", tone: "info"},
+  "cleanup.cancelled": {text: "Database cleanup stopped.", tone: "info"},
+  "cleanup-review.cancelling": {text: "Stopping database cleanup review.", tone: "info"},
+  "cleanup-review.cancelled": {text: "Database cleanup review stopped.", tone: "info"},
   "pipeline.feeds.fetching": {text: "Fetching RSS feeds.", tone: "info"},
   "pipeline.metadata.enriching": {text: "Getting metadata.", tone: "info"},
   "pipeline.classifier.classifying": {text: "Classifying papers.", tone: "info"},
@@ -102,6 +110,16 @@ export function createUiMessage(
     createdAt: Date.now(),
     ttlMs: MESSAGE_TTL_MS,
   };
+}
+
+export function createAppUpdateMessage(update: Pick<AppUpdate, "has_update" | "latest_version">): UiMessage | null {
+  const latestVersion = update.latest_version?.trim();
+  if (!update.has_update || !latestVersion) return null;
+  const message = createUiMessage("app.update.available", {
+    text: `Version ${latestVersion} is available. Open Settings → App to download it.`,
+    tone: "warning",
+  });
+  return {...message, ttlMs: STICKY_TTL_MS};
 }
 
 export function messageFromJob(job: JobInfo): UiMessage {

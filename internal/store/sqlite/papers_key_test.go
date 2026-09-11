@@ -70,4 +70,11 @@ func TestUpsertPaperWithKeyKeepsOriginalRow(t *testing.T) {
 	if cleared.DOI != nil {
 		t.Fatalf("expected cleared doi, got %#v", cleared.DOI)
 	}
+	clearedKey, err := s.StoredPaperKey(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clearedKey != "url:https://example.com/article" {
+		t.Fatalf("expected URL paper key after clearing DOI, got %q", clearedKey)
+	}
 }

@@ -54,20 +54,22 @@ const (
 )
 
 var (
-	openExternalTargetFunc                                                                                           = appruntime.OpenExternalTarget
-	lookupUpdateTXTFunc                                                                                              = net.LookupTXT
-	selectReclassifyPaperIDsFunc                                                                                     = jobruntime.SelectPaperIDsForScope
-	reclassifyPaperIDsContextFunc                                                                                    = jobruntime.ReclassifyPaperIDsContext
-	assignTopicsPaperIDsContextFunc                                                                                  = jobruntime.AssignTopicsPaperIDsContext
-	countTopicBackfillPapersFunc                                                                                     = jobruntime.CountTopicBackfillPapers
-	rebuildLatestReportFunc                                                                                          = jobruntime.RebuildLatestReport
-	runSyncFunc                                                                                                      = jobruntime.RunSync
-	bootstrapProfileFunc                                                                                             = jobruntime.GenerateInitialProfileProposal
-	generateProfileProposalFunc                                                                                      = jobruntime.GenerateProfileProposal
-	listZoteroCollectionsFunc     func(config.Settings) (zoterosvc.CollectionsResponse, error)                       = zoterosvc.ListCollections
-	savePaperToZoteroFunc         func(config.Settings, store.Paper, store.Classification, *string) (*string, error) = zoterosvc.SavePaper
-	notifyTraySettingsChangedFunc                                                                                    = trayapp.NotifySettingsChanged
-	abstractImageHTTPClient                                                                                          = &http.Client{Timeout: 20 * time.Second}
+	openExternalTargetFunc                                                                                             = appruntime.OpenExternalTarget
+	lookupUpdateTXTFunc                                                                                                = net.LookupTXT
+	selectReclassifyPaperIDsFunc                                                                                       = jobruntime.SelectPaperIDsForScope
+	reclassifyPaperIDsContextFunc                                                                                      = jobruntime.ReclassifyPaperIDsContext
+	cleanupUnclassifiedContextFunc                                                                                     = jobruntime.CleanupUnclassifiedContext
+	cleanupReviewContextFunc                                                                                           = jobruntime.ResolveCleanupReviewContext
+	assignTopicsPaperIDsContextFunc                                                                                    = jobruntime.AssignTopicsPaperIDsContext
+	countTopicBackfillPapersFunc                                                                                       = jobruntime.CountTopicBackfillPapers
+	rebuildLatestReportFunc                                                                                            = jobruntime.RebuildLatestReport
+	runSyncFunc                                                                                                        = jobruntime.RunSync
+	bootstrapProfileFunc                                                                                               = jobruntime.GenerateInitialProfileProposal
+	generateProfileProposalFunc                                                                                        = jobruntime.GenerateProfileProposal
+	listZoteroCollectionsFunc       func(config.Settings) (zoterosvc.CollectionsResponse, error)                       = zoterosvc.ListCollections
+	savePaperToZoteroFunc           func(config.Settings, store.Paper, store.Classification, *string) (*string, error) = zoterosvc.SavePaper
+	notifyTraySettingsChangedFunc                                                                                      = trayapp.NotifySettingsChanged
+	abstractImageHTTPClient                                                                                            = &http.Client{Timeout: 20 * time.Second}
 )
 
 func NewServer(settings config.Settings, shutdown func()) *Server {
@@ -212,6 +214,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/zotero/save/", s.handleZoteroSave)
 	mux.HandleFunc("/api/admin/run", s.handleAdminRun)
 	mux.HandleFunc("/api/admin/reclassify", s.handleAdminReclassify)
+	mux.HandleFunc("/api/admin/cleanup/reviews/", s.handleAdminCleanupReviewByID)
+	mux.HandleFunc("/api/admin/cleanup/reviews", s.handleAdminCleanupReviews)
+	mux.HandleFunc("/api/admin/cleanup", s.handleAdminCleanup)
 	mux.HandleFunc("/api/admin/jobs/", s.handleAdminJobByID)
 	mux.HandleFunc("/api/admin/jobs", s.handleAdminJobs)
 	mux.HandleFunc("/api/admin/llm-usage", s.handleAdminLLMUsage)

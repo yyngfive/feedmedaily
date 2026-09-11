@@ -581,8 +581,16 @@ func (s *Store) StoredPaperKey(paperID int64) (string, error) {
 // ClearPaperDOI 清除指定论文的 DOI。enrichment 校验判定 DOI 与标题、日期都
 // 对不上时调用，链接回退到出版社 URL。
 func (s *Store) ClearPaperDOI(paperID int64) error {
-	if _, err := s.db.Exec(`UPDATE papers SET doi = NULL WHERE id = ?`, paperID); err != nil {
-		return fmt.Errorf("clear paper doi: %w", err)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin clear paper doi transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.clearPaperDOITx(tx, paperID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit clear paper doi: %w", err)
 	}
 	return nil
 }
