@@ -466,6 +466,8 @@ func stubAPIGlobals(t *testing.T) func() {
 	previousSavePaperToZotero := savePaperToZoteroFunc
 	previousSelectReclassify := selectReclassifyPaperIDsFunc
 	previousReclassifyContext := reclassifyPaperIDsContextFunc
+	previousCleanupUnclassifiedContext := cleanupUnclassifiedContextFunc
+	previousCleanupReviewContext := cleanupReviewContextFunc
 	previousRebuildLatestReport := rebuildLatestReportFunc
 	previousRunSync := runSyncFunc
 	previousTestClassifierConnection := testClassifierConnectionFunc
@@ -506,6 +508,8 @@ func stubAPIGlobals(t *testing.T) func() {
 		savePaperToZoteroFunc = previousSavePaperToZotero
 		selectReclassifyPaperIDsFunc = previousSelectReclassify
 		reclassifyPaperIDsContextFunc = previousReclassifyContext
+		cleanupUnclassifiedContextFunc = previousCleanupUnclassifiedContext
+		cleanupReviewContextFunc = previousCleanupReviewContext
 		rebuildLatestReportFunc = previousRebuildLatestReport
 		runSyncFunc = previousRunSync
 		testClassifierConnectionFunc = previousTestClassifierConnection

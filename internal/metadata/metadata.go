@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -36,6 +37,23 @@ const (
 	errNoMatchingResult = "no-matching-result"
 )
 
+// DOIVerdict is deliberately conservative: only a title and publication-date
+// match is verified; provider failures or incomplete records remain uncertain
+// and are sent to the cleanup review queue.
+type DOIVerdict string
+
+const (
+	DOIVerdictVerified  DOIVerdict = "verified"
+	DOIVerdictMismatch  DOIVerdict = "mismatch"
+	DOIVerdictUncertain DOIVerdict = "uncertain"
+)
+
+type DOIVerification struct {
+	Verdict  DOIVerdict `json:"verdict"`
+	Provider string     `json:"provider"`
+	Detail   string     `json:"detail"`
+}
+
 func NormalizeDOI(value string) string {
 	// 复刻 Python DOI 清洗逻辑，优先提取标准 DOI 片段。
 	clean := strings.TrimSpace(value)
@@ -59,6 +77,102 @@ func PaperKey(paper store.Paper) string {
 		return "url:" + strings.ToLower(strings.TrimSpace(paper.URL))
 	}
 	return "title:" + strings.ToLower(strings.TrimSpace(paper.Title))
+}
+
+// TitlesMatch and DatesMatch expose the same strict normalization used by
+// enrichment so the database cleanup does not grow a second identity policy.
+func TitlesMatch(left string, right string) bool {
+	return titlesMatch(left, right)
+}
+
+func DatesMatch(left string, right string) bool {
+	return datesMatch(left, right)
+}
+
+// ValidateDOI force-checks a stored DOI even when the paper already has
+// complete RSS metadata. Crossref is tried first because it is the DOI
+// registration source; OpenAlex is used as a fallback when Crossref cannot
+// provide a verdict. A provider's explicit title/date mismatch is enough to
+// repair the DOI, while missing data and network errors remain uncertain.
+func ValidateDOI(ctx context.Context, paper store.Paper) DOIVerification {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if NormalizeDOI(stringValue(paper.DOI)) == "" {
+		return DOIVerification{Verdict: DOIVerdictUncertain, Detail: "paper has no DOI"}
+	}
+	if err := ctx.Err(); err != nil {
+		return DOIVerification{Verdict: DOIVerdictUncertain, Detail: err.Error()}
+	}
+	crossref := validateDOIWithCrossref(ctx, paper)
+	if crossref.Verdict == DOIVerdictVerified || crossref.Verdict == DOIVerdictMismatch {
+		return crossref
+	}
+	if err := ctx.Err(); err != nil {
+		return DOIVerification{Verdict: DOIVerdictUncertain, Provider: crossref.Provider, Detail: err.Error()}
+	}
+	openAlex := validateDOIWithOpenAlex(ctx, paper)
+	if openAlex.Verdict != DOIVerdictUncertain {
+		return openAlex
+	}
+	detail := strings.TrimSpace(crossref.Detail)
+	if detail != "" && strings.TrimSpace(openAlex.Detail) != "" {
+		detail += "; " + strings.TrimSpace(openAlex.Detail)
+	} else if detail == "" {
+		detail = openAlex.Detail
+	}
+	return DOIVerification{Verdict: DOIVerdictUncertain, Provider: "crossref/openalex", Detail: detail}
+}
+
+func validateDOIWithCrossref(ctx context.Context, paper store.Paper) DOIVerification {
+	doi := NormalizeDOI(stringValue(paper.DOI))
+	body, ok, errText := httpGetContext(ctx, strings.TrimRight(crossrefBaseURL, "/")+"/works/"+doi)
+	if !ok {
+		return DOIVerification{Verdict: DOIVerdictUncertain, Provider: "crossref", Detail: "crossref: " + errText}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return DOIVerification{Verdict: DOIVerdictUncertain, Provider: "crossref", Detail: "crossref response was not valid JSON"}
+	}
+	message, ok := payload["message"].(map[string]any)
+	if !ok {
+		return DOIVerification{Verdict: DOIVerdictUncertain, Provider: "crossref", Detail: "crossref response had no record"}
+	}
+	return verdictForExternalRecord(paper, "crossref", crossrefRecordTitle(message), crossrefRecordDate(message))
+}
+
+func validateDOIWithOpenAlex(ctx context.Context, paper store.Paper) DOIVerification {
+	doi := NormalizeDOI(stringValue(paper.DOI))
+	body, ok, errText := httpGetContext(ctx, strings.TrimRight(openAlexBaseURL, "/")+"/works/https://doi.org/"+doi)
+	if !ok {
+		return DOIVerification{Verdict: DOIVerdictUncertain, Provider: "openalex", Detail: "openalex: " + errText}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return DOIVerification{Verdict: DOIVerdictUncertain, Provider: "openalex", Detail: "openalex response was not valid JSON"}
+	}
+	return verdictForExternalRecord(paper, "openalex", openAlexRecordTitle(payload), openAlexRecordDate(payload))
+}
+
+func verdictForExternalRecord(paper store.Paper, provider string, recordTitle string, recordDate string) DOIVerification {
+	if strings.TrimSpace(recordTitle) == "" {
+		return DOIVerification{Verdict: DOIVerdictUncertain, Provider: provider, Detail: provider + " record had no title"}
+	}
+	if !titlesMatch(paper.Title, recordTitle) {
+		return DOIVerification{Verdict: DOIVerdictMismatch, Provider: provider, Detail: provider + " title does not match the stored title"}
+	}
+	if strings.TrimSpace(stringValue(paper.PublishedDate)) == "" || strings.TrimSpace(recordDate) == "" {
+		return DOIVerification{Verdict: DOIVerdictUncertain, Provider: provider, Detail: provider + " record did not provide enough publication-date data"}
+	}
+	paperYear, _ := parseYearMonth(stringValue(paper.PublishedDate))
+	recordYear, _ := parseYearMonth(recordDate)
+	if paperYear == "" || recordYear == "" {
+		return DOIVerification{Verdict: DOIVerdictUncertain, Provider: provider, Detail: provider + " publication-date data could not be parsed"}
+	}
+	if !datesMatch(stringValue(paper.PublishedDate), recordDate) {
+		return DOIVerification{Verdict: DOIVerdictMismatch, Provider: provider, Detail: provider + " publication date does not match the stored date"}
+	}
+	return DOIVerification{Verdict: DOIVerdictVerified, Provider: provider, Detail: fmt.Sprintf("%s title and publication date match", provider)}
 }
 
 func AbstractFromOpenAlexInvertedIndex(index map[string][]int) string {
@@ -492,7 +606,14 @@ func sanitizeExternalAbstract(raw string) string {
 }
 
 func httpGet(url string) ([]byte, bool, string) {
-	request, err := http.NewRequest(http.MethodGet, url, nil)
+	return httpGetContext(context.Background(), url)
+}
+
+func httpGetContext(ctx context.Context, url string) ([]byte, bool, string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, false, err.Error()
 	}

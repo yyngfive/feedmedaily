@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +9,51 @@ import (
 
 	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 )
+
+func TestValidateDOISeparatesVerifiedMismatchAndUncertain(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/works/10.1000/verified":
+			_, _ = w.Write([]byte(`{"message":{"title":["RNA paper"],"issued":{"date-parts":[[2026,6]]}}}`))
+		case "/works/10.1000/mismatch":
+			_, _ = w.Write([]byte(`{"message":{"title":["A different paper"],"issued":{"date-parts":[[2026,6]]}}}`))
+		case "/works/10.1000/uncertain":
+			_, _ = w.Write([]byte(`{"message":{"title":["RNA paper"]}}`))
+		case "/works/https://doi.org/10.1000/uncertain":
+			_, _ = w.Write([]byte(`{"title":"RNA paper"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	previousOpenAlex := openAlexBaseURL
+	previousCrossref := crossrefBaseURL
+	defer func() {
+		openAlexBaseURL = previousOpenAlex
+		crossrefBaseURL = previousCrossref
+	}()
+	openAlexBaseURL = server.URL
+	crossrefBaseURL = server.URL
+
+	paper := store.Paper{Title: "RNA paper", DOI: stringPtr("10.1000/verified"), PublishedDate: stringPtr("2026-06-11")}
+	verified := ValidateDOI(context.Background(), paper)
+	if verified.Verdict != DOIVerdictVerified || verified.Provider != "crossref" {
+		t.Fatalf("unexpected verified result: %#v", verified)
+	}
+
+	paper.DOI = stringPtr("10.1000/mismatch")
+	mismatch := ValidateDOI(context.Background(), paper)
+	if mismatch.Verdict != DOIVerdictMismatch || mismatch.Provider != "crossref" {
+		t.Fatalf("unexpected mismatch result: %#v", mismatch)
+	}
+
+	paper.DOI = stringPtr("10.1000/uncertain")
+	uncertain := ValidateDOI(context.Background(), paper)
+	if uncertain.Verdict != DOIVerdictUncertain || !strings.Contains(uncertain.Detail, "enough publication-date") {
+		t.Fatalf("unexpected uncertain result: %#v", uncertain)
+	}
+}
 
 func TestNormalizeDOIAndPaperKey(t *testing.T) {
 	if got := NormalizeDOI(" DOI:10.1000/ABC. "); got != "10.1000/abc" {

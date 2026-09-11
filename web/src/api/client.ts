@@ -5,6 +5,8 @@ import type {
   AppUpdate,
   ClassifierModelsUpdate,
   ClassificationProfile,
+  CleanupReview,
+  CleanupStatus,
   CurrentProfileResponse,
   FeedSubscription,
   FeedbackRecord,
@@ -478,6 +480,56 @@ export async function launchReclassifyJob(input: {
     "Could not start the reclassification job",
   );
   return payload.job;
+}
+
+export type CleanupReviewDecision = "keep" | "delete" | "delete_match" | "clear_doi" | "clear_match_doi";
+
+export async function fetchCleanupStatus(): Promise<CleanupStatus> {
+  return localJSONRequest(
+    "/api/admin/cleanup",
+    undefined,
+    "load database cleanup status",
+    "Could not load database cleanup status",
+  );
+}
+
+export async function fetchCleanupReviews(state: "pending" | "all" = "pending"): Promise<CleanupReview[]> {
+  return localJSONRequest(
+    `/api/admin/cleanup/reviews?state=${state}`,
+    undefined,
+    "load database cleanup reviews",
+    "Could not load database cleanup reviews",
+  );
+}
+
+export async function launchCleanupJob(): Promise<JobInfo> {
+  const payload = await localJSONRequest<{job: JobInfo}>(
+    "/api/admin/cleanup",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({confirm: true}),
+    },
+    "start database cleanup",
+    "Could not start database cleanup",
+  );
+  return payload.job;
+}
+
+export async function resolveCleanupReview(
+  reviewID: number,
+  decision: CleanupReviewDecision,
+): Promise<{review?: CleanupReview; job?: JobInfo}> {
+  return localJSONRequest(
+    `/api/admin/cleanup/reviews/${reviewID}`,
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({decision, confirm: true}),
+    },
+    "apply database cleanup review decision",
+    "Could not apply database cleanup review decision",
+  );
 }
 
 export async function fetchJob(id: string): Promise<JobInfo> {

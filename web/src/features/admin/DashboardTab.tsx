@@ -2,10 +2,11 @@ import {Button, Chip, Spinner} from "@heroui/react";
 import React from "react";
 
 import {relevanceLabel} from "../../app/constants";
-import {fetchLLMUsage, fetchReclassifyOptions, type ReclassifyOptions, type ReclassifyScope} from "../../api/client";
+import {fetchLLMUsage, fetchReclassifyOptions, type CleanupReviewDecision, type ReclassifyOptions, type ReclassifyScope} from "../../api/client";
 import {CheckboxRow, TextAreaField, TextInputField} from "../../shared/components/FormFields";
 import type {FeedSubscription, JobInfo, LLMUsageRecord, LLMUsageSummary, ReclassifyReconciliation} from "../../shared/types";
 import {AdminDisclosure} from "./AdminDisclosure";
+import {UnclassifiedCleanupPanel} from "./UnclassifiedCleanupPanel";
 
 function formatJobTime(value?: string | null) {
   if (!value || Number.isNaN(Date.parse(value))) {
@@ -17,6 +18,10 @@ function formatJobTime(value?: string | null) {
 function jobResultNumber(job: JobInfo, key: string) {
   const value = job.result?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function jobResultBoolean(job: JobInfo, key: string) {
+  return job.result?.[key] === true ? "Yes" : "No";
 }
 
 function jobReconciliation(job: JobInfo): ReclassifyReconciliation | null {
@@ -92,6 +97,24 @@ function LatestJobPanel({feeds, job}: {feeds: FeedSubscription[]; job: JobInfo})
             <dt className="text-xs">Warnings</dt>
             <dd className="mt-1 font-semibold text-(--ink)">{job.warning_count ?? errors.length}</dd>
           </div>
+        </dl>
+      ) : null}
+      {job.job_type === "cleanup" ? (
+        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 border-y border-(--line) py-3 text-muted sm:grid-cols-5">
+          {(["scanned", "duplicate_groups", "deleted_duplicates", "repaired_doi", "reclassified", "needs_review"] as const).map((key) => (
+            <div key={key}>
+              <dt className="text-xs">{key.replaceAll("_", " ")}</dt>
+              <dd className="mt-1 font-semibold text-(--ink)">{jobResultNumber(job, key)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {job.job_type === "cleanup-review" ? (
+        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 border-y border-(--line) py-3 text-muted sm:grid-cols-4">
+          <div><dt className="text-xs">Decision</dt><dd className="mt-1 font-semibold text-(--ink)">{typeof job.result?.decision === "string" ? job.result.decision : "—"}</dd></div>
+          <div><dt className="text-xs">Deleted</dt><dd className="mt-1 font-semibold text-(--ink)">{jobResultBoolean(job, "deleted")}</dd></div>
+          <div><dt className="text-xs">DOI cleared</dt><dd className="mt-1 font-semibold text-(--ink)">{jobResultBoolean(job, "doi_cleared")}</dd></div>
+          <div><dt className="text-xs">Queued for next batch</dt><dd className="mt-1 font-semibold text-(--ink)">{jobResultBoolean(job, "queued_for_classification")}</dd></div>
         </dl>
       ) : null}
       {reconciliation && reconciliation.checked > 0 ? (
@@ -205,6 +228,8 @@ export function DashboardTab({
   hasFeeds,
   jobs,
   onOpenVerificationInBrowser,
+  onCleanup,
+  onCleanupReview,
   onReclassify,
   onRunSync,
   onStopJob,
@@ -217,9 +242,11 @@ export function DashboardTab({
   hasFeeds: boolean;
   jobs: JobInfo[];
   onOpenVerificationInBrowser: (job: JobInfo) => void;
+  onCleanup: () => Promise<void> | void;
+  onCleanupReview: (reviewID: number, decision: CleanupReviewDecision) => Promise<void> | void;
   onReclassify: (scope: ReclassifyScope, limit?: number) => Promise<void> | void;
   onRunSync: (feedURLs?: string[]) => void;
-  onStopJob: (jobID: string, jobType: "sync" | "reclassify") => Promise<void> | void;
+  onStopJob: (jobID: string, jobType: "sync" | "reclassify" | "cleanup" | "cleanup-review") => Promise<void> | void;
   onStartVerification: (job: JobInfo) => void;
   onSubmitVerificationXML: (job: JobInfo, xml: string) => Promise<void> | void;
   verificationSubmitting: boolean;
@@ -237,9 +264,15 @@ export function DashboardTab({
   const [reclassifyOptionsError, setReclassifyOptionsError] = React.useState<string | null>(null);
   const [reclassifying, setReclassifying] = React.useState(false);
   const [stoppingReclassify, setStoppingReclassify] = React.useState(false);
+  const [stoppingCleanup, setStoppingCleanup] = React.useState(false);
   const latestJob = jobs[0] ?? null;
   const activeSyncJob = jobs.find((job) => job.job_type === "sync" && ["queued", "running", "waiting_for_user"].includes(job.status)) ?? null;
   const activeReclassifyJob = jobs.find((job) => job.job_type === "reclassify" && ["queued", "running"].includes(job.status)) ?? null;
+  const activeCleanupJob = jobs.find((job) => (job.job_type === "cleanup" || job.job_type === "cleanup-review") && ["queued", "running"].includes(job.status)) ?? null;
+  const cleanupRefreshKey = `${latestJob?.id ?? ""}:${latestJob?.status ?? ""}:${latestJob?.finished_at ?? ""}|${jobs
+    .filter((job) => job.job_type === "cleanup" || job.job_type === "cleanup-review")
+    .map((job) => `${job.id}:${job.status}:${job.finished_at ?? ""}:${job.progress_current ?? ""}:${job.progress_percent ?? ""}`)
+    .join("|")}`;
   const verificationJob = jobs.find((job) => job.status === "waiting_for_user" && job.verification_required) ?? null;
   const savedSyncFeedURLs = React.useMemo(() => feeds.map((feed) => feed.url.trim()).filter(Boolean), [feeds]);
   const syncFeedMatches = React.useMemo(() => {
@@ -290,6 +323,13 @@ export function DashboardTab({
     if (!activeReclassifyJob || activeReclassifyJob.cancel_requested || stoppingReclassify) return;
     setStoppingReclassify(true);
     void Promise.resolve(onStopJob(activeReclassifyJob.id, "reclassify")).catch(() => undefined).finally(() => setStoppingReclassify(false));
+  };
+
+  const stopCleanup = () => {
+    if (!activeCleanupJob || activeCleanupJob.cancel_requested || stoppingCleanup) return;
+    setStoppingCleanup(true);
+    const jobType = activeCleanupJob.job_type === "cleanup-review" ? "cleanup-review" : "cleanup";
+    void Promise.resolve(onStopJob(activeCleanupJob.id, jobType)).catch(() => undefined).finally(() => setStoppingCleanup(false));
   };
 
   const parsedReclassifyLimit = Number.parseInt(reclassifyLimit, 10);
@@ -349,7 +389,7 @@ export function DashboardTab({
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-(--line) pb-4">
         <h2 className="text-xl font-semibold text-(--ink)">Dashboard</h2>
-        {activeSyncJob ? <Chip color="warning" size="sm" variant="soft">Sync · {activeSyncJob.status}</Chip> : <Chip color="success" size="sm" variant="soft">Ready</Chip>}
+        {activeSyncJob ? <Chip color="warning" size="sm" variant="soft">Sync · {activeSyncJob.status}</Chip> : activeReclassifyJob ? <Chip color="warning" size="sm" variant="soft">Reclassification · {activeReclassifyJob.status}</Chip> : activeCleanupJob ? <Chip color="warning" size="sm" variant="soft">Cleanup · {activeCleanupJob.status}</Chip> : <Chip color="success" size="sm" variant="soft">Ready</Chip>}
       </div>
 
       {verificationJob ? <VerificationPanel job={verificationJob} submitting={verificationSubmitting} submitError={verificationSubmitError} xml={verificationXML} onXMLChange={setVerificationXML} onOpenInBrowser={() => onOpenVerificationInBrowser(verificationJob)} onReopen={() => onStartVerification(verificationJob)} onSubmitXML={() => void onSubmitVerificationXML(verificationJob, verificationXML)} /> : null}
@@ -358,7 +398,7 @@ export function DashboardTab({
         <h3 className="text-sm font-semibold text-(--ink)">Sync</h3>
         {!hasFeeds ? <p className="mt-2 text-sm leading-6 text-muted">Add and save at least one RSS feed before running a manual sync.</p> : null}
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button isDisabled={!hasFeeds || Boolean(activeSyncJob) || Boolean(activeReclassifyJob)} size="sm" onPress={runSync}>{activeSyncJob ? "Sync running" : activeReclassifyJob ? "Reclassification running" : "Sync now"}</Button>
+          <Button isDisabled={!hasFeeds || Boolean(activeSyncJob) || Boolean(activeReclassifyJob) || Boolean(activeCleanupJob)} size="sm" onPress={runSync}>{activeSyncJob ? "Sync running" : activeReclassifyJob ? "Reclassification running" : activeCleanupJob ? "Cleanup running" : "Sync now"}</Button>
           {activeSyncJob ? <Button isDisabled={stoppingSync || Boolean(activeSyncJob.cancel_requested)} size="sm" variant="danger" onPress={stopSync}>{stoppingSync || activeSyncJob.cancel_requested ? "Stopping…" : "Stop sync"}</Button> : null}
         </div>
         {hasFeeds ? (
@@ -384,7 +424,6 @@ export function DashboardTab({
                 ["feedback", "Feedback papers"],
                 ["all", "All papers"],
                 ["count", "Specific count"],
-                ["unclassified", "Unclassified papers"],
                 ["topics", "Topic backfill"],
               ] as Array<[ReclassifyScope, string]>).map(([scope, label]) => (
                 <Button key={scope} aria-pressed={reclassifyScope === scope} size="sm" variant={reclassifyScope === scope ? "secondary" : "outline"} onPress={() => setReclassifyScope(scope)}>{label}</Button>
@@ -406,8 +445,8 @@ export function DashboardTab({
             {!reclassifyLimitValid ? <p className="text-sm text-rose-700">Enter a whole number from 0 to {reclassifyPaperCount ?? 0}.</p> : null}
             {reclassifyPreview ? <p className="text-sm leading-6 text-muted">{reclassifyPreview}</p> : null}
             <div className="flex flex-wrap gap-2">
-              <Button isDisabled={!reclassifyLimitValid || reclassifying || Boolean(activeReclassifyJob) || Boolean(activeSyncJob)} size="sm" onPress={confirmReclassify}>
-                {reclassifying || activeReclassifyJob ? "Reclassifying…" : activeSyncJob ? "Sync running" : "Confirm reclassification"}
+              <Button isDisabled={!reclassifyLimitValid || reclassifying || Boolean(activeReclassifyJob) || Boolean(activeSyncJob) || Boolean(activeCleanupJob)} size="sm" onPress={confirmReclassify}>
+                {reclassifying || activeReclassifyJob ? "Reclassifying…" : activeSyncJob ? "Sync running" : activeCleanupJob ? "Cleanup running" : "Confirm reclassification"}
               </Button>
               {activeReclassifyJob ? (
                 <Button isDisabled={stoppingReclassify || Boolean(activeReclassifyJob.cancel_requested)} size="sm" variant="danger" onPress={stopReclassify}>
@@ -429,6 +468,20 @@ export function DashboardTab({
             <div className="overflow-x-auto"><table className="w-full min-w-[45rem] text-left text-xs"><thead className="border-b border-(--line) text-muted"><tr><th className="py-2 pr-3 font-medium">Time</th><th className="py-2 pr-3 font-medium">Job</th><th className="py-2 pr-3 font-medium">Model</th><th className="py-2 pr-3 font-medium">Requests</th><th className="py-2 pr-3 font-medium">Tokens · hit / miss / output</th><th className="py-2 font-medium">Cost</th></tr></thead><tbody>{llmUsage.map((item) => <tr key={item.job_id} className="border-b border-(--line)/70 last:border-0"><td className="py-2 pr-3 whitespace-nowrap text-muted">{formatJobTime(item.completed_at)}</td><td className="py-2 pr-3 text-(--ink)">{item.job_type} · {item.status}</td><td className="py-2 pr-3 text-muted">{item.model || "Unknown"}</td><td className="py-2 pr-3 text-muted">{formatTokenCount(item.request_count)}</td><td className="py-2 pr-3 whitespace-nowrap text-muted">{formatTokenCount(item.prompt_cache_hit_tokens)} / {formatTokenCount(item.prompt_cache_miss_tokens)} / {formatTokenCount(item.completion_tokens)}</td><td className="py-2 whitespace-nowrap text-(--ink)">{usageCostLabel(item)}</td></tr>)}</tbody></table></div>
           )}
       </AdminDisclosure>
+
+      <UnclassifiedCleanupPanel
+        activeJob={activeCleanupJob}
+        onCleanup={onCleanup}
+        onCleanupReview={onCleanupReview}
+        refreshKey={cleanupRefreshKey}
+      />
+      {activeCleanupJob ? (
+        <div className="-mt-3 flex justify-end">
+          <Button isDisabled={stoppingCleanup || Boolean(activeCleanupJob.cancel_requested)} size="sm" variant="danger" onPress={stopCleanup}>
+            {stoppingCleanup || activeCleanupJob.cancel_requested ? "Stopping…" : "Stop cleanup"}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

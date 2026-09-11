@@ -120,12 +120,12 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 - Settings 保持右侧抽屉和 `Dashboard`、`Feeds`、`Profile`、`Model`、`App` 五个稳定顶层页面。
 - 桌面使用左侧导航，窄屏退化为横向标签；标题、导航和关闭按钮固定，仅右侧内容滚动。
 - Admin 负责 feed 编辑、手动任务、反馈、Profile proposal 和应用配置。
-- Dashboard 优先展示运行中任务、验证状态和主要 Sync；定向 Sync、Reclassify、用量等低频项渐进披露。Reclassify 作业完成后，Latest activity 面板展示 feedback 纠正对账：`已落实 n / 共 m` 汇总行 + 未落实清单的渐进披露（论文标题 + "纠正值 … ；当前值 …"，主题用后端解析好的 label）。
+- Dashboard 优先展示运行中任务、验证状态和主要 Sync；定向 Sync、Reclassify、用量等低频项渐进披露，Database cleanup 放在 Dashboard 最底部。Database cleanup 只保留一个 `Run cleanup` 入口，未分类数量以按钮旁文字显示，人工复核队列默认折叠且不提供 defer；标题重复和 DOI 冲突的两个条目在桌面宽度下并列显示、窄屏下再上下排列。标题重复复核显示 Item A/Item B，并提供“删除 Item A”“删除 Item B”“Keep current”三个方向，DOI 冲突复核只提供清除 Item A DOI、清除 Item B DOI 或保持两者不变，不得提供删除文章按钮；删除文章或清理 DOI 必须二次确认，复核卡片中的 DOI 应可直接跳转。Keep/clear-DOI 决策只完成清理并让文章留在未分类队列，不得立即调用分类器；只要仍有待复核项，cleanup 不得批量调用分类器。Reclassify 作业完成后，Latest activity 面板展示 feedback 纠正对账：`已落实 n / 共 m` 汇总行 + 未落实清单的渐进披露（论文标题 + "纠正值 … ；当前值 …"，主题用后端解析好的 label）。
 - Feeds 使用独立本地草稿；取消必须恢复已保存值，未保存修改不能污染阅读状态。
 - Profile 使用一个主要审阅文档；反馈队列位于下方作为次级区域。Profile 编辑态包含一个 Topics 章节：主题条支持新建、改名与删除（删除用 danger 样式），未被任何规则引用的主题在只读视图标注 `unused`。规则编辑保持多行文本形态：unrelated 规则沿用整体多行文本框（一行一条）；direct/indirect 规则因需按条打标，每条规则一个多行文本框，主题用单选下拉（每条规则最多归属一个主题，选项含"无主题"），Remove 与下拉同行靠右，不套边框盒子，unrelated 不提供打标入口。
 - Model 常显连接与默认模型，低频调优进入 Advanced，并使用一个统一保存动作；token 价格由后端内置且不可编辑。
 - Model Advanced 中的分类思考只提供全局启用/关闭选择；启用后由后端映射到各供应商最低档，GLM 的说明必须明确其始终为 low、不能关闭。
-- App 顶部常显 About、更新和运行信息；Zotero、Scheduled sync、Local app 使用相同的独立 Disclosure。
+- App 顶部常显 About、更新和运行信息；打开或刷新 Web UI 时后台自动强制检查更新，检测到新版本时使用顶栏现有消息栏提示，下载入口仍在 Settings → App；Zotero、Scheduled sync、Local app 使用相同的独立 Disclosure。
 - Zotero 使用 Web API 和应用内 collection picker，不依赖浏览器 connector。
 
 ### 6.3 Onboarding 与 Profile

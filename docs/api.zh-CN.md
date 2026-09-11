@@ -819,6 +819,7 @@ job result 典型字段：
 - `all`
 - `count`：按入库时间倒序选择指定数量
 - `unclassified`：选择尚无分类记录的文章，用于补跑被取消或失败的批次
+- `topics`：选择已有分类但没有有效主题的相关文章，仅补主题
 
 只有 `count` 使用 `limit`；合法范围为 0 到当前数据库文章总数。其他 scope 会忽略并归零 `limit`。
 
@@ -828,7 +829,7 @@ job result 典型字段：
 {"job": {"id":"...","job_type":"reclassify","status":"queued"}}
 ```
 
-reclassify 与 sync 共用 pipeline 互斥锁，同一时刻只允许一个分类任务执行。有 sync 或 reclassify 正在分类时启动返回 `409`；排队中的 reclassify（如 apply proposal 触发的 feedback 重分类）不算冲突，会等锁空闲后自动开始。
+reclassify 与 sync、cleanup 共用 pipeline 互斥锁，同一时刻只允许一个分类或数据库清理任务执行。有 sync、reclassify 或 cleanup 正在执行时启动返回 `409`；排队中的 reclassify（如 apply proposal 触发的 feedback 重分类）不算冲突，会等锁空闲后自动开始。
 
 常见错误：
 
@@ -836,6 +837,74 @@ reclassify 与 sync 共用 pipeline 互斥锁，同一时刻只允许一个分�
 - 409：sync 或 reclassify 正在执行分类工作。
 
 前端入口：`launchReclassifyJob(input)`。
+
+### `GET /api/admin/cleanup`
+
+用途：读取数据库清理入口的当前状态。
+
+成功响应：
+
+```json
+{
+  "unclassified_paper_count": 134,
+  "pending_review_count": 8
+}
+```
+
+字段分别表示尚无分类的文章数量和待人工确认数量。
+
+### `POST /api/admin/cleanup`
+
+用途：扫描全部未分类文章并执行安全清理；如果产生或仍存在待人工复核项，任务会在批量重分类前暂停。
+
+请求体必须明确确认：
+
+```json
+{"confirm":true}
+```
+
+处理规则：
+
+- 相同规范化 URL 或 DOI 且标题一致的重复组只自动删除未分类副本，优先保留已有分类的文章，否则保留最早入库的文章；feedback/Zotero 引用会迁移到保留文章。
+- 两个条目都存在 DOI、同时存在精确 URL/DOI 重复关系，但规范化标题仍不匹配时进入 DOI 冲突复核；像 `Inside Back Cover:` 这类规范化后仍能匹配的标题变体属于普通重复复核。DOI 冲突复核只允许清除 Item A 或 Item B 的 DOI，或保持两者不变，不提供删除文章操作。
+- Crossref/OpenAlex 明确证明标题或发布日期不一致时，保留文章、清除 DOI 并按文章 URL 重建 `paper_key`。
+- 只有标题相似、两个 DOI 与标题冲突、DOI 校验资料不足或外部服务失败的项目进入 `cleanup_reviews`，不会自动删除或分类。
+- 只要 `cleanup_reviews` 中仍有 `pending` 项，本次任务不会批量调用分类器；处理完复核项后再次调用本接口，才会分类剩余未分类文章。
+- 修改数据库前会在数据目录生成 `literature.sqlite.pre-cleanup-<timestamp>` 备份。
+
+成功响应：`{"job":{"id":"...","job_type":"cleanup","status":"queued"}}`。
+
+cleanup 与 sync/reclassify 共用 pipeline 互斥锁；任务可通过 cancel 接口停止，已完成的数据库清理和分类不会回滚。
+
+前端入口：`launchCleanupJob()`。
+
+### `GET /api/admin/cleanup/reviews?state=<state>`
+
+用途：读取人工复核队列。
+
+`state` 可选：`pending`（默认前端视图）或 `all`。返回 `CleanupReview[]`，每项包含候选文章、可选的匹配文章、匹配类型、原因、建议动作和审计状态。
+
+### `POST /api/admin/cleanup/reviews/{id}`
+
+用途：提交一项人工复核决定。
+
+请求体：
+
+```json
+{"decision":"keep","confirm":true}
+```
+
+`decision` 可选：
+
+- `keep`：保留文章并保持未分类，等待下一次 cleanup 批量分类
+- `delete`：标题重复复核中删除 Item A，保留 Item B；必须 `confirm: true`
+- `delete_match`：标题重复复核中删除 Item B，保留 Item A，等待下一次 cleanup 批量分类；必须 `confirm: true`
+- `clear_doi`：DOI 冲突复核中清除 Item A 的 DOI，或单条不确定 DOI 复核中清除当前 DOI；保持未分类；必须 `confirm: true`
+- `clear_match_doi`：DOI 冲突复核中清除 Item B 的 DOI，保持两篇文章并让 Item A 等待下一次 cleanup 批量分类；必须 `confirm: true`
+
+所有决定都作为可审计状态写入 `cleanup_reviews`，且通过可取消的 `cleanup-review` job 执行。成功响应返回该 job。旧数据库中的 `deferred` 记录会迁移为 `pending`，不再提供暂缓入口。
+
+前端入口：`resolveCleanupReview(reviewID, decision)`。
 
 ### `GET /api/admin/jobs`
 
@@ -863,9 +932,9 @@ LLM job 在完成或失败后包含可选 `llm_usage`：请求数、三类 token
 
 ### `POST /api/admin/jobs/{id}/cancel`
 
-用途：停止当前正在执行的 sync 或 reclassify job。停止请求会取消网络/LLM 请求和重试等待；如果 sync 正在等待受保护 feed 验证，也会关闭该次等待。已写入数据库的内容和已完成的分类批次不会回滚；取消的任务保留阶段性 result（fetched/inserted/updated/classified、warnings 等），Activity 面板据此显示已完成的数量与警告。
+用途：停止当前正在执行的 sync、reclassify 或 cleanup job。停止请求会取消网络/LLM 请求和重试等待；如果 sync 正在等待受保护 feed 验证，也会关闭该次等待。已写入数据库的内容、已完成的清理操作和分类批次不会回滚；取消的任务保留阶段性 result，Activity 面板据此显示已完成的数量与警告。
 
-仅 `sync` 与 `reclassify` 且状态为 `queued`、`running` 或 `waiting_for_user` 的任务可停止。成功接受停止请求返回 `202`：
+仅 `sync`、`reclassify`、`cleanup`、`cleanup-review` 且状态为 `queued`、`running` 或 `waiting_for_user` 的任务可停止。成功接受停止请求返回 `202`：
 
 ```json
 {"job":{"id":"...","job_type":"sync","status":"running","cancel_requested":true},"cancel_requested":true}

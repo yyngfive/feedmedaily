@@ -100,6 +100,20 @@ CREATE TABLE IF NOT EXISTS llm_usage_jobs (
   completed_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS cleanup_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_key TEXT NOT NULL UNIQUE,
+  candidate_paper_id INTEGER NOT NULL,
+  matched_paper_id INTEGER,
+  match_type TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  suggested_action TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  decision TEXT,
+  created_at TEXT NOT NULL,
+  decided_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_papers_first_seen_at ON papers(first_seen_at);
 CREATE INDEX IF NOT EXISTS idx_classifications_paper_id ON classifications(paper_id);
 CREATE INDEX IF NOT EXISTS idx_classifications_paper_id_classified_at ON classifications(paper_id, classified_at DESC, id DESC);
@@ -108,6 +122,8 @@ CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedback(created_at);
 CREATE INDEX IF NOT EXISTS idx_feedback_paper_id_state_created_at ON feedback(paper_id, state, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_profile_proposals_created_at ON profile_proposals(created_at);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_jobs_completed_at ON llm_usage_jobs(completed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cleanup_reviews_state_created_at ON cleanup_reviews(state, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_cleanup_reviews_candidate_paper_id ON cleanup_reviews(candidate_paper_id);
 `
 
 func OpenOrCreate(path string) (*Store, error) {
@@ -145,6 +161,26 @@ func OpenOrCreate(path string) (*Store, error) {
 }
 
 func ensureMutableSchema(db *sql.DB) error {
+	if _, err := db.Exec(`
+		UPDATE cleanup_reviews
+		SET state = ?
+		WHERE state = ?
+	`, CleanupReviewStatePending, CleanupReviewStateDeferred); err != nil && !isMissingSQLiteTable(err) {
+		return fmt.Errorf("migrate deferred cleanup reviews: %w", err)
+	}
+	if _, err := db.Exec(`
+		UPDATE cleanup_reviews
+		SET match_type = ?,
+			suggested_action = ?,
+			reason = ?
+		WHERE state = ?
+		  AND match_type = ?
+		  AND group_key LIKE 'title:%'
+	`, CleanupReviewMatchTitle, CleanupDecisionDelete,
+		"The normalized title matches another paper, but no exact URL or DOI match was found. Confirm whether this is a duplicate. The DOI is left unchanged until this title match is reviewed.",
+		CleanupReviewStatePending, CleanupReviewMatchDOIConflict); err != nil && !isMissingSQLiteTable(err) {
+		return fmt.Errorf("migrate legacy DOI-conflict title reviews: %w", err)
+	}
 	if err := ensureColumn(db, "profile_proposals", "base_profile_version", "INTEGER"); err != nil {
 		return err
 	}

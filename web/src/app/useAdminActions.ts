@@ -6,12 +6,14 @@ import {
   cancelAdminJob,
   deleteSchedulerSettings,
   exitApp,
+  launchCleanupJob,
   launchAdminJob,
   launchProfileProposalGeneration,
   launchReclassifyJob,
   openAppTarget,
   openFeedVerificationInBrowser,
   rejectProfileProposal,
+  resolveCleanupReview,
   saveCurrentProfile,
   saveFeedSubscriptions,
   saveSchedulerSettings,
@@ -20,8 +22,8 @@ import {
   submitFeedVerificationXML,
   testClassifierModel,
 } from "../api/client";
+import type {CleanupReviewDecision, ReclassifyScope} from "../api/client";
 import type {ClassifierModelsUpdate, ClassificationProfile, FeedSubscription, JobInfo, SettingsConfigUpdate} from "../shared/types";
-import type {ReclassifyScope} from "../api/client";
 import type {AppData} from "./useAppData";
 import type {AppState} from "./useAppState";
 
@@ -222,11 +224,14 @@ export function useAdminActions(state: AppState, data: AppData) {
     try { registerJob(await launchAdminJob(path, feedURLs?.length ? {feed_urls: feedURLs} : undefined)); pushMessage("job.started"); }
     catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not start the sync job."); }
   };
-  const handleStopJob = React.useCallback(async (jobID: string, jobType: "sync" | "reclassify") => {
+  const handleStopJob = React.useCallback(async (jobID: string, jobType: "sync" | "reclassify" | "cleanup" | "cleanup-review") => {
     try {
       const job = await cancelAdminJob(jobID);
       registerJob(job, false);
-      pushMessage(jobType === "reclassify" ? "reclassify.cancel.requested" : "sync.cancel.requested");
+      if (jobType === "reclassify") pushMessage("reclassify.cancel.requested");
+      else if (jobType === "cleanup-review") pushMessage("cleanup-review.cancelling");
+      else if (jobType === "cleanup") pushMessage("cleanup.cancelling");
+      else pushMessage("sync.cancel.requested");
     } catch (error) {
       pushErrorMessage("job.cancel.failed", error, "Could not stop the job.");
     }
@@ -256,6 +261,23 @@ export function useAdminActions(state: AppState, data: AppData) {
     try { registerJob(await launchReclassifyJob({scope, limit})); pushMessage("job.reclassify.started"); }
     catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not start the reclassification job."); }
   };
+  const handleCleanup = React.useCallback(async () => {
+    try { registerJob(await launchCleanupJob()); pushMessage("cleanup.started"); }
+    catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not start database cleanup."); }
+  }, [pushErrorMessage, pushMessage, registerJob]);
+  const handleCleanupReview = React.useCallback(async (reviewID: number, decision: CleanupReviewDecision) => {
+    try {
+      const response = await resolveCleanupReview(reviewID, decision);
+      if (response.job) {
+        registerJob(response.job);
+        pushMessage("cleanup.review.started");
+      } else {
+        pushMessage("cleanup.review.applied");
+      }
+    } catch (error) {
+      pushErrorMessage("app.service.unavailable", error, "Could not apply database cleanup review decision.");
+    }
+  }, [pushErrorMessage, pushMessage, registerJob]);
 
   return {
     registerJob, handleSaveFeeds,
@@ -264,6 +286,6 @@ export function useAdminActions(state: AppState, data: AppData) {
     handleOnboardingSaveSettings, handleGenerateProposal, handleApplyProposal,
     handleRejectProposal, handleOnboardingAcceptDraft, handleOnboardingRejectProposal,
     handleRunAdminJob, handleStopJob, handleStartVerification, handleOpenVerificationInBrowser,
-    handleSubmitVerificationXML, handleReclassify,
+    handleSubmitVerificationXML, handleReclassify, handleCleanup, handleCleanupReview,
   };
 }

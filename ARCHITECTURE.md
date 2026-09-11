@@ -13,12 +13,12 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 - `internal/classifier/`: Go classifier client, provider adapter, prompt shaping, and bounded retry handling
 - `internal/config/`: settings schema, fixed classifier model catalog, local config editing, and path resolution
 - `internal/feeds/`: feed fetch client, generic RSS/Atom/RDF parser, and publisher-specific extractors
-- `internal/jobs/`: sync pipeline, reclassify flows, and background job orchestration
+- `internal/jobs/`: sync pipeline, reclassify and database-cleanup flows, and background job orchestration
 - `internal/llmusage/`: thread-safe per-job LLM usage collection and immutable DeepSeek pricing snapshots
 - `internal/metadata/`: conditional metadata enrichment via DOI/OpenAlex/Crossref lookups
 - `internal/profile/`: profile validation, generation, and persistence helpers
 - `internal/runtime/`: shared runtime paths, version, mode, process, and app metadata helpers
-- `internal/store/sqlite/`: SQLite persistence for papers, classifications, feedback, proposals, Zotero status, and per-job LLM usage
+- `internal/store/sqlite/`: SQLite persistence for papers, classifications, feedback, proposals, Zotero status, cleanup-review audit records, and per-job LLM usage
 - `internal/trayapp/`: tray lifecycle, scheduling, backend supervision, and autostart
 - `internal/zotero/`: Zotero Web API integration
 - `web/`: Vite + React + TypeScript frontend organized into app orchestration, feature modules, API/data adapters, and shared UI/types
@@ -31,8 +31,9 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 4. Metadata enrichment runs only when core fields such as DOI, authors, journal, or usable abstract content are missing. Externally resolved records are validated against both the paper title and the publication date, and a DOI whose record fails either check is dropped so linking falls back to the publisher URL; enrichment writes back under the row's stored `paper_key` so a newly found DOI never splits a paper into duplicate rows.
 5. The classifier evaluates papers against the active `data/classification_profile.json`.
 6. Classifications, feedback, profile proposals, Zotero save status, and completed-job LLM usage are persisted in SQLite.
-7. `feedmedailyd` serves `web/dist` and exposes the local JSON API surface.
-8. The API service keeps a long-lived SQLite handle open for request reuse, and the UI reads the latest report through `/api/report/latest`, rebuilt from SQLite-backed state rather than replayed from disk report snapshots.
+7. A manually launched database-cleanup job scans all papers without classifications, removes only exact URL/DOI duplicate copies whose titles agree, repairs explicit DOI metadata mismatches while retaining the article, and sends title-only, DOI-conflict, or uncertain cases to a persistent review queue before classification.
+8. `feedmedailyd` serves `web/dist` and exposes the local JSON API surface.
+9. The API service keeps a long-lived SQLite handle open for request reuse, and the UI reads the latest report through `/api/report/latest`, rebuilt from SQLite-backed state rather than replayed from disk report snapshots.
 
 ## Runtime Surfaces
 
@@ -45,18 +46,20 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 - report, feedback, paper-read, and profile proposal APIs
 - profile bootstrap, proposal generation, proposal apply/reject, and reclassify flows
 - Zotero recursive collection-tree listing and save flows
-- admin job endpoints including sync and reclassify
+- admin job endpoints including sync, reclassify, database cleanup, and cleanup-review decisions
 - protected-feed verification start, callback, and completion endpoints
 - structured job-progress payloads for fetch, metadata, classification, report refresh, and profile-generation status updates
 - static React asset serving and SPA fallback
 
 `Run Sync Now` is fully owned by Go end-to-end: feed fetch, ingest, conditional metadata enrichment, classification, report refresh, and background job state all run through `feedmedailyd`. The same `/api/admin/run` endpoint also accepts an optional saved-feed URL list so Dashboard can run a targeted manual sync without changing the stored subscriptions. Sync launch is single-flight across full and targeted runs: while a sync is queued, running, or waiting for verification, another launch request returns the existing job instead of starting a second pipeline. The Dashboard disables its Sync button while that active job is visible and exposes `Stop sync`; `POST /api/admin/jobs/{id}/cancel` propagates cancellation through the current feed/LLM context and verification wait, then records a terminal `cancelled` job without rolling back already persisted papers or completed classification batches. A later sync asks SQLite for papers without a classification, so it skips completed batches and resumes work from the remaining papers. The backend registry remains the concurrency authority for UI, tray, and concurrent API callers.
 
+Database cleanup is a separate cancellable pipeline job exposed through `/api/admin/cleanup`. It snapshots the SQLite file with `VACUUM INTO` before mutation, builds exact duplicate components from normalized URL/DOI keys, retains a classified or oldest canonical row, moves feedback/Zotero references, and deletes only unclassified duplicate rows when the normalized titles agree. Duplicate entries that both have DOI values but still have non-matching normalized titles become a DOI-conflict review instead of an automatic deletion; title variants such as `Inside Back Cover:` remain ordinary duplicate reviews. A standalone DOI is cleared and re-keyed to its publisher URL only when Crossref or OpenAlex provides an explicit title/date mismatch; provider failures and incomplete records are persisted in `cleanup_reviews` and are never auto-deleted. Review decisions (`keep`, `delete`, `delete_match`, `clear_doi`, or `clear_match_doi`) are audit-stamped and applied through the same serialized pipeline; title-duplicate reviews let the user choose either side to delete, while DOI-conflict reviews only let the user clear one side's DOI or keep both entries unchanged. The retained unclassified article remains queued for the next cleanup batch. Bulk classification pauses whenever any pending review remains and resumes only on a later cleanup run after review completion. Legacy deferred rows migrate to pending.
+
 The job polling endpoints expose both human-readable messages and structured progress fields so the UI can show stage-aware status such as current feed `i/N`, metadata/classification completion percentages, step-based profile generation progress, and structured latest-job summaries. Sync warning details are read from the existing job result errors and matched back to the current feed list by URL.
 
 Every LLM-backed job owns one explicit thread-safe usage collector and uses the built-in provider pricing catalog for the job. Classifier batches, retries, single-paper degradation, title translation, profile generation, validation, JSON repair, and thinking fallbacks record each successful provider response exactly once, including its response timestamp. When the job reaches `completed`, `failed`, or `cancelled`, its token totals and pricing snapshot are copied into `JobInfo.llm_usage` and persisted as one `llm_usage_jobs` row. Ledger persistence failures are warnings and never change the business job outcome. Official DeepSeek requests use Beijing-time weekday peak/off-peak rates; the retired `deepseek-v4-pro` routing is billed at Flash rates from 2026-09-14 12:00 Beijing until V4.1 Pro ships, and official GLM-5.3-Flash requests use cached-input, ordinary-input, and output rates, with OpenAI-style cached-token details normalized by the adapter. For any supported official provider, input tokens left unclassified because the response omitted cache details are conservatively treated as cache misses; inconsistent or unknown usage remains `unavailable`. Token pricing is not exposed through Settings or environment variables. Existing-database migrations and narrowly scoped historical pricing repairs run when the backend starts, before Dashboard opens its read-only store; incomplete-cache rows are repaired only when one saved model/rate snapshot makes recalculation unambiguous. Dashboard reads the last three days through `/api/admin/llm-usage`, while SQLite retains the full history.
 
-The API service reuses long-lived SQLite stores across requests instead of reopening the database per handler. Read-heavy endpoints and mutation endpoints are split across separate store roles so the UI can keep `/api/report/latest` responsive while feedback or read-status writes are in flight. The SQLite runtime now enables WAL plus a busy-timeout-oriented connection string, and the `/api/report/latest` read path batch-selects each paper's latest classification, latest open feedback, and latest Zotero save state with SQL windowing rather than issuing per-paper follow-up lookups. `/api/app/update` keeps a short-lived in-memory status cache for routine polling and page initialization, but also accepts a force-refresh path so manual checks can bypass that cache immediately.
+The API service reuses long-lived SQLite stores across requests instead of reopening the database per handler. Read-heavy endpoints and mutation endpoints are split across separate store roles so the UI can keep `/api/report/latest` responsive while feedback or read-status writes are in flight. The SQLite runtime now enables WAL plus a busy-timeout-oriented connection string, and the `/api/report/latest` read path batch-selects each paper's latest classification, latest open feedback, and latest Zotero save state with SQL windowing rather than issuing per-paper follow-up lookups. `/api/app/update` keeps a short-lived in-memory status cache for routine background hydration, while page initialization and manual checks use its force-refresh path when they need a current result.
 
 ### Protected-feed verification
 
@@ -90,6 +93,8 @@ Current limitation: even with a persistent verifier profile, some publisher chal
 - tray-owned local daily scheduling
 
 Packaged builds ship the tray executable as the primary desktop entrypoint. In source mode, the tray builds or launches the local Go backend as needed.
+
+Before an installer update replaces packaged files, Inno Setup invokes the existing tray with `--shutdown`. The tray stops the backend through `/api/app/exit`, waits for the recorded backend process to exit, then closes its hidden tray window; Restart Manager remains enabled as a final file-in-use fallback.
 
 New scheduler settings default to local time `12:30`, which falls in DeepSeek's current midday off-peak window when the machine uses China Standard Time; users in other time zones can override it. Existing saved scheduler settings remain authoritative. The Web scheduler form uses the same fallback so the tray, API, and UI do not present different first-run times.
 
@@ -179,7 +184,7 @@ Behavioral baseline:
 - paper cards stay summary-only
 - paper actions live in the detail panel
 - the settings drawer uses stable sidebar navigation for `Dashboard`, `Feeds`, `Profile`, `Model`, and `App`, with a horizontal fallback on narrow screens: Dashboard prioritizes active jobs and progressively discloses targeted sync, reclassification, and usage; Feeds edits an isolated local draft and opens catalog/custom additions as a focused secondary view; Profile keeps one primary review document and a secondary feedback queue; Model keeps credentials and defaults visible while tuning stays under Advanced with one save action; token pricing is built in and not editable; App owns visible update/runtime information followed by separate Zotero, scheduled-sync, and local-app panels. All single expandable settings use the same soft-surface HeroUI Disclosure pattern instead of native `details` elements.
-- manual update checks are exposed in the upper `Settings -> App -> About and updates` section and in the footer status bar, and both routes trigger the same force-refresh update request
+- `Settings -> App -> About and updates` exposes the manual force-refresh action. Every Web UI mount, including a browser refresh, also starts a force-refresh check in the background; when a newer version is found, the shared TopBar message banner announces it and directs the user to `Settings -> App`.
 - app-update, scheduler, settings, proposal, and feedback hydration are non-critical background loads and must not block the card list from appearing
 - `Mark as read` and feedback mutations commit their local UI result first and use a non-blocking report reconcile pass afterward, so the card list stays visible during background refreshes
 
@@ -212,7 +217,7 @@ Supported admin reclassification scopes:
 - `unclassified`, selecting papers without any classification record so cancelled or failed batches can be backfilled without re-sending classified papers
 - `topics`, selecting related papers without a real topic (never processed, sentinel, or orphaned id) for the topic-only backfill pass described above
 
-Dashboard presents these as an explicit range selection followed by a separate confirmation action. `GET /api/admin/reclassify` supplies the current database paper count used to bound the custom quantity, plus per-range classified/unclassified breakdowns that the Dashboard previews before confirming. Sync and reclassification are mutually exclusive: a process-wide pipeline lock guarantees at most one of them classifies at a time. Manual launches reject with `409` while the lock is held, the Dashboard cross-disables both actions, and a reclassification launched by applying a proposal waits in `queued` status until the lock frees, then starts automatically. Queued and running reclassify jobs can be cancelled like sync jobs; a cancelled job keeps its partial result and completed classification batches, and a later run skips papers that already have a classification.
+Dashboard presents the remaining reclassification scopes as an explicit range selection followed by a separate confirmation action. The legacy `unclassified` API scope remains available for compatibility, but the Dashboard routes this recovery path through the database-cleanup job so duplicate rows and bad DOI keys are handled before classification. `GET /api/admin/reclassify` supplies the current database paper count used to bound the custom quantity, plus per-range classified/unclassified breakdowns that the Dashboard previews before confirming. Sync, reclassification, and cleanup are mutually exclusive: a process-wide pipeline lock guarantees at most one of them classifies or mutates the paper database at a time. Manual launches reject with `409` while the lock is held, the Dashboard cross-disables the actions, and a reclassification launched by applying a proposal waits in `queued` status until the lock frees, then starts automatically. Queued and running sync/reclassify/cleanup jobs can be cancelled; a cancelled job keeps its partial result and completed database work.
 
 ## Reporting
 

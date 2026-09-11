@@ -13,8 +13,8 @@ import {
   fetchSchedulerSettings,
   fetchSettingsConfig,
 } from "../api/client";
-import {EMPTY_REPORT, type ClassificationProfile, type JobInfo} from "../shared/types";
-import {messageFromJob} from "./messages";
+import {EMPTY_REPORT, type AppUpdate, type ClassificationProfile, type JobInfo} from "../shared/types";
+import {createAppUpdateMessage, messageFromJob} from "./messages";
 import type {AppState, RefreshRequestFlags} from "./useAppState";
 
 // 数据编排保持首屏读取与管理数据解耦，并协调后台 job 完成后的刷新。
@@ -30,6 +30,8 @@ export function useAppData(state: AppState) {
     setPendingReadOverrides, setProfile, setProfileProposals, setProfileResolved, setReport,
     setReportLoadError, setReportLoading, setScheduler, setSettingsConfig, setClassifierModels,
   } = state;
+  const appUpdateCheckRef = React.useRef<Promise<AppUpdate> | null>(null);
+  const autoUpdateCheckRef = React.useRef(false);
 
   const formatAdminHydrationWarning = React.useCallback((areas: string[]) => {
     if (areas.length === 0) return null;
@@ -113,17 +115,34 @@ export function useAppData(state: AppState) {
     setFeedsLoaded(true);
   }, [hydrateEditableFeeds, setFeeds, setFeedsLoaded]);
   const refreshAppMeta = React.useCallback(async () => setAppMeta(await fetchAppMeta()), [setAppMeta]);
-  const refreshAppUpdate = React.useCallback(async () => setAppUpdate(await fetchAppUpdate()), [setAppUpdate]);
+  const checkAppUpdate = React.useCallback((force = false) => {
+    if (appUpdateCheckRef.current) return appUpdateCheckRef.current;
+    setAppUpdateChecking(true);
+    const request = (async () => {
+      try {
+        const next = await fetchAppUpdate(force);
+        setAppUpdate(next);
+        return next;
+      } finally {
+        appUpdateCheckRef.current = null;
+        setAppUpdateChecking(false);
+      }
+    })();
+    appUpdateCheckRef.current = request;
+    return request;
+  }, [setAppUpdate, setAppUpdateChecking]);
+  const announceAppUpdate = React.useCallback((update: AppUpdate) => {
+    const nextMessage = createAppUpdateMessage(update);
+    if (nextMessage) setMessage(nextMessage);
+  }, [setMessage]);
+  const refreshAppUpdate = React.useCallback(() => checkAppUpdate(), [checkAppUpdate]);
   const handleCheckAppUpdate = React.useCallback(async () => {
     try {
-      setAppUpdateChecking(true);
-      setAppUpdate(await fetchAppUpdate(true));
+      announceAppUpdate(await checkAppUpdate(true));
     } catch (error) {
       pushErrorMessage("app.update.check.failed", error, "Could not check local update status.");
-    } finally {
-      setAppUpdateChecking(false);
     }
-  }, [pushErrorMessage, setAppUpdate, setAppUpdateChecking]);
+  }, [announceAppUpdate, checkAppUpdate, pushErrorMessage]);
   const refreshScheduler = React.useCallback(async () => setScheduler(await fetchSchedulerSettings()), [setScheduler]);
   const refreshConfig = React.useCallback(async () => {
     const next = await fetchSettingsConfig();
@@ -131,6 +150,14 @@ export function useAppData(state: AppState) {
     setClassifierModels(next.classifier_models);
   }, [setClassifierModels, setSettingsConfig]);
   const refreshProposals = React.useCallback(async () => setProfileProposals(await fetchProfileProposals()), [setProfileProposals]);
+
+  React.useEffect(() => {
+    if (autoUpdateCheckRef.current) return;
+    autoUpdateCheckRef.current = true;
+    void checkAppUpdate(true).then(announceAppUpdate).catch(() => {
+      // 启动更新检查属于非关键后台任务，失败时不打断阅读工作区。
+    });
+  }, [announceAppUpdate, checkAppUpdate]);
 
   React.useEffect(() => {
     if (!adminOpen) return;
@@ -167,14 +194,15 @@ export function useAppData(state: AppState) {
     });
   }, [profileRef, pushErrorMessage, refreshFeeds, refreshReport, setReport, setReportLoadError, setReportLoading]);
 
-  const refreshAdminData = React.useCallback(async () => {
+  const refreshAdminData = React.useCallback(async (options: {includeUpdate?: boolean} = {}) => {
     setAdminDataLoading(true);
     try {
       const tasks = [
         {label: "profile proposals", run: refreshProposals}, {label: "feedback records", run: refreshFeedback},
         {label: "local settings", run: refreshConfig}, {label: "app status", run: refreshAppMeta},
-        {label: "update status", run: refreshAppUpdate}, {label: "scheduler status", run: refreshScheduler},
-      ] as const;
+        ...(options.includeUpdate === false ? [] : [{label: "update status", run: refreshAppUpdate}]),
+        {label: "scheduler status", run: refreshScheduler},
+      ];
       const results = await Promise.allSettled(tasks.map((task) => task.run()));
       setAdminHydrationWarning(formatAdminHydrationWarning(results.flatMap((result, index) => result.status === "rejected" ? [tasks[index].label] : [])));
     } finally {
@@ -220,7 +248,7 @@ export function useAppData(state: AppState) {
         const currentProfile = await refreshProfileGate();
         if (cancelled) return;
         if (currentProfile) void refreshReviewCore(currentProfile);
-        void refreshAdminData();
+        void refreshAdminData({includeUpdate: false});
       } catch (error) {
         if (!cancelled) {
           pushErrorMessage("profile.current.load.failed", error, "Could not load the local profile.");
