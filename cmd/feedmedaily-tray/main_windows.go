@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/yyngfive/scirssagent/internal/trayapp"
 )
@@ -21,12 +22,33 @@ func main() {
 
 	// 托盘只需要 root；其余路径和设置都由内部布局解析完成。
 	root := flag.String("root", defaultRoot, "Project root or installed app directory.")
+	shutdown := flag.Bool("shutdown", false, "Stop an existing FeedMeDaily instance before an update.")
+	dataRoot := flag.String("data-root", "", "User data directory used by the running instance.")
 	flag.Parse()
 
 	absRoot, err := filepath.Abs(*root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "failed to resolve root:", err)
 		os.Exit(1)
+	}
+
+	if *shutdown {
+		if strings.TrimSpace(*dataRoot) != "" {
+			absDataRoot, err := filepath.Abs(*dataRoot)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "failed to resolve data root:", err)
+				os.Exit(1)
+			}
+			if err := os.Setenv("FEEDMEDAILY_DATA_ROOT", absDataRoot); err != nil {
+				fmt.Fprintln(os.Stderr, "failed to set data root:", err)
+				os.Exit(1)
+			}
+		}
+		if err := trayapp.ShutdownRunningApp(absRoot); err != nil {
+			fmt.Fprintln(os.Stderr, "failed to shut down FeedMeDaily:", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	// 托盘应用负责菜单、调度、自启动和后台服务控制。

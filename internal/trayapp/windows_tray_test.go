@@ -3,7 +3,12 @@
 package trayapp
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -195,6 +200,104 @@ func TestNotifySettingsChangedPostsReloadMessageToTrayWindow(t *testing.T) {
 	}}
 	if !reflect.DeepEqual(posted, wantPosted) {
 		t.Fatalf("posted = %#v, want %#v", posted, wantPosted)
+	}
+}
+
+func TestShutdownRunningAppStopsServiceBeforeClosingTray(t *testing.T) {
+	root := t.TempDir()
+	layout := testLayout(root, runtimeModeRelease)
+
+	var exitCalled bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/app/health":
+			if r.Method != http.MethodGet {
+				t.Errorf("health method = %s, want GET", r.Method)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		case "/api/app/exit":
+			if r.Method != http.MethodPost {
+				t.Errorf("exit method = %s, want POST", r.Method)
+				return
+			}
+			exitCalled = true
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(serverURL.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout.ServerHost = serverURL.Hostname()
+	layout.ServerPort = port
+	if err := WriteRuntimeState(layout.RuntimeStatePath, RuntimeState{PID: 4242, Port: port}); err != nil {
+		t.Fatal(err)
+	}
+
+	runningChecks := 0
+	restoreProcess := replaceProcessRunningCall(func(pid int) bool {
+		if pid != 4242 {
+			t.Fatalf("ProcessRunning pid = %d, want 4242", pid)
+		}
+		runningChecks++
+		return runningChecks == 1
+	})
+	defer restoreProcess()
+
+	findCalls := 0
+	restoreFind := replaceFindTrayWindowCall(func(configDir string) uintptr {
+		if configDir != layout.ConfigDir {
+			t.Fatalf("find configDir = %q, want %q", configDir, layout.ConfigDir)
+		}
+		findCalls++
+		if findCalls == 1 {
+			return 909
+		}
+		return 0
+	})
+	defer restoreFind()
+
+	var posted []postedTrayMessage
+	restorePost := replacePostMessageCall(func(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) bool {
+		if !exitCalled {
+			t.Error("tray close was requested before the service exit request completed")
+		}
+		posted = append(posted, postedTrayMessage{
+			hwnd:    hwnd,
+			message: message,
+			wParam:  wParam,
+			lParam:  lParam,
+		})
+		return true
+	})
+	defer restorePost()
+
+	if err := shutdownRunningApp(layout); err != nil {
+		t.Fatal(err)
+	}
+	if !exitCalled {
+		t.Fatal("expected the running service to receive an exit request")
+	}
+	wantPosted := []postedTrayMessage{{
+		hwnd:    909,
+		message: wmClose,
+		wParam:  0,
+		lParam:  0,
+	}}
+	if !reflect.DeepEqual(posted, wantPosted) {
+		t.Fatalf("posted = %#v, want %#v", posted, wantPosted)
+	}
+	if _, err := os.Stat(layout.RuntimeStatePath); !os.IsNotExist(err) {
+		t.Fatalf("runtime state error = %v, want file to be removed", err)
 	}
 }
 
