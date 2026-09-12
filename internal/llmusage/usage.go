@@ -12,7 +12,9 @@ import (
 const (
 	PricingSnapshotDeepSeekCNY    = "deepseek-cny-2026-09-10"
 	PricingSnapshotGLM53FlashCNY  = "zhipu-glm-5.3-flash-cny-2026-09-10"
+	PricingSnapshotGLM53CNY       = "zhipu-glm-5.3-cny-2026-09-12"
 	PricingSnapshotQwen38FlashCNY = "aliyun-qwen3.8-flash-cny-2026-08-29"
+	PricingSnapshotQwen38MaxCNY   = "aliyun-qwen3.8-max-0902-cny-2026-09-12"
 	PricingSnapshotMiMoV25CNY     = "xiaomi-mimo-v2.5-cny-2026-08-29"
 	PricingSnapshotZenFreeCNY     = "opencode-zen-mimo-v2.5-free-cny-2026-09-04"
 )
@@ -23,11 +25,6 @@ const (
 )
 
 var chinaStandardTime = time.FixedZone("CST", 8*60*60)
-
-// deepSeekProRoutedToFlashSince is when api.deepseek.com started routing
-// deepseek-v4-pro requests to DeepSeek V4.1 Flash and billing them at Flash
-// rates, until the V4.1 Pro release takes over that call name.
-var deepSeekProRoutedToFlashSince = time.Date(2026, 9, 14, 4, 0, 0, 0, time.UTC) // 12:00 Beijing
 
 type ResponseUsage struct {
 	PromptTokens          int64 `json:"prompt_tokens"`
@@ -72,8 +69,12 @@ type pricingCatalog struct {
 	Pro                 tieredRates
 	GLM53Flash          tokenRates
 	GLM53FlashSnapshot  string
+	GLM53               tokenRates
+	GLM53Snapshot       string
 	Qwen38Flash         tokenRates
 	Qwen38FlashSnapshot string
+	Qwen38Max           tokenRates
+	Qwen38MaxSnapshot   string
 	MiMoV25             tokenRates
 	MiMoV25Snapshot     string
 }
@@ -111,8 +112,18 @@ func builtInPricing() pricingCatalog {
 		},
 		GLM53Flash:          tokenRates{CacheHitNanoCNYPerToken: 230, CacheMissNanoCNYPerToken: 800, CompletionNanoCNYPerToken: 2_800},
 		GLM53FlashSnapshot:  PricingSnapshotGLM53FlashCNY,
+		// GLM-5.3 flagship rate card from docs.bigmodel.cn/cn/guide/start/pricing
+		// (2026-09-12): input 8, cache hit 2, output 28 CNY per 1M; billing does
+		// not vary with reasoning_effort.
+		GLM53:               tokenRates{CacheHitNanoCNYPerToken: 2_000, CacheMissNanoCNYPerToken: 8_000, CompletionNanoCNYPerToken: 28_000},
+		GLM53Snapshot:       PricingSnapshotGLM53CNY,
 		Qwen38Flash:         tokenRates{CacheHitNanoCNYPerToken: 100, CacheMissNanoCNYPerToken: 800, CompletionNanoCNYPerToken: 2_700},
 		Qwen38FlashSnapshot: PricingSnapshotQwen38FlashCNY,
+		// qwen3.8-max-0902 rate card from help.aliyun.com model pricing
+		// (2026-09-12): single tier, input 12, output 36 CNY per 1M, and
+		// context-cache hits bill at 10% of the input rate.
+		Qwen38Max:           tokenRates{CacheHitNanoCNYPerToken: 1_200, CacheMissNanoCNYPerToken: 12_000, CompletionNanoCNYPerToken: 36_000},
+		Qwen38MaxSnapshot:   PricingSnapshotQwen38MaxCNY,
 		MiMoV25:             tokenRates{CacheHitNanoCNYPerToken: 20, CacheMissNanoCNYPerToken: 1_000, CompletionNanoCNYPerToken: 2_000},
 		MiMoV25Snapshot:     PricingSnapshotMiMoV25CNY,
 	}
@@ -222,8 +233,14 @@ func providerRates(baseURL string, model string, occurredAt time.Time, pricing p
 			CompletionNanoCNYPerToken: pricing.GLM53Flash.CompletionNanoCNYPerToken,
 		}, true
 	}
+	if strings.EqualFold(parsed.Hostname(), "open.bigmodel.cn") && strings.EqualFold(strings.TrimSpace(model), "glm-5.3") {
+		return standardBreakdown(model, pricing.GLM53Snapshot, pricing.GLM53), true
+	}
 	if strings.EqualFold(parsed.Hostname(), "dashscope.aliyuncs.com") && strings.EqualFold(strings.TrimSpace(model), "qwen3.8-flash") {
 		return standardBreakdown(model, pricing.Qwen38FlashSnapshot, pricing.Qwen38Flash), true
+	}
+	if strings.EqualFold(parsed.Hostname(), "dashscope.aliyuncs.com") && strings.EqualFold(strings.TrimSpace(model), "qwen3.8-max-0902") {
+		return standardBreakdown(model, pricing.Qwen38MaxSnapshot, pricing.Qwen38Max), true
 	}
 	if strings.EqualFold(parsed.Hostname(), "api.xiaomimimo.com") && strings.EqualFold(strings.TrimSpace(model), "mimo-v2.5") {
 		return standardBreakdown(model, pricing.MiMoV25Snapshot, pricing.MiMoV25), true
@@ -260,11 +277,9 @@ func providerRates(baseURL string, model string, occurredAt time.Time, pricing p
 	case "deepseek-flash", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner":
 		return breakdown(selectedRates(pricing.Flash)), true
 	case "deepseek-v4-pro":
-		// DeepSeek routes Pro requests to V4.1 Flash at Flash pricing once the
-		// Pro model is retired, until the V4.1 Pro release inherits the name.
-		if !occurredAt.Before(deepSeekProRoutedToFlashSince) {
-			return breakdown(selectedRates(pricing.Flash)), true
-		}
+		// DeepSeek's revised 2026-09-10 announcement withdrew the planned Flash
+		// routing: V4 Pro keeps serving with unchanged Pro billing, so this call
+		// name always estimates at Pro rates.
 		return breakdown(selectedRates(pricing.Pro)), true
 	default:
 		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "deepseek-v4.1-flash") {

@@ -112,7 +112,7 @@ func TestCollectorUsesDeepSeekProPricingAndAggregatesRequests(t *testing.T) {
 	}
 }
 
-func TestCollectorPricesProAtFlashRatesAfterDeepSeekRetiresPro(t *testing.T) {
+func TestCollectorKeepsDeepSeekProPricingAfterRoutingAnnouncementReversal(t *testing.T) {
 	newCollector := func(occurredAt time.Time) *llmusage.Collector {
 		collector := llmusage.NewCollector()
 		collector.Record(llmusage.Event{
@@ -127,18 +127,20 @@ func TestCollectorPricesProAtFlashRatesAfterDeepSeekRetiresPro(t *testing.T) {
 		return collector
 	}
 
-	// Sunday 21:00 in Beijing, still billed on the Pro off-peak rates.
-	before := newCollector(time.Date(2026, 9, 13, 13, 0, 0, 0, time.UTC)).Summary()
-	if before.EstimatedCostCNY == nil || *before.EstimatedCostCNY != "18.150000" {
-		t.Fatalf("pro cost before the routing change = %#v", before.EstimatedCostCNY)
+	// Sunday 21:00 in Beijing, billed on the Pro off-peak rates.
+	offPeak := newCollector(time.Date(2026, 9, 13, 13, 0, 0, 0, time.UTC)).Summary()
+	if offPeak.EstimatedCostCNY == nil || *offPeak.EstimatedCostCNY != "18.150000" {
+		t.Fatalf("pro cost before the announced routing date = %#v", offPeak.EstimatedCostCNY)
 	}
-	// Monday 21:00 in Beijing, after DeepSeek started routing Pro to V4.1 Flash.
+	// Monday 21:00 in Beijing, after the date DeepSeek once announced for Flash
+	// routing. The announcement was revised to keep serving V4 Pro with
+	// unchanged billing, so Pro rates must still apply.
 	after := newCollector(time.Date(2026, 9, 14, 13, 0, 0, 0, time.UTC)).Summary()
-	if after.EstimatedCostCNY == nil || *after.EstimatedCostCNY != "5.020000" {
-		t.Fatalf("pro cost after the routing change = %#v", after.EstimatedCostCNY)
+	if after.EstimatedCostCNY == nil || *after.EstimatedCostCNY != "18.150000" {
+		t.Fatalf("pro cost after the routing reversal = %#v", after.EstimatedCostCNY)
 	}
 	if len(after.Pricing) != 1 || after.Pricing[0].Tier != llmusage.PricingTierOffPeak {
-		t.Fatalf("pro pricing after the routing change = %#v", after.Pricing)
+		t.Fatalf("pro pricing after the routing reversal = %#v", after.Pricing)
 	}
 }
 
@@ -209,6 +211,44 @@ func TestCollectorTreatsUnreportedOfficialProviderInputAsCacheMiss(t *testing.T)
 	}
 	if summary.PromptCacheHitTokens != 1_000_000 || summary.PromptCacheMissTokens != 2_000_000 {
 		t.Fatalf("normalized MiMo cache usage = %#v", summary)
+	}
+}
+
+func TestCollectorPricesGLM53AndQwen38MaxProfileModels(t *testing.T) {
+	collector := llmusage.NewCollector()
+	for _, event := range []llmusage.Event{
+		{
+			BaseURL: "https://open.bigmodel.cn/api/paas/v4", Model: "glm-5.3",
+			Usage: llmusage.ResponseUsage{
+				PromptTokens: 3_000_000, PromptCacheHitTokens: 1_000_000,
+				PromptCacheMissTokens: 2_000_000, CompletionTokens: 1_000_000,
+				CacheBreakdownPresent: true,
+			},
+		},
+		{
+			BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", Model: "qwen3.8-max-0902",
+			Usage: llmusage.ResponseUsage{
+				PromptTokens: 3_000_000, PromptCacheHitTokens: 1_000_000,
+				PromptCacheMissTokens: 2_000_000, CompletionTokens: 1_000_000,
+				CacheBreakdownPresent: true,
+			},
+		},
+	} {
+		collector.Record(event)
+	}
+
+	summary := collector.Summary()
+	if summary.PricingStatus != "estimated" {
+		t.Fatalf("pricing status = %q", summary.PricingStatus)
+	}
+	// GLM-5.3: 1M×2 + 2M×8 + 1M×28 = 46 CNY. qwen3.8-max-0902: 1M×1.2 + 2M×12 + 1M×36 = 61.2 CNY.
+	if summary.EstimatedCostCNY == nil || *summary.EstimatedCostCNY != "107.200000" {
+		t.Fatalf("combined estimate = %#v", summary.EstimatedCostCNY)
+	}
+	if len(summary.Pricing) != 2 ||
+		summary.Pricing[0].Model != "glm-5.3" || summary.Pricing[0].Snapshot != llmusage.PricingSnapshotGLM53CNY ||
+		summary.Pricing[1].Model != "qwen3.8-max-0902" || summary.Pricing[1].Snapshot != llmusage.PricingSnapshotQwen38MaxCNY {
+		t.Fatalf("pricing breakdowns = %#v", summary.Pricing)
 	}
 }
 
