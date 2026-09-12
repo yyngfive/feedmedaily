@@ -10,6 +10,7 @@ import type {
   FeedSubscription,
   FeedbackRecord,
   JobInfo,
+  ProfileModelsResponse,
   ProfileProposal,
   SchedulerSettings,
   SettingsConfigField,
@@ -21,6 +22,7 @@ import {AdminDisclosure} from "./AdminDisclosure";
 import {DashboardTab} from "./DashboardTab";
 import {ClassifierModelsEditor, classifierModelsDraftHasRequiredKeys, classifierModelsUpdateFromDraft, createClassifierModelsDraft, type ClassifierModelsDraft} from "./ClassifierModelsEditor";
 import {FeedsTab} from "./FeedsTab";
+import {ProfileModelsEditor, createProfileModelsDraft, type ProfileModelsDraft} from "./ProfileModelsEditor";
 import {ProfileTab} from "./ProfileTab";
 import {SettingsConfigEditor, type SettingsConfigEditorHandle} from "./SettingsConfigEditor";
 
@@ -48,6 +50,7 @@ export type AdminPanelProps = {
   configFields: SettingsConfigField[];
   configSaving: boolean;
   classifierModels: ClassifierModelsResponse;
+  profileModels: ProfileModelsResponse;
   feedback: FeedbackRecord[];
   feeds: FeedSubscription[];
   feedsSaving: boolean;
@@ -68,6 +71,7 @@ export type AdminPanelProps = {
   onStopJob: (jobID: string, jobType: "sync" | "reclassify" | "cleanup" | "cleanup-review") => Promise<void> | void;
   onSaveConfig: (fields: Record<string, SettingsConfigUpdate>, classifierModels?: ClassifierModelsUpdate) => Promise<void>;
   onTestClassifierModel: (modelID: string, apiKey?: string) => Promise<JobInfo>;
+  onTestProfileModel: (modelID: string) => Promise<JobInfo>;
   onSaveFeeds: (feeds?: FeedSubscription[]) => Promise<boolean | void> | boolean | void;
   onSaveProfile: (profile: ClassificationProfile) => Promise<void> | void;
   onSaveScheduler: (dailyTime: string) => Promise<void>;
@@ -96,24 +100,23 @@ export function AdminPanel(props: AdminPanelProps) {
     [props.configFields],
   );
   const [classifierDraft, setClassifierDraft] = React.useState<ClassifierModelsDraft>(() => createClassifierModelsDraft(props.classifierModels));
-  const profileModelRef = React.useRef<SettingsConfigEditorHandle | null>(null);
+  const [profileDraft, setProfileDraft] = React.useState<ProfileModelsDraft>(() => createProfileModelsDraft(props.profileModels));
   const advancedModelRef = React.useRef<SettingsConfigEditorHandle | null>(null);
   const dialogRef = React.useRef<HTMLElement | null>(null);
   const closeButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const restoreFocusRef = React.useRef<HTMLElement | null>(null);
   const onCloseRef = React.useRef(props.onClose);
   onCloseRef.current = props.onClose;
-  const primaryModelFields = React.useMemo(
-    () => modelFields.filter((field) => field.key === "SCIRSS_PROFILE_API_KEY"),
-    [modelFields],
-  );
   const advancedModelFields = React.useMemo(
-    () => modelFields.filter((field) => field.key !== "SCIRSS_PROFILE_API_KEY"),
+    () => modelFields.filter((field) => field.key !== "SCIRSS_PROFILE_DEFAULT_MODEL"),
     [modelFields],
   );
   React.useEffect(() => {
     setClassifierDraft(createClassifierModelsDraft(props.classifierModels));
   }, [props.classifierModels]);
+  React.useEffect(() => {
+    setProfileDraft(createProfileModelsDraft(props.profileModels));
+  }, [props.profileModels]);
 
   React.useEffect(() => {
     if (!props.open) return;
@@ -149,10 +152,12 @@ export function AdminPanel(props: AdminPanelProps) {
   }, [props.open]);
 
   const saveModelSettings = () => {
-    const fields = {
-      ...(profileModelRef.current?.getPayload() ?? {}),
+    const fields: Record<string, SettingsConfigUpdate> = {
       ...(advancedModelRef.current?.getPayload() ?? {}),
     };
+    if (profileDraft.defaultModelId) {
+      fields.SCIRSS_PROFILE_DEFAULT_MODEL = {value: profileDraft.defaultModelId};
+    }
     return props.onSaveConfig(fields, classifierModelsUpdateFromDraft(classifierDraft));
   };
 
@@ -238,7 +243,13 @@ export function AdminPanel(props: AdminPanelProps) {
               </section>
               <section className="border-b border-(--line) pb-6">
                 <h3 className="mb-3 text-sm font-semibold text-(--ink)">Profile generator</h3>
-                <SettingsConfigEditor ref={profileModelRef} fields={primaryModelFields} hideGroupTitles saving={props.configSaving} showHeader={false} showSaveAction={false} title="Profile generator" onSave={props.onSaveConfig} />
+                <ProfileModelsEditor
+                  draft={profileDraft}
+                  jobs={props.jobs}
+                  models={props.profileModels}
+                  onChange={setProfileDraft}
+                  onTest={props.onTestProfileModel}
+                />
               </section>
               <AdminDisclosure title="Advanced model settings">
                 <div>

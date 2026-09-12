@@ -68,7 +68,9 @@ type Settings struct {
 	ProfileAPIKey       string
 	ProfileBaseURL      string
 	ProfileModel        string
+	ProfileProvider     string
 	ProfileThinking     string
+	ProfileModels       ProfileModels
 	ZoteroAPIKey        string
 	ZoteroLibraryType   string
 	ZoteroLibraryID     string
@@ -123,6 +125,7 @@ type SettingsConfigField struct {
 type SettingsConfigResponse struct {
 	Fields           []SettingsConfigField    `json:"fields"`
 	ClassifierModels ClassifierModelsResponse `json:"classifier_models"`
+	ProfileModels    ProfileModelsResponse    `json:"profile_models"`
 }
 
 type SettingsConfigFieldUpdate struct {
@@ -229,28 +232,36 @@ var Options = []Option{
 		Default:     strconv.Itoa(DefaultClassifierBatchSize),
 	},
 	{
-		Key:         "SCIRSS_PROFILE_API_KEY",
-		Label:       "Profile API key",
-		Description: "Used for onboarding, profile generation, and profile revision.",
+		Key:         profileDefaultModelKey,
+		Label:       "Default profile model",
+		Description: "Managed profile model used for onboarding, profile generation, and profile revision. Shares the matching classifier provider API key.",
 		Section:     "Profile model",
+		InputType:   "text",
+		Default:     ProfileModelDeepSeekV4Pro,
+	},
+	{
+		Key:         profileLegacyAPIKey,
+		Label:       "Profile API key",
+		Description: "Legacy profile key. Still honored for DeepSeek profile requests when the shared DeepSeek classifier key is empty.",
+		Section:     "Legacy profile model",
 		InputType:   "password",
 		Secret:      true,
 	},
 	{
-		Key:         "SCIRSS_PROFILE_BASE_URL",
+		Key:         profileLegacyBaseURL,
 		Label:       "Profile base URL",
-		Description: "Base URL for the profile-generation model provider.",
-		Section:     "Profile model",
+		Description: "Legacy base URL for the profile-generation model provider.",
+		Section:     "Legacy profile model",
 		InputType:   "url",
 		Default:     "https://api.deepseek.com",
 	},
 	{
-		Key:         "SCIRSS_PROFILE_MODEL",
+		Key:         profileLegacyModelKey,
 		Label:       "Profile model",
-		Description: "Model name used for initial and feedback-driven profile proposals.",
-		Section:     "Profile model",
+		Description: "Legacy model name used for profile proposals. The managed default profile model overrides it.",
+		Section:     "Legacy profile model",
 		InputType:   "text",
-		Default:     "deepseek-v4-pro",
+		Default:     ProfileModelDeepSeekV4Pro,
 	},
 	{
 		Key:         "SCIRSS_PROFILE_THINKING",
@@ -374,8 +385,15 @@ func Load(root string) (Settings, error) {
 	settings.ClassifierBatchSize = positiveInt(valueMap["SCIRSS_CLASSIFIER_BATCH_SIZE"], DefaultClassifierBatchSize)
 	settings.ProfileAPIKey = optionalValue(valueMap["SCIRSS_PROFILE_API_KEY"])
 	settings.ProfileBaseURL = valueOrDefault(valueMap["SCIRSS_PROFILE_BASE_URL"], "https://api.deepseek.com")
-	settings.ProfileModel = valueOrDefault(valueMap["SCIRSS_PROFILE_MODEL"], "deepseek-v4-pro")
+	settings.ProfileModel = valueOrDefault(valueMap["SCIRSS_PROFILE_MODEL"], ProfileModelDeepSeekV4Pro)
 	settings.ProfileThinking = valueOrDefault(strings.ToLower(strings.TrimSpace(valueMap["SCIRSS_PROFILE_THINKING"])), "enabled")
+	settings.ProfileModels = profileModelsFromResolvedValues(values)
+	if effectiveProfile := settings.EffectiveProfileModel(); effectiveProfile.ID != "" {
+		settings.ProfileModel = effectiveProfile.ID
+		settings.ProfileBaseURL = effectiveProfile.BaseURL
+		settings.ProfileAPIKey = effectiveProfile.APIKey
+		settings.ProfileProvider = effectiveProfile.Provider
+	}
 	settings.ZoteroAPIKey = optionalValue(valueMap["SCIRSS_ZOTERO_API_KEY"])
 	settings.ZoteroLibraryType = valueOrDefault(strings.ToLower(strings.TrimSpace(valueMap["SCIRSS_ZOTERO_LIBRARY_TYPE"])), "user")
 	settings.ZoteroLibraryID = optionalValue(valueMap["SCIRSS_ZOTERO_LIBRARY_ID"])
@@ -483,6 +501,7 @@ func SettingsConfig(root string) (SettingsConfigResponse, error) {
 	return SettingsConfigResponse{
 		Fields:           fieldsFromResolvedValues(values),
 		ClassifierModels: classifierModelsResponse(settings),
+		ProfileModels:    profileModelsResponse(settings),
 	}, nil
 }
 

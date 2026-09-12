@@ -10,6 +10,7 @@ import type {
   FeedbackRecord,
   JobInfo,
   Paper,
+  ProfileModelsResponse,
   ProfileProposal,
   Relevance,
   Report,
@@ -58,6 +59,10 @@ export function useAppState() {
   const [classifierModels, setClassifierModels] = React.useState<ClassifierModelsResponse>({
     models: [],
     enabled_model_ids: [],
+    default_model_id: "",
+  });
+  const [profileModels, setProfileModels] = React.useState<ProfileModelsResponse>({
+    models: [],
     default_model_id: "",
   });
   const [feedsLoaded, setFeedsLoaded] = React.useState(false);
@@ -181,7 +186,7 @@ export function useAppState() {
   return {
     report, setReport, profile, setProfile, appMeta, setAppMeta, appUpdate, setAppUpdate,
     appUpdateChecking, setAppUpdateChecking, feeds, setFeeds, scheduler, setScheduler,
-    settingsConfig, setSettingsConfig, classifierModels, setClassifierModels, feedsLoaded, setFeedsLoaded, profileResolved, setProfileResolved,
+    settingsConfig, setSettingsConfig, classifierModels, setClassifierModels, profileModels, setProfileModels, feedsLoaded, setFeedsLoaded, profileResolved, setProfileResolved,
     reportLoading, setReportLoading, adminDataLoading, setAdminDataLoading,
     verificationSubmitting, setVerificationSubmitting, verificationSubmitError, setVerificationSubmitError,
     reportLoadError, setReportLoadError, adminHydrationWarning, setAdminHydrationWarning,

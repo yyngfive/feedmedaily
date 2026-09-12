@@ -29,6 +29,7 @@ export function useAppData(state: AppState) {
     setAppUpdateChecking, setFeedbackRecords, setFeeds, setFeedsLoaded, setJobs, setMessage,
     setPendingReadOverrides, setProfile, setProfileProposals, setProfileResolved, setReport,
     setReportLoadError, setReportLoading, setScheduler, setSettingsConfig, setClassifierModels,
+    setProfileModels,
   } = state;
   const appUpdateCheckRef = React.useRef<Promise<AppUpdate> | null>(null);
   const autoUpdateCheckRef = React.useRef(false);
@@ -148,7 +149,8 @@ export function useAppData(state: AppState) {
     const next = await fetchSettingsConfig();
     setSettingsConfig(next.fields);
     setClassifierModels(next.classifier_models);
-  }, [setClassifierModels, setSettingsConfig]);
+    setProfileModels(next.profile_models);
+  }, [setClassifierModels, setProfileModels, setSettingsConfig]);
   const refreshProposals = React.useCallback(async () => setProfileProposals(await fetchProfileProposals()), [setProfileProposals]);
 
   React.useEffect(() => {

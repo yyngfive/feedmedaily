@@ -232,6 +232,20 @@ export async function testClassifierModel(modelId: string, apiKey?: string): Pro
   return payload.job;
 }
 
+export async function testProfileModel(modelId: string): Promise<JobInfo> {
+  const payload = await localJSONRequest<{job: JobInfo}>(
+    "/api/settings/profile-models/test",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({model_id: modelId}),
+    },
+    "test the profile model connection",
+    "Could not test the profile model connection",
+  );
+  return payload.job;
+}
+
 export async function saveFeedSubscriptions(
   feeds: FeedSubscription[],
 ): Promise<FeedSubscription[]> {

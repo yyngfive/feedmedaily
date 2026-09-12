@@ -45,6 +45,7 @@ export function App() {
           configFields={state.settingsConfig}
           configSaving={state.settingsConfigSaving}
           classifierModels={state.classifierModels}
+          profileModels={state.profileModels}
           jobs={state.jobs}
           proposals={state.profileProposals}
           onAcceptDraft={admin.handleOnboardingAcceptDraft}
@@ -52,6 +53,7 @@ export function App() {
           onSaveSettings={admin.handleOnboardingSaveSettings}
           onSaveAndBootstrap={admin.handleOnboardingSaveAndBootstrap}
           onTestClassifierModel={admin.handleTestClassifierModel}
+          onTestProfileModel={admin.handleTestProfileModel}
         />
       </>
     );
@@ -69,6 +71,7 @@ export function App() {
         configFields={state.settingsConfig}
         configSaving={state.settingsConfigSaving}
         classifierModels={state.classifierModels}
+        profileModels={state.profileModels}
         open={state.adminOpen}
         profile={state.profile}
         profileSaving={state.profileSaving}
@@ -86,6 +89,7 @@ export function App() {
         onCheckForUpdates={() => void data.handleCheckAppUpdate()}
         onSaveConfig={admin.handleSaveConfig}
         onTestClassifierModel={admin.handleTestClassifierModel}
+        onTestProfileModel={admin.handleTestProfileModel}
         onSaveProfile={admin.handleSaveProfile}
         onSaveScheduler={admin.handleSaveScheduler}
         onSaveFeeds={admin.handleSaveFeeds}

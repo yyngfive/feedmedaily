@@ -21,6 +21,7 @@ import {
   startFeedVerification,
   submitFeedVerificationXML,
   testClassifierModel,
+  testProfileModel,
 } from "../api/client";
 import type {CleanupReviewDecision, ReclassifyScope} from "../api/client";
 import type {ClassifierModelsUpdate, ClassificationProfile, FeedSubscription, JobInfo, SettingsConfigUpdate} from "../shared/types";
@@ -33,7 +34,7 @@ export function useAdminActions(state: AppState, data: AppData) {
     errorText, feeds, hydrateEditableFeeds, pushErrorMessage, pushMessage, setAdminOpen,
     setAppControlBusy, setBusy, setFeeds, setFeedsLoaded, setFeedsSaving, setJobs,
     setProfile, setProfileSaving, setScheduler, setSchedulerSaving, setSettingsConfig, setClassifierModels,
-    setSettingsConfigSaving, setVerificationSubmitError, setVerificationSubmitting,
+    setProfileModels, setSettingsConfigSaving, setVerificationSubmitError, setVerificationSubmitting,
   } = state;
   const {
     refreshAdminData, refreshFeedback, refreshProfileGate, refreshProposals, refreshReviewCore,
@@ -67,13 +68,14 @@ export function useAdminActions(state: AppState, data: AppData) {
       const saved = await saveSettingsConfig(fields, classifierModels);
       setSettingsConfig(saved.fields);
       setClassifierModels(saved.classifier_models);
+      setProfileModels(saved.profile_models);
       const currentProfile = await refreshProfileGate();
       await Promise.all([refreshAdminData(), currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve()]);
       pushMessage("settings.config.save.succeeded");
     } catch (error) {
       pushErrorMessage("settings.config.save.failed", error, "Could not save local settings.");
     } finally { setSettingsConfigSaving(false); }
-  }, [pushErrorMessage, pushMessage, refreshAdminData, refreshProfileGate, refreshReviewCore, setClassifierModels, setSettingsConfig, setSettingsConfigSaving]);
+  }, [pushErrorMessage, pushMessage, refreshAdminData, refreshProfileGate, refreshReviewCore, setClassifierModels, setProfileModels, setSettingsConfig, setSettingsConfigSaving]);
   const handleSaveScheduler = React.useCallback(async (dailyTime: string) => {
     try {
       setSchedulerSaving(true);
@@ -139,6 +141,7 @@ export function useAdminActions(state: AppState, data: AppData) {
       const saved = await saveSettingsConfig(fields, classifierModels);
       setSettingsConfig(saved.fields);
       setClassifierModels(saved.classifier_models);
+      setProfileModels(saved.profile_models);
       const currentProfile = await refreshProfileGate();
       await Promise.all([refreshAdminData(), currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve()]);
     } catch (error) {
@@ -151,20 +154,21 @@ export function useAdminActions(state: AppState, data: AppData) {
     } catch (error) {
       return {ok: false, tone: "warning" as const, message: `Local settings were saved, but the initial profile generation did not start: ${errorText(error, "Unknown error.")}`};
     } finally { setBusy(false); }
-  }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore, registerJob, setBusy, setClassifierModels, setSettingsConfig, setSettingsConfigSaving]);
+  }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore, registerJob, setBusy, setClassifierModels, setProfileModels, setSettingsConfig, setSettingsConfigSaving]);
   const handleOnboardingSaveSettings = React.useCallback(async (fields: Record<string, SettingsConfigUpdate>, classifierModels: ClassifierModelsUpdate) => {
     try {
       setSettingsConfigSaving(true);
       const saved = await saveSettingsConfig(fields, classifierModels);
       setSettingsConfig(saved.fields);
       setClassifierModels(saved.classifier_models);
+      setProfileModels(saved.profile_models);
       const currentProfile = await refreshProfileGate();
       await Promise.all([refreshAdminData(), currentProfile ? refreshReviewCore(currentProfile) : Promise.resolve()]);
       return {ok: true, tone: "success" as const, message: "Local settings saved."};
     } catch (error) {
       return {ok: false, tone: "danger" as const, message: errorText(error, "Could not save local settings.")};
     } finally { setSettingsConfigSaving(false); }
-  }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore, setClassifierModels, setSettingsConfig, setSettingsConfigSaving]);
+  }, [errorText, refreshAdminData, refreshProfileGate, refreshReviewCore, setClassifierModels, setProfileModels, setSettingsConfig, setSettingsConfigSaving]);
 
   const handleTestClassifierModel = React.useCallback(async (modelId: string, apiKey?: string) => {
     try {
@@ -176,6 +180,18 @@ export function useAdminActions(state: AppState, data: AppData) {
       return job;
     } catch (error) {
       pushErrorMessage("classifier.model.test.failed", error, "Could not start the classifier model connection test.");
+      throw error;
+    }
+  }, [pushErrorMessage, pushMessage, registerJob]);
+
+  const handleTestProfileModel = React.useCallback(async (modelId: string) => {
+    try {
+      const job = await testProfileModel(modelId);
+      registerJob(job, false);
+      pushMessage("profile.model.test.started", {text: "Connection test queued. It uses a small amount of provider quota.", tone: "info"});
+      return job;
+    } catch (error) {
+      pushErrorMessage("profile.model.test.failed", error, "Could not start the profile model connection test.");
       throw error;
     }
   }, [pushErrorMessage, pushMessage, registerJob]);
@@ -281,7 +297,7 @@ export function useAdminActions(state: AppState, data: AppData) {
 
   return {
     registerJob, handleSaveFeeds,
-    handleSaveConfig, handleSaveScheduler, handleSaveProfile, handleDeleteScheduler, handleTestClassifierModel,
+    handleSaveConfig, handleSaveScheduler, handleSaveProfile, handleDeleteScheduler, handleTestClassifierModel, handleTestProfileModel,
     handleOpenAppTarget, handleExitApp, handleOnboardingSaveAndBootstrap,
     handleOnboardingSaveSettings, handleGenerateProposal, handleApplyProposal,
     handleRejectProposal, handleOnboardingAcceptDraft, handleOnboardingRejectProposal,

@@ -339,6 +339,8 @@ secret 字段和 `classifier_models` 中的 key 均不以明文返回。`source=
 
 当前固定分类目录为 DeepSeek V4.1 Flash、Zhipu GLM-5.3-Flash、Qwen3.8-Flash 和 MiMo-V2.5。`SCIRSS_CLASSIFIER_THINKING` 只控制最低思考档：GLM 始终为 low；DeepSeek/Qwen 开启时为 low；MiMo 开启时为 enabled。DeepSeek/MiMo 开启时使用至少 4096 completion tokens。分类器默认 batch size 为 `5`。模型响应不要求 `decision_trace` 或 `recommended_action`；报告 API 中保留的 `recommended_action` 由后端按 relevance 确定。
 
+Profile 生成同样使用固定目录，并通过 `profile_models` 字段返回：`deepseek-v4-pro`（默认）、`glm-5.3`、`qwen3.8-max-0902`、`mimo-v2.5-pro`。每个条目的 `configured` 表示对应 classifier 供应商 key 已配置——profile 角色与分类角色共用同一套供应商 API key；DeepSeek 条目在共享 key 缺失时仍回退到 legacy 的 `SCIRSS_PROFILE_API_KEY`。默认模型用 `SCIRSS_PROFILE_DEFAULT_MODEL` 选择；`SCIRSS_PROFILE_BASE_URL/MODEL/API_KEY` 成为 legacy 迁移字段，未知的自定义 legacy 供应商保持原样运行，不受目录接管。Profile 请求由后端按供应商适配思考参数：DeepSeek 发送 `thinking.type` 并钉住 `reasoning_effort=low`（V4 系列支持 low/high/max 三档），输出预算下限 16384——low 档在 proposal 任务上的推理实测也会超过 8192；Qwen 使用 `reasoning_effort`（开启即 low，预算下限 8192）；MiMo 使用 `thinking.type` 加 `max_completion_tokens`，因无档位参数且默认深度推理单独即超过 8192 tokens，开启思考时预算下限为 16384；GLM-5.3 常思考，不接受 disabled，同样钉 `reasoning_effort=low`。所有开思考请求的输出预算下限保证思考与 JSON 共享预算时不截断，响应日志记录 `finish_reason` 与 reasoning tokens；模型误带到 unrelated/scope 变更上的主题标签会被确定性剥离。开启思考的请求超时放宽到 300 秒。
+
 模型价格由后端 `internal/llmusage` 内置，按 provider 和响应时间选择，单位为 CNY / 1M tokens。`/api/settings/config` 不返回价格配置字段，也不接受价格更新；旧版本遗留在 `.env` 或 release `settings.json` 中的价格键会在启动时清理。
 
 前端入口：`fetchSettingsConfig()`。
@@ -388,6 +390,20 @@ secret 字段和 `classifier_models` 中的 key 均不以明文返回。`source=
 ```
 
 省略 `api_key` 时使用已保存 key。成功响应为 `{ "job": JobInfo }`，前端可通过 `GET /api/admin/jobs` 轮询；未知模型或没有可用 key 返回 400。日志不会写入 API key。
+
+### `POST /api/settings/profile-models/test`
+
+用途：以后台 `profile-model-test` job 对指定 profile 模型发送一个最小 JSON 请求，走与生产一致的供应商适配请求路径（含思考参数与 JSON mode）。连接测试不改变默认模型，记录返回的 token 用量，并消耗少量对应提供商额度。
+
+请求体：
+
+```json
+{"model_id":"mimo-v2.5-pro"}
+```
+
+成功响应为 `{ "job": JobInfo }`；未知模型或该模型对应的共享 classifier key 未配置时返回 400。
+
+前端入口：`testProfileModel(modelId)`。
 
 ### `GET /api/settings/feeds`
 
@@ -956,7 +972,7 @@ LLM job 在完成或失败后包含可选 `llm_usage`：请求数、三类 token
 - `pricing_status`、`pricing` 单价快照
 - 可用时返回 `estimated_cost_nano_cny` 和 `estimated_cost_cny`
 
-费用仅对官方 `api.deepseek.com` 的已知模型计算，并按每个成功响应发生时的北京时间选择峰谷价格。高峰时段为周一至周五 9:00–12:00、14:00–18:00，其余时间（包括周末）为空闲时段。V4.1 Flash（调用名 `deepseek-flash`，兼容映射的 `deepseek-v4-flash`、`deepseek-chat`、`deepseek-reasoner`）内置空闲价为命中 ¥0.02/M、未命中 ¥1/M、输出 ¥4/M，高峰价为 ¥0.04/M、¥2/M、¥8/M；V4 Pro 空闲价为 ¥0.15/M、¥4.5/M、¥13.5/M，高峰价为 ¥0.30/M、¥9/M、¥27/M。DeepSeek 自北京时间 2026-09-14 12:00 起把 `deepseek-v4-pro` 的请求路由到 V4.1 Flash 并按 Flash 价格计费，直到 V4.1 Pro 上线；该窗口内的 Pro 用量按 Flash 费率估算。GLM-5.3-Flash 的限时五折活动已于北京时间 2026-09-09 24:00 结束，内置刊例价为命中 ¥0.23/M、未命中 ¥0.8/M、输出 ¥2.8/M。价格不允许通过 Settings 或环境变量修改；ledger 保存每条记录实际采用的 `tier` 和费率快照，历史记录不回算。默认价格依据 DeepSeek 的[响应 usage 定义](https://api-docs.deepseek.com/api/create-chat-completion/)和[官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)。
+费用仅对官方 `api.deepseek.com` 的已知模型计算，并按每个成功响应发生时的北京时间选择峰谷价格。高峰时段为周一至周五 9:00–12:00、14:00–18:00，其余时间（包括周末）为空闲时段。V4.1 Flash（调用名 `deepseek-flash`，兼容映射的 `deepseek-v4-flash`、`deepseek-chat`、`deepseek-reasoner`）内置空闲价为命中 ¥0.02/M、未命中 ¥1/M、输出 ¥4/M，高峰价为 ¥0.04/M、¥2/M、¥8/M；V4 Pro 空闲价为 ¥0.15/M、¥4.5/M、¥13.5/M，高峰价为 ¥0.30/M、¥9/M、¥27/M。DeepSeek 曾公告自北京时间 2026-09-14 12:00 起把 `deepseek-v4-pro` 的请求路由到 V4.1 Flash 并按 Flash 价格计费，随后在 2026-09-10 公告的修订中改为继续提供 V4 Pro 的 API 服务且计费方式保持不变；因此 Pro 用量始终按 Pro 费率估算。GLM-5.3-Flash 的限时五折活动已于北京时间 2026-09-09 24:00 结束，内置刊例价为命中 ¥0.23/M、未命中 ¥0.8/M、输出 ¥2.8/M。GLM-5.3 旗舰模型内置刊例价为命中 ¥2/M、未命中 ¥8/M、输出 ¥28/M（计费不随 reasoning_effort 档位变化）；qwen3.8-max-0902 内置刊例价为命中 ¥1.2/M（按输入价一折的上下文缓存）、未命中 ¥12/M、输出 ¥36/M（单档计费，无输入长度阶梯）。价格不允许通过 Settings 或环境变量修改；ledger 保存每条记录实际采用的 `tier` 和费率快照，历史记录不回算。默认价格依据 DeepSeek 的[响应 usage 定义](https://api-docs.deepseek.com/api/create-chat-completion/)和[官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)、[智谱 API 定价](https://docs.bigmodel.cn/cn/guide/start/pricing)与[阿里云百炼模型价格](https://help.aliyun.com/zh/model-studio/model-pricing)。
 
 数据库启动修复会幂等纠正 2026-08-22 起误用 `deepseek-cny-2026-07-24` 的记录、曾使用 `deepseek-cny-2026-08-21` 高峰价计算的周末记录、2026-09-10 12:00（北京时间）DeepSeek 降价后仍按旧快照计价的 Flash 记录，以及 2026-09-09 24:00（北京时间）GLM 五折结束后仍按促销快照计价的 GLM 记录；其他历史快照不自动改写。
 

@@ -2,11 +2,11 @@ import {Button, Card, Spinner} from "@heroui/react";
 import React from "react";
 
 import {statusMessage, toProfileRule} from "../../app/utils";
-import {DEEPSEEK_CLASSIFIER_MODEL_ID} from "../../shared/classifierModels";
 import type {
   ClassifierModelsResponse,
   ClassificationProfile,
   JobInfo,
+  ProfileModelsResponse,
   ProfileProposal,
   SettingsConfigField,
   SettingsConfigUpdate,
@@ -15,6 +15,7 @@ import {TextAreaField, TextInputField} from "../../shared/components/FormFields"
 import {SelectField} from "../../shared/components/SelectField";
 import {StatusBanner, type StatusTone} from "../../shared/components/StatusBanner";
 import {ClassifierModelsEditor, classifierModelsDraftHasRequiredKeys, classifierModelsUpdateFromDraft, createClassifierModelsDraft, type ClassifierModelsDraft} from "../admin/ClassifierModelsEditor";
+import {ProfileModelsEditor, createProfileModelsDraft, type ProfileModelsDraft} from "../admin/ProfileModelsEditor";
 
 const aiAdvancedKeys = [
   "SCIRSS_CLASSIFIER_BATCH_SIZE",
@@ -109,10 +110,9 @@ function draftToProfile(profile: ClassificationProfile, draft: ProfileDraft): Cl
 function buildSettingsPayload(
   fields: SettingsConfigField[],
   values: Record<string, string>,
-  profileApiKey: string,
+  profileDefaultModelId: string,
 ): Record<string, SettingsConfigUpdate> {
   const payload: Record<string, SettingsConfigUpdate> = {};
-  const profileKey = profileApiKey.trim();
 
   fields.forEach((field) => {
     const rawValue = values[field.key] ?? "";
@@ -128,7 +128,9 @@ function buildSettingsPayload(
     payload[field.key] = {value: trimmedValue};
   });
 
-  if (profileKey) payload.SCIRSS_PROFILE_API_KEY = {value: profileKey};
+  if (profileDefaultModelId.trim()) {
+    payload.SCIRSS_PROFILE_DEFAULT_MODEL = {value: profileDefaultModelId.trim()};
+  }
 
   return payload;
 }
@@ -408,6 +410,8 @@ export function Onboarding({
   onSaveSettings,
   onSaveAndBootstrap,
   onTestClassifierModel,
+  onTestProfileModel,
+  profileModels,
   proposals,
 }: {
   busy: boolean;
@@ -427,11 +431,13 @@ export function Onboarding({
     interestDescription: string,
   ) => Promise<{message: string; ok: boolean; tone: StatusTone}>;
   onTestClassifierModel: (modelID: string, apiKey?: string) => Promise<JobInfo>;
+  onTestProfileModel: (modelID: string) => Promise<JobInfo>;
+  profileModels: ProfileModelsResponse;
   proposals: ProfileProposal[];
 }) {
   const [interestDescription, setInterestDescription] = React.useState("");
-  const [profileApiKey, setProfileApiKey] = React.useState("");
   const [classifierDraft, setClassifierDraft] = React.useState<ClassifierModelsDraft>(() => createClassifierModelsDraft(classifierModels));
+  const [profileModelsDraft, setProfileModelsDraft] = React.useState<ProfileModelsDraft>(() => createProfileModelsDraft(profileModels));
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const [advancedValues, setAdvancedValues] = React.useState<Record<string, string>>(() =>
     createInitialFieldValues(configFields),
@@ -464,10 +470,12 @@ export function Onboarding({
     () => fieldsForKeys(configFields, aiAdvancedKeys),
     [configFields],
   );
-  const profileApiKeyField = React.useMemo(
-    () => configFields.find((field) => field.key === "SCIRSS_PROFILE_API_KEY"),
-    [configFields],
-  );
+  const profileDefaultModel = React.useMemo(() => {
+    const selectedId = profileModels.models.some((model) => model.id === profileModelsDraft.defaultModelId)
+      ? profileModelsDraft.defaultModelId
+      : profileModels.default_model_id;
+    return profileModels.models.find((model) => model.id === selectedId) ?? null;
+  }, [profileModels, profileModelsDraft.defaultModelId]);
   const zoteroFields = React.useMemo(
     () => fieldsForKeys(configFields, zoteroKeys),
     [configFields],
@@ -492,20 +500,13 @@ export function Onboarding({
   }, [configFields]);
 
   React.useEffect(() => {
-    const next = createClassifierModelsDraft(classifierModels);
-    next.reuseDeepSeekKeyForProfile = !profileApiKeyField?.configured &&
-      next.enabledModelIds.includes(DEEPSEEK_CLASSIFIER_MODEL_ID) &&
-      Boolean(classifierModels.models.find((model) => model.id === DEEPSEEK_CLASSIFIER_MODEL_ID)?.configured);
-    setClassifierDraft(next);
-  }, [classifierModels, profileApiKeyField?.configured]);
+    setProfileModelsDraft(createProfileModelsDraft(profileModels));
+  }, [profileModels]);
 
-  const profileReady = Boolean(profileApiKey.trim()) || Boolean(profileApiKeyField?.configured);
-  const deepSeekModel = classifierModels.models.find((model) => model.id === DEEPSEEK_CLASSIFIER_MODEL_ID);
-  const deepSeekReady = classifierDraft.enabledModelIds.includes(DEEPSEEK_CLASSIFIER_MODEL_ID) &&
-    (Boolean(deepSeekModel?.configured) || Boolean(classifierDraft.credentials[DEEPSEEK_CLASSIFIER_MODEL_ID]?.value));
   const classifierSelectionValid = classifierDraft.enabledModelIds.length > 0 && classifierDraft.enabledModelIds.includes(classifierDraft.defaultModelId);
   const classifierKeysReady = classifierModelsDraftHasRequiredKeys(classifierDraft, classifierModels);
-  const canGenerate = classifierSelectionValid && classifierKeysReady && Boolean(interestDescription.trim()) && (profileReady || (classifierDraft.reuseDeepSeekKeyForProfile && deepSeekReady));
+  const canGenerate = classifierSelectionValid && classifierKeysReady &&
+    Boolean(interestDescription.trim()) && Boolean(profileDefaultModel?.configured);
 
   React.useEffect(() => {
     const currentPendingProposal = pendingProposal;
@@ -533,27 +534,21 @@ export function Onboarding({
     setSettingsMessage(null);
     setProposalMessage(null);
     const result = await onSaveAndBootstrap(
-      buildSettingsPayload(editableSettingsFields, advancedValues, profileApiKey),
+      buildSettingsPayload(editableSettingsFields, advancedValues, profileModelsDraft.defaultModelId),
       classifierModelsUpdateFromDraft(classifierDraft),
       interestDescription.trim(),
     );
     setSettingsMessage({tone: result.tone, text: result.message});
-    if (result.ok) {
-      setProfileApiKey("");
-    }
   };
 
   const handleSaveSettings = async () => {
     setSettingsMessage(null);
     setProposalMessage(null);
     const result = await onSaveSettings(
-      buildSettingsPayload(editableSettingsFields, advancedValues, profileApiKey),
+      buildSettingsPayload(editableSettingsFields, advancedValues, profileModelsDraft.defaultModelId),
       classifierModelsUpdateFromDraft(classifierDraft),
     );
     setSettingsMessage({tone: result.tone, text: result.message});
-    if (result.ok) {
-      setProfileApiKey("");
-    }
   };
 
   const handleAcceptDraft = async () => {
@@ -617,29 +612,13 @@ export function Onboarding({
                   models={classifierModels}
                   onChange={setClassifierDraft}
                   onTest={onTestClassifierModel}
-                  profileConfigured={Boolean(profileApiKeyField?.configured)}
-                  showReuse
                 />
-                <TextInputField
-                  description={
-                    <>
-                      Profile generation uses DeepSeek V4 Pro with its own key. Get and fund a key at{" "}
-                      <a
-                        className="underline underline-offset-2"
-                        href="https://platform.deepseek.com/"
-                        rel="noopener noreferrer"
-                        target="_blank"
-                      >
-                        platform.deepseek.com
-                      </a>
-                      .
-                    </>
-                  }
-                  label="Profile generation — DeepSeek V4 Pro API key"
-                  placeholder={profileApiKeyField?.configured ? "Leave blank to keep the current Profile key" : "Paste Profile API key"}
-                  type="password"
-                  value={profileApiKey}
-                  onChange={setProfileApiKey}
+                <ProfileModelsEditor
+                  draft={profileModelsDraft}
+                  jobs={jobs}
+                  models={profileModels}
+                  onChange={setProfileModelsDraft}
+                  onTest={onTestProfileModel}
                 />
               </div>
 

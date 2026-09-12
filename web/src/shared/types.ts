@@ -66,9 +66,27 @@ export type ClassifierModelsUpdate = {
   reuse_deepseek_key_for_profile?: boolean;
 };
 
+export type ProfileModelView = {
+  id: string;
+  provider: string;
+  label: string;
+  base_url: string;
+  default: boolean;
+  configured: boolean;
+  source: SettingsConfigSource | string;
+  stored_locally: boolean;
+  environment_override: boolean;
+};
+
+export type ProfileModelsResponse = {
+  models: ProfileModelView[];
+  default_model_id: string;
+};
+
 export type SettingsConfigResponse = {
   fields: SettingsConfigField[];
   classifier_models: ClassifierModelsResponse;
+  profile_models: ProfileModelsResponse;
 };
 
 export type AppMeta = {

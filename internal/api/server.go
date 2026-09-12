@@ -199,6 +199,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/app/exit", s.handleAppExit)
 	mux.HandleFunc("/api/settings/config", s.handleSettingsConfig)
 	mux.HandleFunc("/api/settings/classifier-models/test", s.handleClassifierModelTest)
+	mux.HandleFunc("/api/settings/profile-models/test", s.handleProfileModelTest)
 	mux.HandleFunc("/api/settings/feeds", s.handleSettingsFeeds)
 	mux.HandleFunc("/api/settings/scheduler", s.handleSettingsScheduler)
 	mux.HandleFunc("/api/profile/current", s.handleProfileCurrent)

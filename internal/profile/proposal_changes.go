@@ -115,6 +115,13 @@ func (change *ProposalChange) UnmarshalJSON(data []byte) error {
 		SourcePaperIDs:    payload.SourcePaperIDs,
 		Status:            payload.Status,
 	}
+	// 主题 label 列表只对 direct/indirect 规则变更有意义。部分模型会把标签带到
+	// unrelated/scope 变更上；这些标签按设计不变量本就无效，直接剥离，避免整个
+	// proposal 因一个空洞字段失败。
+	if payload.Section != ProposalSectionDirectRule && payload.Section != ProposalSectionIndirectRule {
+		change.TopicsBefore = nil
+		change.TopicsAfter = nil
+	}
 	return nil
 }
 
