@@ -471,6 +471,7 @@ export function DashboardTab({
 
       <UnclassifiedCleanupPanel
         activeJob={activeCleanupJob}
+        pipelineBusy={Boolean(activeSyncJob) || Boolean(activeReclassifyJob) || Boolean(activeCleanupJob)}
         onCleanup={onCleanup}
         onCleanupReview={onCleanupReview}
         refreshKey={cleanupRefreshKey}

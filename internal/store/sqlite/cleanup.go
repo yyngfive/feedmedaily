@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -265,6 +266,16 @@ func cleanupReviewStatePriority(state string) int {
 	default:
 		return 1
 	}
+}
+
+// CleanupTitleReviewGroupKey derives the direction-independent review key for a
+// title-duplicate pair. One row per pair means a keep decision covers both scan
+// directions instead of generating a mirrored review for the other paper.
+func CleanupTitleReviewGroupKey(left int64, right int64) string {
+	if left > right {
+		left, right = right, left
+	}
+	return "title:" + strconv.FormatInt(left, 10) + ":" + strconv.FormatInt(right, 10)
 }
 
 func (s *Store) ListCleanupReviews(state string) ([]CleanupReview, error) {
@@ -532,6 +543,28 @@ func (s *Store) ApplyCleanupReviewDecision(ctx context.Context, reviewID int64, 
 	}
 	result.PaperID = candidateID
 
+	nextState := CleanupReviewStateKept
+	switch decision {
+	case CleanupDecisionDelete:
+		nextState = CleanupReviewStateDeleted
+	case CleanupDecisionDeleteMatch:
+		nextState = CleanupReviewStateKept
+	case CleanupDecisionClearDOI:
+		nextState = CleanupReviewStateDOIClear
+	case CleanupDecisionClearMatchDOI:
+		nextState = CleanupReviewStateDOIClear
+	}
+	// Stamp the decision first: the deletion cascade below closes every pending
+	// review that references the deleted paper, including this row when the
+	// deleted side is its matched paper, and must not overwrite the decision.
+	if _, err := tx.Exec(`
+		UPDATE cleanup_reviews
+		SET state = ?, decision = ?, decided_at = ?
+		WHERE id = ? AND state IN (?, ?)
+	`, nextState, decision, now.UTC().Format(time.RFC3339Nano), reviewID, CleanupReviewStatePending, CleanupReviewStateDeferred); err != nil {
+		return result, fmt.Errorf("record cleanup review decision: %w", err)
+	}
+
 	switch decision {
 	case CleanupDecisionDelete, CleanupDecisionDeleteMatch:
 		if !matchedID.Valid || matchedID.Int64 <= 0 || matchedID.Int64 == candidateID {
@@ -595,24 +628,6 @@ func (s *Store) ApplyCleanupReviewDecision(ctx context.Context, reviewID int64, 
 		result.DOICleared = true
 	}
 
-	nextState := CleanupReviewStateKept
-	switch decision {
-	case CleanupDecisionDelete:
-		nextState = CleanupReviewStateDeleted
-	case CleanupDecisionDeleteMatch:
-		nextState = CleanupReviewStateKept
-	case CleanupDecisionClearDOI:
-		nextState = CleanupReviewStateDOIClear
-	case CleanupDecisionClearMatchDOI:
-		nextState = CleanupReviewStateDOIClear
-	}
-	if _, err := tx.Exec(`
-		UPDATE cleanup_reviews
-		SET state = ?, decision = ?, decided_at = ?
-		WHERE id = ? AND state IN (?, ?)
-	`, nextState, decision, now.UTC().Format(time.RFC3339Nano), reviewID, CleanupReviewStatePending, CleanupReviewStateDeferred); err != nil {
-		return result, fmt.Errorf("record cleanup review decision: %w", err)
-	}
 	if err := tx.Commit(); err != nil {
 		return result, fmt.Errorf("commit cleanup review transaction: %w", err)
 	}
@@ -807,12 +822,17 @@ func (s *Store) repointPaperReferencesTx(tx *sql.Tx, fromID int64, toID int64) e
 	return nil
 }
 
+// markCleanupReviewsDeletedTx closes every pending review that references the
+// deleted paper, as candidate or as matched. Reviews whose matched paper is
+// gone would render without any actionable decision in the UI and would pause
+// bulk classification forever, so the next scan rebuilds them against a
+// surviving paper instead.
 func (s *Store) markCleanupReviewsDeletedTx(tx *sql.Tx, paperID int64, now time.Time) error {
 	_, err := tx.Exec(`
 		UPDATE cleanup_reviews
 		SET state = ?, decision = ?, decided_at = ?
-		WHERE candidate_paper_id = ? AND state IN (?, ?)
-	`, CleanupReviewStateDeleted, CleanupDecisionDelete, now.UTC().Format(time.RFC3339Nano), paperID, CleanupReviewStatePending, CleanupReviewStateDeferred)
+		WHERE (candidate_paper_id = ? OR matched_paper_id = ?) AND state IN (?, ?)
+	`, CleanupReviewStateDeleted, CleanupDecisionDelete, now.UTC().Format(time.RFC3339Nano), paperID, paperID, CleanupReviewStatePending, CleanupReviewStateDeferred)
 	if err != nil && !isMissingSQLiteTable(err) {
 		return fmt.Errorf("close cleanup reviews for deleted paper %d: %w", paperID, err)
 	}

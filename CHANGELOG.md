@@ -22,6 +22,10 @@ Changes since `0.6.1`:
 
 ### Fixed
 
+- Fixed a database-cleanup deadlock: when a review's matched article was deleted by an exact-duplicate removal or another review decision, the remaining review stayed pending with no actionable button and paused bulk classification forever. Reviews that reference a deleted paper now close automatically, already-broken reviews are repaired at startup, and the next cleanup run rebuilds an actionable review against a surviving article.
+- Keeping a title-duplicate review no longer produces a mirrored review for the other article on the next cleanup run. Reviews are now keyed per article pair, so one decision covers both scan directions and classification resumes without a redundant second decision.
+- Database-cleanup backup snapshots (`literature.sqlite.pre-cleanup-*`) are now pruned to the newest ten so per-decision backups no longer accumulate without bound.
+- The Dashboard's cleanup section now disables its actions while a sync or reclassification job is running, matching the backend pipeline lock instead of surfacing a conflict error after clicking.
 - Fixed cleanup review classification for title variants such as `Inside Back Cover`: normalized-title matches remain duplicate reviews instead of being mislabeled as DOI conflicts. DOI-conflict reviews are reserved for exact duplicate relations whose titles do not match, and the two review items now render side by side on wider screens.
 - Fixed Windows installer updates failing when FeedMeDaily was running: the installer now asks the tray to stop the local backend and waits for both processes before replacing packaged files.
 - Repriced usage-ledger rows that were recorded with a price snapshot a later official price change replaced: DeepSeek Flash rows completed at or after the 2026-09-10 cutover and GLM-5.3-Flash rows completed after the 2026-09-09 promotion ended now carry the current default rates instead of the superseded ones. The repair runs idempotently at startup alongside the existing legacy-snapshot repairs, and rows recorded while their snapshot was still current keep their historical estimate.

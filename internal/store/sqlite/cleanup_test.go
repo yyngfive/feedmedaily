@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -462,6 +463,262 @@ func TestOpenOrCreateMigratesLegacyDOIConflictTitleReviewBackToTitleDuplicate(t 
 	}
 	if review.MatchType != CleanupReviewMatchTitle || review.SuggestedAction != CleanupDecisionDelete || review.State != CleanupReviewStatePending {
 		t.Fatalf("legacy DOI conflict title review was not migrated back to title duplicate: %#v", review)
+	}
+}
+
+func TestApplyCleanupOperationsClosesReviewsReferencingDeletedDuplicate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	store, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 9, 11, 8, 0, 0, 0, time.UTC)
+
+	canonicalID, _, err := store.UpsertPaper(Paper{SourceURL: "feed", Title: "Canonical", URL: "https://example.com/canonical"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveClassification(canonicalID, Classification{
+		Relevance: "direct", Confidence: 0.9, Reason: "fixture", TopicTags: []string{}, RecommendedAction: "read", Model: "fixture",
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	// A DOI gives the duplicate a distinct paper_key so it is stored as its own row.
+	duplicateID, _, err := store.UpsertPaper(Paper{SourceURL: "feed", Title: "Canonical", URL: "https://example.com/canonical", DOI: stringPointer("10.1000/duplicate")}, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	partnerID, _, err := store.UpsertPaper(Paper{SourceURL: "feed", Title: "Shared Title Variant", URL: "https://example.com/partner"}, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewID, err := store.UpsertCleanupReview(CleanupReviewDraft{
+		GroupKey: "title:partner-cascade", CandidatePaperID: partnerID, MatchedPaperID: duplicateID,
+		MatchType: CleanupReviewMatchTitle, Reason: "title match", SuggestedAction: CleanupDecisionDelete,
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.ApplyCleanupOperations(context.Background(), []CleanupOperation{{
+		Kind: CleanupOperationDeleteDuplicate, CandidatePaperID: duplicateID, CanonicalPaperID: canonicalID, Identity: CleanupIdentityURL,
+	}}, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	review, err := store.CleanupReviewByID(reviewID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review.State != CleanupReviewStateDeleted || review.Decision == nil || *review.Decision != CleanupDecisionDelete {
+		t.Fatalf("pending review referencing the deleted duplicate as matched was not closed: %#v", review)
+	}
+	partner, err := store.PaperByID(partnerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if partner == nil {
+		t.Fatal("review candidate must survive the cascade")
+	}
+}
+
+func TestApplyCleanupReviewDecisionClosesReviewsReferencingDeletedPaper(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	store, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 9, 11, 8, 0, 0, 0, time.UTC)
+
+	retainedID, _, err := store.UpsertPaper(Paper{SourceURL: "feed", Title: "Retained article", URL: "https://example.com/retained"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveClassification(retainedID, Classification{
+		Relevance: "direct", Confidence: 0.9, Reason: "fixture", TopicTags: []string{}, RecommendedAction: "read", Model: "fixture",
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	deletedID, _, err := store.UpsertPaper(Paper{SourceURL: "feed", Title: "Deleted article", URL: "https://example.com/deleted"}, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	observerID, _, err := store.UpsertPaper(Paper{SourceURL: "feed", Title: "Deleted article", URL: "https://example.com/observer"}, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// observer's review points at the paper another decision is about to delete.
+	observerReviewID, err := store.UpsertCleanupReview(CleanupReviewDraft{
+		GroupKey: "title:observer", CandidatePaperID: observerID, MatchedPaperID: deletedID,
+		MatchType: CleanupReviewMatchTitle, Reason: "title match", SuggestedAction: CleanupDecisionDelete,
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deletedReviewID, err := store.UpsertCleanupReview(CleanupReviewDraft{
+		GroupKey: "title:deleted", CandidatePaperID: deletedID, MatchedPaperID: retainedID,
+		MatchType: CleanupReviewMatchTitle, Reason: "title match", SuggestedAction: CleanupDecisionDelete,
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.ApplyCleanupReviewDecision(context.Background(), deletedReviewID, CleanupDecisionDelete, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	observerReview, err := store.CleanupReviewByID(observerReviewID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observerReview.State != CleanupReviewStateDeleted || observerReview.Decision == nil || *observerReview.Decision != CleanupDecisionDelete {
+		t.Fatalf("pending review whose matched paper was deleted by another decision was not closed: %#v", observerReview)
+	}
+	// The decided review's candidate paper is gone, so the listing JOIN hides
+	// it; assert its recorded state directly.
+	var deletedState string
+	var deletedDecision *string
+	if err := store.db.QueryRow(`SELECT state, decision FROM cleanup_reviews WHERE id = ?`, deletedReviewID).Scan(&deletedState, &deletedDecision); err != nil {
+		t.Fatal(err)
+	}
+	if deletedState != CleanupReviewStateDeleted || deletedDecision == nil || *deletedDecision != CleanupDecisionDelete {
+		t.Fatalf("decided review did not keep its own decision record: state=%q decision=%v", deletedState, deletedDecision)
+	}
+	observer, err := store.PaperByID(observerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observer == nil {
+		t.Fatal("observer paper must survive the cascade")
+	}
+}
+
+func TestOpenOrCreateClosesCleanupReviewsWithDeletedMatchedPapers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	store, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 11, 8, 0, 0, 0, time.UTC)
+	candidateID, _, err := store.UpsertPaper(Paper{SourceURL: "feed", Title: "Stuck review", URL: "https://example.com/stuck"}, now)
+	if err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	matchedID, _, err := store.UpsertPaper(Paper{SourceURL: "feed", Title: "Vanished match", URL: "https://example.com/vanished"}, now.Add(time.Minute))
+	if err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	reviewID, err := store.UpsertCleanupReview(CleanupReviewDraft{
+		GroupKey: "title:stuck", CandidatePaperID: candidateID, MatchedPaperID: matchedID,
+		MatchType: CleanupReviewMatchTitle, Reason: "title match", SuggestedAction: CleanupDecisionDelete,
+	}, now)
+	if err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	// Simulate a legacy database where the matched paper was deleted without
+	// closing reviews that referenced it.
+	if _, err := store.db.Exec(`DELETE FROM papers WHERE id = ?`, matchedID); err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	review, err := reopened.CleanupReviewByID(reviewID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review.State != CleanupReviewStateDeleted || review.Decision == nil || *review.Decision != CleanupDecisionDelete || review.DecidedAt == nil {
+		t.Fatalf("dead matched reference was not repaired at startup: %#v", review)
+	}
+}
+
+func TestOpenOrCreateMigratesLegacyTitleReviewKeysToPairKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	store, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 11, 8, 0, 0, 0, time.UTC)
+	firstID, _, err := store.UpsertPaper(Paper{SourceURL: "feed", Title: "Mirrored pair", URL: "https://example.com/first"}, now)
+	if err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	secondID, _, err := store.UpsertPaper(Paper{SourceURL: "feed", Title: "Mirrored pair", URL: "https://example.com/second"}, now.Add(time.Minute))
+	if err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	// Mirrored legacy rows: each direction created its own candidate-keyed row.
+	for _, legacy := range []struct {
+		groupKey  string
+		candidate int64
+		matched   int64
+	}{
+		{groupKey: "title:" + strconv.FormatInt(firstID, 10), candidate: firstID, matched: secondID},
+		{groupKey: "title:" + strconv.FormatInt(secondID, 10), candidate: secondID, matched: firstID},
+	} {
+		if _, err := store.db.Exec(`
+			INSERT INTO cleanup_reviews (group_key, candidate_paper_id, matched_paper_id, match_type, reason, suggested_action, state, created_at)
+			VALUES (?, ?, ?, 'title_duplicate', 'legacy mirror', 'delete', 'pending', ?)
+		`, legacy.groupKey, legacy.candidate, legacy.matched, now.Format(time.RFC3339Nano)); err != nil {
+			store.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	pairKey := CleanupTitleReviewGroupKey(firstID, secondID)
+	if pairKey == "title:"+strconv.FormatInt(firstID, 10) {
+		t.Fatalf("pair key must be direction independent: %q", pairKey)
+	}
+	assertSinglePendingPairReview(t, reopened, pairKey)
+
+	// Reopening must be a no-op once keys are migrated.
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopenedAgain, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopenedAgain.Close()
+	assertSinglePendingPairReview(t, reopenedAgain, pairKey)
+}
+
+func assertSinglePendingPairReview(t *testing.T, store *Store, pairKey string) {
+	t.Helper()
+	var groupKey string
+	var state string
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM cleanup_reviews`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("mirrored legacy reviews did not collapse into one row: count=%d", count)
+	}
+	if err := store.db.QueryRow(`SELECT group_key, state FROM cleanup_reviews LIMIT 1`).Scan(&groupKey, &state); err != nil {
+		t.Fatal(err)
+	}
+	if groupKey != pairKey || state != CleanupReviewStatePending {
+		t.Fatalf("unexpected migrated review: key=%q state=%q", groupKey, state)
 	}
 }
 

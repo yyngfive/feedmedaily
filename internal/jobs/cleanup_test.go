@@ -2,7 +2,11 @@ package jobs
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -298,6 +302,151 @@ func TestResolveCleanupReviewLeavesKeepAndClearDOIUnclassified(t *testing.T) {
 				t.Fatalf("review state = %q, want %q", review.State, wantState)
 			}
 		})
+	}
+}
+
+func TestCleanupTitleReviewKeepResolvesPairWithoutMirrorReview(t *testing.T) {
+	root := t.TempDir()
+	settings := testJobSettings(root)
+	writeTestProfile(t, settings)
+	classifierServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"items\":[{\"id\":\"1\",\"relevance\":\"direct\",\"confidence\":0.9,\"reason\":\"Relevant.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"镜像对\"},{\"id\":\"2\",\"relevance\":\"indirect\",\"confidence\":0.8,\"reason\":\"Tangential.\",\"recommended_action\":\"read\",\"translated_title_zh\":\"镜像对二\"}]}"}}]}`))
+	}))
+	defer classifierServer.Close()
+	settings.ClassifierBaseURL = classifierServer.URL
+
+	sqliteStore, err := store.OpenOrCreate(filepath.Join(root, "data", "literature.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 11, 8, 0, 0, 0, time.UTC)
+	firstID, _, err := sqliteStore.UpsertPaper(store.Paper{
+		SourceURL: "feed", Title: "A duplicated discovery", URL: "https://example.com/first",
+	}, now)
+	if err != nil {
+		sqliteStore.Close()
+		t.Fatal(err)
+	}
+	secondID, _, err := sqliteStore.UpsertPaper(store.Paper{
+		SourceURL: "feed", Title: "A duplicated discovery", URL: "https://example.com/second",
+	}, now.Add(time.Hour))
+	if err != nil {
+		sqliteStore.Close()
+		t.Fatal(err)
+	}
+	if err := sqliteStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	firstRun, err := CleanupUnclassifiedContext(settings, context.Background(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstRun["reclassified"] != 0 || firstRun["needs_review"] != 1 || firstRun["awaiting_review"] != true {
+		t.Fatalf("cleanup should collapse the title pair into one review: %#v", firstRun)
+	}
+	reopened, err := store.Open(settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := reopened.ListCleanupReviews(store.CleanupReviewStatePending)
+	if err != nil {
+		reopened.Close()
+		t.Fatal(err)
+	}
+	if len(pending) != 1 {
+		reopened.Close()
+		t.Fatalf("expected one pending pair review, got %#v", pending)
+	}
+	reviewID := pending[0].ID
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ResolveCleanupReviewContext(settings, reviewID, store.CleanupDecisionKeep, context.Background(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// The second run must not reopen a mirrored review for the other paper; the
+	// kept decision covers the pair, so classification resumes.
+	secondRun, err := CleanupUnclassifiedContext(settings, context.Background(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondRun["reclassified"] != 1 || secondRun["needs_review"] != 0 {
+		t.Fatalf("kept pair decision should resume classification without a mirror review: %#v", secondRun)
+	}
+	thirdRun, err := CleanupUnclassifiedContext(settings, context.Background(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thirdRun["reclassified"] != 1 || thirdRun["needs_review"] != 0 {
+		t.Fatalf("second paper should classify on the following run: %#v", thirdRun)
+	}
+
+	finalStore, err := store.Open(settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer finalStore.Close()
+	finalPending, err := finalStore.ListCleanupReviews(store.CleanupReviewStatePending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(finalPending) != 0 {
+		t.Fatalf("pending reviews should be empty after the pair decision: %#v", finalPending)
+	}
+	for _, paperID := range []int64{firstID, secondID} {
+		classification, err := finalStore.LatestClassification(paperID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if classification == nil {
+			t.Fatalf("paper %d was never classified after one keep decision", paperID)
+		}
+	}
+}
+
+func TestPruneCleanupBackupsKeepsNewestSnapshots(t *testing.T) {
+	directory := t.TempDir()
+	base := time.Date(2026, 9, 11, 8, 0, 0, 0, time.UTC)
+	for i := 0; i < 12; i++ {
+		name := filepath.Join(directory, cleanupBackupFilePrefix+strconv.Itoa(1000+i))
+		if err := os.WriteFile(name, []byte("snapshot"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		stamp := base.Add(time.Duration(i) * time.Hour)
+		if err := os.Chtimes(name, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unrelated := filepath.Join(directory, "literature.sqlite")
+	if err := os.WriteFile(unrelated, []byte("db"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pruneCleanupBackups(directory)
+
+	remaining, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := map[string]bool{}
+	for _, entry := range remaining {
+		kept[entry.Name()] = true
+	}
+	if len(kept) != cleanupBackupRetainCount+1 {
+		t.Fatalf("prune should keep %d backups plus the database, got %d files", cleanupBackupRetainCount, len(kept))
+	}
+	if !kept["literature.sqlite"] {
+		t.Fatal("prune must not touch files outside the backup prefix")
+	}
+	for i := 0; i < 12; i++ {
+		name := cleanupBackupFilePrefix + strconv.Itoa(1000+i)
+		shouldKeep := i >= 12-cleanupBackupRetainCount
+		if kept[name] != shouldKeep {
+			t.Fatalf("backup %s kept=%v, want %v", name, kept[name], shouldKeep)
+		}
 	}
 }
 

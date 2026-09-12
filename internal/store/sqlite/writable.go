@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const writableSchema = `
@@ -181,6 +182,12 @@ func ensureMutableSchema(db *sql.DB) error {
 		CleanupReviewStatePending, CleanupReviewMatchDOIConflict); err != nil && !isMissingSQLiteTable(err) {
 		return fmt.Errorf("migrate legacy DOI-conflict title reviews: %w", err)
 	}
+	if err := closeCleanupReviewsWithDeletedMatchedPapers(db); err != nil {
+		return err
+	}
+	if err := migrateLegacyTitleReviewGroupKeys(db); err != nil {
+		return err
+	}
 	if err := ensureColumn(db, "profile_proposals", "base_profile_version", "INTEGER"); err != nil {
 		return err
 	}
@@ -195,6 +202,91 @@ func ensureMutableSchema(db *sql.DB) error {
 	}
 	if err := ensureColumn(db, "feedback", "corrected_topic", "TEXT"); err != nil {
 		return err
+	}
+	return nil
+}
+
+// closeCleanupReviewsWithDeletedMatchedPapers repairs pending reviews that
+// reference a paper which no longer exists. Earlier versions only closed
+// reviews whose candidate was deleted, so such rows could render without any
+// actionable decision and pause bulk classification forever. Closing them lets
+// the next cleanup scan rebuild an actionable review against a surviving paper.
+func closeCleanupReviewsWithDeletedMatchedPapers(db *sql.DB) error {
+	if _, err := db.Exec(`
+		UPDATE cleanup_reviews
+		SET state = ?, decision = ?, decided_at = ?
+		WHERE state IN (?, ?)
+			AND matched_paper_id IS NOT NULL
+			AND NOT EXISTS (SELECT 1 FROM papers WHERE papers.id = cleanup_reviews.matched_paper_id)
+	`, CleanupReviewStateDeleted, CleanupDecisionDelete, time.Now().UTC().Format(time.RFC3339Nano),
+		CleanupReviewStatePending, CleanupReviewStateDeferred); err != nil && !isMissingSQLiteTable(err) {
+		return fmt.Errorf("close cleanup reviews with deleted matched papers: %w", err)
+	}
+	return nil
+}
+
+// migrateLegacyTitleReviewGroupKeys rewrites pre-pair title review keys
+// (title:<candidate>) to direction-independent pair keys. Mirrored rows for the
+// same pair collapse into one row, preferring the pending one, so a decision
+// recorded against either direction is honored.
+func migrateLegacyTitleReviewGroupKeys(db *sql.DB) error {
+	rows, err := db.Query(`
+		SELECT id, candidate_paper_id, matched_paper_id, state
+		FROM cleanup_reviews
+		WHERE group_key = 'title:' || candidate_paper_id
+			AND matched_paper_id IS NOT NULL
+	`)
+	if err != nil {
+		if isMissingSQLiteTable(err) {
+			return nil
+		}
+		return fmt.Errorf("query legacy title review keys: %w", err)
+	}
+	type legacyTitleReview struct {
+		id        int64
+		candidate int64
+		matched   int64
+		state     string
+	}
+	legacy := []legacyTitleReview{}
+	for rows.Next() {
+		var review legacyTitleReview
+		if err := rows.Scan(&review.id, &review.candidate, &review.matched, &review.state); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan legacy title review: %w", err)
+		}
+		legacy = append(legacy, review)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate legacy title reviews: %w", err)
+	}
+	rows.Close()
+
+	byPairKey := map[string][]legacyTitleReview{}
+	for _, review := range legacy {
+		key := CleanupTitleReviewGroupKey(review.candidate, review.matched)
+		byPairKey[key] = append(byPairKey[key], review)
+	}
+	for key, group := range byPairKey {
+		keep := group[0]
+		for _, review := range group[1:] {
+			if cleanupReviewStatePriority(review.state) > cleanupReviewStatePriority(keep.state) ||
+				(cleanupReviewStatePriority(review.state) == cleanupReviewStatePriority(keep.state) && review.id < keep.id) {
+				keep = review
+			}
+		}
+		for _, review := range group {
+			if review.id == keep.id {
+				continue
+			}
+			if _, err := db.Exec(`DELETE FROM cleanup_reviews WHERE id = ?`, review.id); err != nil {
+				return fmt.Errorf("delete superseded legacy title review %d: %w", review.id, err)
+			}
+		}
+		if _, err := db.Exec(`UPDATE cleanup_reviews SET group_key = ? WHERE id = ?`, key, keep.id); err != nil {
+			return fmt.Errorf("migrate legacy title review key %d: %w", keep.id, err)
+		}
 	}
 	return nil
 }
