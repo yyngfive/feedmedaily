@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -120,7 +121,7 @@ func CleanupUnclassifiedContext(settings config.Settings, ctx context.Context, p
 					reason += " The DOI was left unchanged until this title match is reviewed."
 				}
 				reviewDrafts = append(reviewDrafts, store.CleanupReviewDraft{
-					GroupKey:         "title:" + strconv.FormatInt(item.Paper.ID, 10),
+					GroupKey:         store.CleanupTitleReviewGroupKey(item.Paper.ID, matched.Paper.ID),
 					CandidatePaperID: item.Paper.ID,
 					MatchedPaperID:   matched.Paper.ID,
 					MatchType:        store.CleanupReviewMatchTitle,
@@ -172,6 +173,7 @@ func CleanupUnclassifiedContext(settings config.Settings, ctx context.Context, p
 		return result, err
 	}
 	result["backup_path"] = backupPath
+	pruneCleanupBackups(cleanupBackupDir(settings))
 
 	for _, draft := range reviewDrafts {
 		if err := ctx.Err(); err != nil {
@@ -192,9 +194,12 @@ func CleanupUnclassifiedContext(settings config.Settings, ctx context.Context, p
 	if err != nil {
 		return result, err
 	}
+	// The pending count is authoritative: a draft may have refreshed an already
+	// resolved pair review instead of creating new work, so report what is
+	// actually waiting rather than how many drafts the scan produced.
 	result["pending_review_count"] = pendingReviews
+	result["needs_review"] = pendingReviews
 	if pendingReviews > 0 {
-		result["needs_review"] = pendingReviews
 		result["awaiting_review"] = true
 		if operationsCount := applyResult.DeletedDuplicates + applyResult.RepairedDOI; operationsCount > 0 {
 			reportCount, err := RebuildLatestReport(settings, progress)
@@ -248,6 +253,7 @@ func ResolveCleanupReviewContext(settings config.Settings, reviewID int64, decis
 	if err := sqliteStore.BackupTo(backupPath); err != nil {
 		return nil, err
 	}
+	pruneCleanupBackups(cleanupBackupDir(settings))
 	EmitProgress(progress, StepProgress(
 		"pipeline.cleanup.applying",
 		"cleanup-review",
@@ -520,10 +526,53 @@ func stringValue(value *string) string {
 	return strings.TrimSpace(*value)
 }
 
-func cleanupBackupPath(settings config.Settings, now time.Time) string {
+const (
+	cleanupBackupFilePrefix  = "literature.sqlite.pre-cleanup-"
+	cleanupBackupRetainCount = 10
+)
+
+func cleanupBackupDir(settings config.Settings) string {
 	directory := strings.TrimSpace(settings.DataDir)
 	if directory == "" {
-		directory = filepath.Dir(settings.DatabasePath)
+		return filepath.Dir(settings.DatabasePath)
 	}
-	return filepath.Join(directory, "literature.sqlite.pre-cleanup-"+strconv.FormatInt(now.UnixNano(), 10))
+	return directory
+}
+
+func cleanupBackupPath(settings config.Settings, now time.Time) string {
+	return filepath.Join(cleanupBackupDir(settings), cleanupBackupFilePrefix+strconv.FormatInt(now.UnixNano(), 10))
+}
+
+// pruneCleanupBackups bounds the disk cost of the per-run and per-decision
+// VACUUM INTO snapshots by keeping only the newest ones. Pruning is best-effort
+// housekeeping: failures never fail an otherwise successful cleanup mutation.
+func pruneCleanupBackups(directory string) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return
+	}
+	type backupFile struct {
+		name    string
+		modTime time.Time
+	}
+	backups := []backupFile{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), cleanupBackupFilePrefix) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		backups = append(backups, backupFile{name: entry.Name(), modTime: info.ModTime()})
+	}
+	sort.SliceStable(backups, func(i, j int) bool {
+		return backups[i].modTime.After(backups[j].modTime)
+	})
+	if len(backups) <= cleanupBackupRetainCount {
+		return
+	}
+	for _, backup := range backups[cleanupBackupRetainCount:] {
+		_ = os.Remove(filepath.Join(directory, backup.name))
+	}
 }

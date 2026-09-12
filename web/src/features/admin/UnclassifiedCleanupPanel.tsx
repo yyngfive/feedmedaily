@@ -60,11 +60,14 @@ function PaperMeta({paper}: {paper: CleanupReview["candidate"]}) {
 
 export function UnclassifiedCleanupPanel({
   activeJob,
+  pipelineBusy,
   onCleanup,
   onCleanupReview,
   refreshKey,
 }: {
   activeJob: JobInfo | null;
+  /** True while any pipeline job (sync, reclassify, cleanup) holds the lock. */
+  pipelineBusy: boolean;
   onCleanup: () => Promise<void> | void;
   onCleanupReview: (reviewID: number, decision: CleanupReviewDecision) => Promise<void> | void;
   refreshKey: string;
@@ -78,7 +81,7 @@ export function UnclassifiedCleanupPanel({
   const [confirmCleanup, setConfirmCleanup] = React.useState(false);
   const [confirmedAction, setConfirmedAction] = React.useState<ConfirmedReviewAction | null>(null);
   const loadSequence = React.useRef(0);
-  const disabled = Boolean(activeJob) || starting || processingReviewID !== null;
+  const disabled = pipelineBusy || starting || processingReviewID !== null;
 
   const loadCleanup = React.useCallback(async () => {
     const sequence = ++loadSequence.current;
