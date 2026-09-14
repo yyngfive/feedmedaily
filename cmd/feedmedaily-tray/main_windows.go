@@ -22,6 +22,7 @@ func main() {
 
 	// 托盘只需要 root；其余路径和设置都由内部布局解析完成。
 	root := flag.String("root", defaultRoot, "Project root or installed app directory.")
+	check := flag.Bool("check", false, "Check whether a FeedMeDaily instance is running.")
 	shutdown := flag.Bool("shutdown", false, "Stop an existing FeedMeDaily instance before an update.")
 	dataRoot := flag.String("data-root", "", "User data directory used by the running instance.")
 	flag.Parse()
@@ -32,18 +33,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *shutdown {
-		if strings.TrimSpace(*dataRoot) != "" {
-			absDataRoot, err := filepath.Abs(*dataRoot)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "failed to resolve data root:", err)
-				os.Exit(1)
-			}
-			if err := os.Setenv("FEEDMEDAILY_DATA_ROOT", absDataRoot); err != nil {
-				fmt.Fprintln(os.Stderr, "failed to set data root:", err)
-				os.Exit(1)
-			}
+	if strings.TrimSpace(*dataRoot) != "" {
+		absDataRoot, err := filepath.Abs(*dataRoot)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "failed to resolve data root:", err)
+			os.Exit(1)
 		}
+		if err := os.Setenv("FEEDMEDAILY_DATA_ROOT", absDataRoot); err != nil {
+			fmt.Fprintln(os.Stderr, "failed to set data root:", err)
+			os.Exit(1)
+		}
+	}
+
+	if *check {
+		running, err := trayapp.IsRunningApp(absRoot)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "failed to check FeedMeDaily:", err)
+			os.Exit(1)
+		}
+		if running {
+			os.Exit(2)
+		}
+		return
+	}
+
+	if *shutdown {
 		if err := trayapp.ShutdownRunningApp(absRoot); err != nil {
 			fmt.Fprintln(os.Stderr, "failed to shut down FeedMeDaily:", err)
 			os.Exit(1)

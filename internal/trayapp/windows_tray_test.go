@@ -301,6 +301,110 @@ func TestShutdownRunningAppStopsServiceBeforeClosingTray(t *testing.T) {
 	}
 }
 
+func TestIsRunningAppDetectsServiceOrTray(t *testing.T) {
+	t.Run("service", func(t *testing.T) {
+		root := t.TempDir()
+		layout := testLayout(root, runtimeModeRelease)
+		if err := WriteRuntimeState(layout.RuntimeStatePath, RuntimeState{PID: 4242, Port: 8000}); err != nil {
+			t.Fatal(err)
+		}
+
+		restoreProcess := replaceProcessRunningCall(func(pid int) bool {
+			return pid == 4242
+		})
+		defer restoreProcess()
+		restoreFind := replaceFindTrayWindowCall(func(string) uintptr { return 0 })
+		defer restoreFind()
+
+		running, err := isRunningApp(layout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !running {
+			t.Fatal("isRunningApp = false, want true for a running service")
+		}
+	})
+
+	t.Run("service-health", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/app/health" {
+				t.Fatalf("health path = %q, want /api/app/health", r.URL.Path)
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		serverURL, err := url.Parse(server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		port, err := strconv.Atoi(serverURL.Port())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		root := t.TempDir()
+		layout := testLayout(root, runtimeModeRelease)
+		if err := WriteRuntimeState(layout.RuntimeStatePath, RuntimeState{PID: 4242, Port: port}); err != nil {
+			t.Fatal(err)
+		}
+
+		restoreProcess := replaceProcessRunningCall(func(int) bool { return false })
+		defer restoreProcess()
+		restoreFind := replaceFindTrayWindowCall(func(string) uintptr { return 0 })
+		defer restoreFind()
+
+		running, err := isRunningApp(layout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !running {
+			t.Fatal("isRunningApp = false, want true for a healthy service")
+		}
+	})
+
+	t.Run("tray", func(t *testing.T) {
+		root := t.TempDir()
+		layout := testLayout(root, runtimeModeRelease)
+
+		restoreProcess := replaceProcessRunningCall(func(int) bool { return false })
+		defer restoreProcess()
+		restoreFind := replaceFindTrayWindowCall(func(configDir string) uintptr {
+			if configDir != layout.ConfigDir {
+				t.Fatalf("find configDir = %q, want %q", configDir, layout.ConfigDir)
+			}
+			return 909
+		})
+		defer restoreFind()
+
+		running, err := isRunningApp(layout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !running {
+			t.Fatal("isRunningApp = false, want true for a running tray")
+		}
+	})
+
+	t.Run("none", func(t *testing.T) {
+		root := t.TempDir()
+		layout := testLayout(root, runtimeModeRelease)
+
+		restoreProcess := replaceProcessRunningCall(func(int) bool { return false })
+		defer restoreProcess()
+		restoreFind := replaceFindTrayWindowCall(func(string) uintptr { return 0 })
+		defer restoreFind()
+
+		running, err := isRunningApp(layout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if running {
+			t.Fatal("isRunningApp = true, want false when neither service nor tray is running")
+		}
+	})
+}
+
 func TestWindowProcReloadSettingsRefreshesAppState(t *testing.T) {
 	app, settingsPath := testSchedulerApp(t, TraySettings{
 		ScheduleEnabled: false,

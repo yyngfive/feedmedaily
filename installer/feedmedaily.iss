@@ -44,6 +44,8 @@ var
   DataRoot: String;
   Parameters: String;
   ResultCode: Integer;
+  CheckResultCode: Integer;
+  Choice: Integer;
 begin
   Result := '';
   NeedsRestart := False;
@@ -57,6 +59,37 @@ begin
 
   ExtractTemporaryFile('{#MyShutdownExeName}');
   ShutdownExe := ExpandConstant('{tmp}\{#MyShutdownExeName}');
+
+  Parameters := '--check --root "' + ExpandConstant('{app}') +
+    '" --data-root "' + DataRoot + '"';
+  if not Exec(ShutdownExe, Parameters, ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, CheckResultCode) then
+  begin
+    Result := 'FeedMeDaily could not be checked before the update. Please close FeedMeDaily manually and try again.';
+    Exit;
+  end;
+  if (CheckResultCode <> 0) and (CheckResultCode <> 2) then
+  begin
+    Result := 'FeedMeDaily could not be checked before the update. Please close FeedMeDaily manually and try again.';
+    Exit;
+  end;
+  if CheckResultCode = 0 then
+    Exit;
+
+  if WizardSilent then
+    Choice := IDYES
+  else
+    Choice := TaskDialogMsgBox(
+      'FeedMeDaily is running',
+      'Setup needs to close FeedMeDaily before it can update the application files. Do you want Setup to close it automatically now?',
+      mbInformation,
+      MB_YESNO, ['Close automatically', 'Cancel installation'],
+      IDYES);
+  if Choice <> IDYES then
+  begin
+    Result := 'Please close FeedMeDaily manually before continuing with the update.';
+    Exit;
+  end;
+
   Parameters := '--shutdown --root "' + ExpandConstant('{app}') +
     '" --data-root "' + DataRoot + '"';
   if not Exec(ShutdownExe, Parameters, ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then

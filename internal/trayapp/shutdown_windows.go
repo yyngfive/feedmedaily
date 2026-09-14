@@ -10,6 +10,34 @@ import (
 
 const updateShutdownTimeout = 8 * time.Second
 
+// IsRunningApp reports whether the installed FeedMeDaily instance is still active.
+func IsRunningApp(root string) (bool, error) {
+	// Resolve the same layout used by the running tray so the check targets its user data.
+	layout, err := ResolveLayout(root)
+	if err != nil {
+		return false, fmt.Errorf("resolve app layout: %w", err)
+	}
+	return isRunningApp(layout)
+}
+
+func isRunningApp(layout Layout) (bool, error) {
+	// Check the recorded backend PID and the config-scoped tray window independently.
+	state, err := ReadRuntimeState(layout.RuntimeStatePath)
+	if err != nil {
+		return false, err
+	}
+	if state != nil {
+		if processRunningCall(state.PID) {
+			return true, nil
+		}
+		baseURL := fmt.Sprintf("http://%s:%d", layout.ServerHost, state.Port)
+		if WaitForHealthcheck(baseURL+"/api/app/health", 1200*time.Millisecond) {
+			return true, nil
+		}
+	}
+	return findTrayWindowCall(layout.ConfigDir) != 0, nil
+}
+
 // ShutdownRunningApp stops the installed FeedMeDaily processes before an update.
 func ShutdownRunningApp(root string) error {
 	// Resolve the same layout used by the running tray so the shutdown request targets its user data.
