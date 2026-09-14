@@ -295,6 +295,11 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(context.C
 			current.Status = "failed"
 			current.MessageKey = "sync.failed"
 			current.Error = err.Error()
+			// Keep the partial sync counters and warnings on the failed card:
+			// a run that fetched and enriched most of its batch before failing
+			// must not report zeros.
+			current.Result = result
+			current.WarningCount = countWarnings(result)
 			current.LLMUsage = &summary
 			clearJobProgress(current)
 			current.FinishedAt = &finished

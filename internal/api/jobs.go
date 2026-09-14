@@ -290,6 +290,11 @@ func launchLocalJob(settings config.Settings, jobType string, queuedMessageKey s
 				current.MessageKey = jobType + ".failed"
 				current.Message = ""
 				current.Error = err.Error()
+				// A failed job keeps whatever it finished before the error: the
+				// Dashboard renders the same counters and warning list for it,
+				// and zeros would hide real work and real warnings.
+				current.Result = result
+				current.WarningCount = countWarnings(result)
 				current.LLMUsage = &summary
 				clearJobProgress(current)
 				current.FinishedAt = &finished

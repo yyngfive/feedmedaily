@@ -79,6 +79,9 @@ func TestTitlesMatchAndDatesMatch(t *testing.T) {
 		{"paper title truncates record title", "Tabula Sapiens 2.0: A comprehensive transcriptomic atlas of human cell types", "Tabula Sapiens 2.0", false},
 		{"short title not contained", "Cell", "Cell Reports: a very different article about something else entirely", false},
 		{"unrelated", "Endogenous opioid dynamics in the dorsal striatum", "Goals and Habits in the Brain", false},
+		{"rss subscript spacing", "CO-Mediated Relay Catalysis Affords Selective CO 2 Hydrogenation to Methanol", "CO-Mediated Relay Catalysis Affords Selective CO2 Hydrogenation to Methanol", true},
+		{"rss subscript spacing on element symbols", "Construction of a 0D/2D S-Scheme Heterojunction Based on Ni-Doped CsPbBr 3 and ZnO for Enhanced Photocatalytic CO 2 Reduction", "Construction of a 0D/2D S-Scheme Heterojunction Based on Ni-Doped CsPbBr3 and ZnO for Enhanced Photocatalytic CO2 Reduction", true},
+		{"different subscript-free title still rejected", "CO-Mediated Relay Catalysis Affords Selective CO 2 Hydrogenation to Methanol", "Selective Hydrogenation of Carbon Dioxide to Methanol over Copper Catalysts", false},
 	}
 	for _, tc := range cases {
 		if got := titlesMatch(tc.paperTitle, tc.recordTitle); got != tc.want {

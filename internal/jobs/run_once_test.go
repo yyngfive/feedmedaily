@@ -457,6 +457,73 @@ func testStringPtr(value string) *string {
 	return &value
 }
 
+func TestRepairRejectedDOIDegradesKeyCollisionToWarning(t *testing.T) {
+	settings := testJobSettings(t.TempDir())
+	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqliteStore.Close()
+	now := time.Date(2026, 9, 14, 1, 0, 0, 0, time.UTC)
+
+	// 同一篇论文两行：先入库的一行占了 url: 键，后入库的一行带着 DOI。
+	urlKeyedID, _, err := sqliteStore.UpsertPaper(store.Paper{
+		SourceURL: "https://example.com/feed",
+		Title:     "Shared article",
+		URL:       "https://example.com/article",
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doiKeyedID, _, err := sqliteStore.UpsertPaper(store.Paper{
+		SourceURL: "https://example.com/feed",
+		Title:     "Shared article",
+		URL:       "https://example.com/article",
+		DOI:       testStringPtr("10.1000/rejected-doi"),
+	}, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doiKeyedID == urlKeyedID {
+		t.Fatalf("fixture did not create a duplicate row")
+	}
+
+	// 清 DOI 需要把键退回 url:，而该键已被重复行占用：这里必须降级成 warning，
+	// 让调用方继续分类，而不是中断整批任务。
+	warning := repairRejectedDOI(sqliteStore, doiKeyedID)
+	if warning == "" {
+		t.Fatalf("expected a warning when the repaired URL key is taken")
+	}
+	kept, err := sqliteStore.PaperByID(doiKeyedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept == nil || kept.DOI == nil || *kept.DOI != "10.1000/rejected-doi" {
+		t.Fatalf("colliding repair must leave the rejected DOI untouched: %#v", kept)
+	}
+
+	// 没有重复行时仍然正常清掉 DOI，并且不产生 warning。
+	soloID, _, err := sqliteStore.UpsertPaper(store.Paper{
+		SourceURL: "https://example.com/feed",
+		Title:     "Solo article",
+		URL:       "https://example.com/solo",
+		DOI:       testStringPtr("10.1000/solo-doi"),
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if warning := repairRejectedDOI(sqliteStore, soloID); warning != "" {
+		t.Fatalf("unexpected warning for a collision-free repair: %s", warning)
+	}
+	solo, err := sqliteStore.PaperByID(soloID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if solo == nil || solo.DOI != nil {
+		t.Fatalf("expected the rejected DOI to be cleared: %#v", solo)
+	}
+}
+
 func writeTestProfile(t *testing.T, settings config.Settings) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(settings.ProfilePath), 0o755); err != nil {

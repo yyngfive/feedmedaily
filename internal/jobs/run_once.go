@@ -93,26 +93,26 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 	if fetchResult.Fetched == 0 {
 		nonSkippedErrors := filterNonSkippedErrors(fetchResult.Errors, opts.SkippedFeeds)
 		if len(nonSkippedErrors) > 0 {
-			return RunSummary{}, fmt.Errorf("%s", strings.Join(nonSkippedErrors, "\n"))
+			return summary, fmt.Errorf("%s", strings.Join(nonSkippedErrors, "\n"))
 		}
 	}
 
 	currentProfile, err := profile.ReadCurrent(settings.ProfilePath)
 	if err != nil {
-		return RunSummary{}, err
+		return summary, err
 	}
 	if currentProfile == nil {
-		return RunSummary{}, fmt.Errorf("No classification profile exists yet.")
+		return summary, fmt.Errorf("No classification profile exists yet.")
 	}
 	cfg, err := classifierConfig(settings, opts.Usage)
 	if err != nil {
-		return RunSummary{}, err
+		return summary, err
 	}
 	cfg.Context = ctx
 
 	sqliteStore, err := store.OpenOrCreate(settings.DatabasePath)
 	if err != nil {
-		return RunSummary{}, err
+		return summary, err
 	}
 	defer sqliteStore.Close()
 
@@ -126,7 +126,7 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 		}
 		paperID, isNew, err := sqliteStore.UpsertPaper(paper, now)
 		if err != nil {
-			return RunSummary{}, err
+			return summary, err
 		}
 		touchedIDs = append(touchedIDs, paperID)
 		if isNew {
@@ -145,7 +145,7 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 	if !opts.Reclassify {
 		pendingIDs, err = sqliteStore.PaperIDsNeedingClassification(touchedIDs)
 		if err != nil {
-			return RunSummary{}, err
+			return summary, err
 		}
 	}
 	_, _ = logging.WriteDefault(logging.Event{
@@ -172,7 +172,7 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 	}
 	reportCount, err := rebuildLatestReportSummary(settings, progress)
 	if err != nil {
-		return RunSummary{}, err
+		return summary, err
 	}
 	_ = reportCount
 	return summary, nil
@@ -202,6 +202,27 @@ func reclassifyExistingPapers(sqliteStore *store.Store, settings config.Settings
 	return reclassifyExistingPapersContext(sqliteStore, settings, currentProfile, cfg, paperIDs, context.Background(), progress)
 }
 
+// repairRejectedDOI 清掉 enrichment 判为错配的 DOI，让界面回退到出版社 URL。
+// 重建 URL 键时撞上另一行，说明库里已经存在同一篇论文的重复行占用了该键；
+// 合并重复是数据库清理的职责，所以这里把失败降级成 warning 描述返回，而不是
+// 让一篇论文的键修复失败中断整批分类。
+func repairRejectedDOI(sqliteStore *store.Store, paperID int64) string {
+	if err := sqliteStore.ClearPaperDOI(paperID); err != nil {
+		warning := fmt.Sprintf("paper %d: could not clear the rejected DOI: %v", paperID, err)
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "warning",
+			Component: "jobs.sync",
+			Action:    "doi_repair_skipped",
+			Message:   warning,
+			Data: map[string]any{
+				"paper_id": paperID,
+			},
+		})
+		return warning
+	}
+	return ""
+}
+
 func reclassifyExistingPapersContext(sqliteStore *store.Store, settings config.Settings, currentProfile map[string]any, cfg classifier.LLMConfig, paperIDs []int64, ctx context.Context, progress ProgressFunc) (int, []string, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -212,6 +233,7 @@ func reclassifyExistingPapersContext(sqliteStore *store.Store, settings config.S
 	logging.SetDefaultDir(settings.LogsDir)
 	EmitProgress(progress, PercentProgress("pipeline.metadata.enriching", "metadata", 0, len(paperIDs), metadataProgressMessage(0, len(paperIDs))))
 	enrichedPairs := make([]classificationPaperPair, 0, len(paperIDs))
+	classificationWarnings := []string{}
 	now := time.Now().UTC()
 	for _, paperID := range paperIDs {
 		if err := ctx.Err(); err != nil {
@@ -241,8 +263,8 @@ func reclassifyExistingPapersContext(sqliteStore *store.Store, settings config.S
 		}
 		if doiRejected {
 			// DOI 与标题、日期都对不上：清掉错误 DOI，界面回退到出版社 URL。
-			if err := sqliteStore.ClearPaperDOI(paperID); err != nil {
-				return 0, nil, err
+			if warning := repairRejectedDOI(sqliteStore, paperID); warning != "" {
+				classificationWarnings = append(classificationWarnings, warning)
 			}
 		}
 		enrichedPairs = append(enrichedPairs, classificationPaperPair{PaperID: paperID, Paper: enriched})
@@ -269,7 +291,6 @@ func reclassifyExistingPapersContext(sqliteStore *store.Store, settings config.S
 		batchSize = config.DefaultClassifierBatchSize
 	}
 	classified := 0
-	classificationWarnings := []string{}
 	for start := 0; start < len(enrichedPairs); start += batchSize {
 		if err := ctx.Err(); err != nil {
 			return classified, classificationWarnings, err

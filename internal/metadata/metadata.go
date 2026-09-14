@@ -446,6 +446,18 @@ func titlesMatch(paperTitle string, recordTitle string) bool {
 	if left == "" || right == "" {
 		return false
 	}
+	if titleFormsMatch(left, right) {
+		return true
+	}
+	// RSS 会把下标写成 "CO<sub>2</sub>"，转成纯文本后是 "CO 2"，而 OpenAlex 与
+	// Crossref 记作 "CO2"。去掉空白再比一次，避免把这类正确的 DOI 判成错配。
+	return titleFormsMatch(compactTitle(left), compactTitle(right))
+}
+
+func titleFormsMatch(left string, right string) bool {
+	if left == "" || right == "" {
+		return false
+	}
 	if left == right {
 		return true
 	}
@@ -457,6 +469,11 @@ func titlesMatch(paperTitle string, recordTitle string) bool {
 		return true
 	}
 	return false
+}
+
+// compactTitle 去掉标题里的空白，用于抵消下标、连字符断行带来的空格差异。
+func compactTitle(value string) string {
+	return strings.ReplaceAll(value, " ", "")
 }
 
 func normalizeTitle(value string) string {
