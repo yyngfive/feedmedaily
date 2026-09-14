@@ -455,7 +455,9 @@ func (s *Store) ApplyCleanupOperations(ctx context.Context, operations []Cleanup
 				result.Skipped++
 				continue
 			}
-			if err := s.mergeDuplicatePaperTx(tx, *canonical, *candidate, operation.Identity, now); err != nil {
+			// 重复行的来源要在删除前读出来，它决定 DOI 是否能交给幸存行。
+			candidateKey, err := s.storedPaperKeyTx(tx, operation.CandidatePaperID)
+			if err != nil {
 				return result, err
 			}
 			if err := s.repointPaperReferencesTx(tx, operation.CandidatePaperID, operation.CanonicalPaperID); err != nil {
@@ -464,8 +466,14 @@ func (s *Store) ApplyCleanupOperations(ctx context.Context, operations []Cleanup
 			if err := s.markCleanupReviewsDeletedTx(tx, operation.CandidatePaperID, now); err != nil {
 				return result, err
 			}
+			// 先删掉重复行再合并：paper_key 是 UNIQUE，幸存行只有在重复行让出
+			// doi: 键之后才能接管它。合并本身只读内存里的重复行快照，删除不
+			// 影响它写入的内容。
 			if _, err := tx.Exec(`DELETE FROM papers WHERE id = ?`, operation.CandidatePaperID); err != nil {
 				return result, fmt.Errorf("delete duplicate paper %d: %w", operation.CandidatePaperID, err)
+			}
+			if err := s.mergeDuplicatePaperTx(tx, *canonical, *candidate, candidateKey, now); err != nil {
+				return result, err
 			}
 			result.DeletedDuplicates++
 		case CleanupOperationClearDOI:
@@ -587,9 +595,6 @@ func (s *Store) ApplyCleanupReviewDecision(ctx context.Context, reviewID int64, 
 			canonical = *candidate
 			duplicate = *matched
 		}
-		if err := s.mergeDuplicatePaperTx(tx, canonical, duplicate, "title", now); err != nil {
-			return result, err
-		}
 		if err := s.repointPaperReferencesTx(tx, duplicateID, canonicalID); err != nil {
 			return result, err
 		}
@@ -601,8 +606,16 @@ func (s *Store) ApplyCleanupReviewDecision(ctx context.Context, reviewID int64, 
 		if err := s.markCleanupReviewsDeletedTx(tx, duplicateID, now); err != nil {
 			return result, err
 		}
+		duplicateKey, err := s.storedPaperKeyTx(tx, duplicateID)
+		if err != nil {
+			return result, err
+		}
+		// 与确定性删除同理：先让出纸键，幸存行才能接管重复行的 doi: 键。
 		if _, err := tx.Exec(`DELETE FROM papers WHERE id = ?`, duplicateID); err != nil {
 			return result, fmt.Errorf("delete reviewed duplicate paper %d: %w", duplicateID, err)
+		}
+		if err := s.mergeDuplicatePaperTx(tx, canonical, duplicate, duplicateKey, now); err != nil {
+			return result, err
 		}
 		result.Deleted = true
 		result.DeletedPaperID = duplicateID
@@ -705,7 +718,7 @@ func (s *Store) deletePaperClassificationsTx(tx *sql.Tx, paperID int64) error {
 	return nil
 }
 
-func mergeDuplicatePaperContent(existing Paper, duplicate Paper, identity string) Paper {
+func mergeDuplicatePaperContent(existing Paper, duplicate Paper, adoptDOI bool) Paper {
 	result := existing
 	if result.FeedTitle == nil && duplicate.FeedTitle != nil {
 		value := *duplicate.FeedTitle
@@ -732,7 +745,7 @@ func mergeDuplicatePaperContent(existing Paper, duplicate Paper, identity string
 		value := *duplicate.ReadAt
 		result.ReadAt = &value
 	}
-	if identity == CleanupIdentityDOI && result.DOI == nil && duplicate.DOI != nil {
+	if adoptDOI && result.DOI == nil && duplicate.DOI != nil {
 		value := *duplicate.DOI
 		result.DOI = &value
 	}
@@ -747,8 +760,61 @@ func mergeDuplicatePaperContent(existing Paper, duplicate Paper, identity string
 	return result
 }
 
-func (s *Store) mergeDuplicatePaperTx(tx *sql.Tx, canonical Paper, duplicate Paper, identity string, now time.Time) error {
-	merged := mergeDuplicatePaperContent(canonical, duplicate, identity)
+// adoptDuplicateDOI 判断被删重复行的 DOI 能否交给幸存行。ingest 的 paper_key
+// 是 DOI 优先的，所以 doi: 前缀说明这个 DOI 是随 feed 条目一起入库的，未来的
+// ingest 也会按这个键找行，必须接管；url:/title: 前缀说明入库时没有 DOI，当前
+// 的 DOI 是 enrichment 后续按标题搜索补上的猜测值，交给幸存行只会把猜测值
+// 栽到它头上，因此不接管——这类行对应的 feed 条目本来就不带 DOI，未来 ingest
+// 会按 URL 键命中幸存行，不接管同样不会重建重复。
+func adoptDuplicateDOI(duplicateKey string) bool {
+	return strings.HasPrefix(duplicateKey, "doi:")
+}
+
+// adoptDuplicateKeyTx 把幸存行的 paper_key 提升到更强的 identity（DOI 优先）。
+// 两条行是同一篇论文的重复，被删掉的那条可能正持有 doi: 键；canonical 若停在
+// url: 键上，下一次 ingest 会按 doi: 键查不到任何行而重新插入一条重复记录，
+// 使重复与随之而来的 DOI 修复冲突反复出现。键被其他行占用时保持原键不变。
+func (s *Store) adoptDuplicateKeyTx(tx *sql.Tx, canonicalID int64, duplicateID int64, merged Paper) (string, bool, error) {
+	if !s.paperColumns["paper_key"] {
+		return "", false, nil
+	}
+	desired := paperKey(merged)
+	storedKey, err := s.storedPaperKeyTx(tx, canonicalID)
+	if err != nil {
+		return "", false, err
+	}
+	if storedKey == "" || desired == storedKey {
+		return "", false, nil
+	}
+	var takenBy int64
+	err = tx.QueryRow(`SELECT id FROM papers WHERE paper_key = ? AND id <> ? AND id <> ? LIMIT 1`, desired, canonicalID, duplicateID).Scan(&takenBy)
+	if err == nil {
+		return "", false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) && !strings.Contains(err.Error(), "sql: no rows in result set") {
+		return "", false, fmt.Errorf("check paper key for %d: %w", canonicalID, err)
+	}
+	return desired, true, nil
+}
+
+// storedPaperKeyTx 读取一行的 paper_key；行不存在时返回空串。
+func (s *Store) storedPaperKeyTx(tx *sql.Tx, paperID int64) (string, error) {
+	if !s.paperColumns["paper_key"] {
+		return "", nil
+	}
+	var key string
+	err := tx.QueryRow(`SELECT paper_key FROM papers WHERE id = ?`, paperID).Scan(&key)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "sql: no rows in result set") {
+			return "", nil
+		}
+		return "", fmt.Errorf("read paper key for %d: %w", paperID, err)
+	}
+	return key, nil
+}
+
+func (s *Store) mergeDuplicatePaperTx(tx *sql.Tx, canonical Paper, duplicate Paper, duplicateKey string, now time.Time) error {
+	merged := mergeDuplicatePaperContent(canonical, duplicate, adoptDuplicateDOI(duplicateKey))
 	rawJSON, authorsJSON, err := encodeStoredPaper(merged)
 	if err != nil {
 		return err
@@ -773,6 +839,12 @@ func (s *Store) mergeDuplicatePaperTx(tx *sql.Tx, canonical Paper, duplicate Pap
 	if s.paperColumns["last_checked_at"] {
 		assignments = append(assignments, "last_checked_at = ?")
 		args = append(args, now.UTC().Format(time.RFC3339Nano))
+	}
+	if key, ok, err := s.adoptDuplicateKeyTx(tx, canonical.ID, duplicate.ID, merged); err != nil {
+		return err
+	} else if ok {
+		assignments = append(assignments, "paper_key = ?")
+		args = append(args, key)
 	}
 	args = append(args, canonical.ID)
 	if _, err := tx.Exec(fmt.Sprintf(`UPDATE papers SET %s WHERE id = ?`, strings.Join(assignments, ", ")), args...); err != nil {

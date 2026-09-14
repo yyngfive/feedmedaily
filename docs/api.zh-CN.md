@@ -881,7 +881,7 @@ reclassify 与 sync、cleanup 共用 pipeline 互斥锁，同一时刻只允许�
 
 处理规则：
 
-- 相同规范化 URL 或 DOI 且标题一致的重复组只自动删除未分类副本，优先保留已有分类的文章，否则保留最早入库的文章；feedback/Zotero 引用会迁移到保留文章。
+- 相同规范化 URL 或 DOI 且标题一致的重复组只自动删除未分类副本，优先保留已有分类的文章，否则保留最早入库的文章；feedback/Zotero 引用会迁移到保留文章。被删副本的 DOI 只在它是随 feed 条目一起入库时才交给保留文章（其 `paper_key` 为 `doi:` 前缀，说明 ingest 当时就解析出了 DOI），并在 `doi:` 键空闲时把保留文章的 `paper_key` 升级为该 DOI 键；若该 DOI 是 enrichment 后来按标题搜索补上的（`url:`/`title:` 前缀），则不接管——这类文章对应的 feed 条目本来不带 DOI，下一次抓取会按 URL 键命中保留文章，不接管同样不会重建重复。
 - 两个条目都存在 DOI、同时存在精确 URL/DOI 重复关系，但规范化标题仍不匹配时进入 DOI 冲突复核；像 `Inside Back Cover:` 这类规范化后仍能匹配的标题变体属于普通重复复核。DOI 冲突复核只允许清除 Item A 或 Item B 的 DOI，或保持两者不变，不提供删除文章操作。
 - Crossref/OpenAlex 明确证明标题或发布日期不一致时，保留文章、清除 DOI 并按文章 URL 重建 `paper_key`。
 - 只有标题相似、两个 DOI 与标题冲突、DOI 校验资料不足或外部服务失败的项目进入 `cleanup_reviews`，不会自动删除或分类。

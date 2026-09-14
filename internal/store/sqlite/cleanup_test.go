@@ -31,7 +31,7 @@ func TestApplyCleanupOperationsDeletesDuplicateAndMovesReferences(t *testing.T) 
 		SourceURL: "https://example.com/feed",
 		Title:     "Canonical paper",
 		URL:       "https://example.com/article",
-		DOI:       stringPointer("10.1000/wrong-doi"),
+		DOI:       stringPointer("10.1000/duplicate-doi"),
 		Abstract:  stringPointer("Recovered abstract"),
 		ReadAt:    timePointer(now.Add(time.Hour)),
 	}, now.Add(time.Minute))
@@ -76,8 +76,17 @@ func TestApplyCleanupOperationsDeletesDuplicateAndMovesReferences(t *testing.T) 
 	if merged == nil || merged.Abstract == nil || *merged.Abstract != "Recovered abstract" {
 		t.Fatalf("canonical paper did not retain richer content: %#v", merged)
 	}
-	if merged.DOI != nil {
-		t.Fatalf("a URL duplicate's unrelated DOI must not be copied: %#v", merged.DOI)
+	// 两行是按 URL 判定的重复，即同一个出版社页面：Doi 必须留在幸存行上，
+	// 否则幸存行退回 url: 键，下一次 ingest 会为同一个页面再插一条重复记录。
+	if merged.DOI == nil || *merged.DOI != "10.1000/duplicate-doi" {
+		t.Fatalf("canonical paper did not adopt the duplicate DOI: %#v", merged.DOI)
+	}
+	key, err := store.StoredPaperKey(canonicalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "doi:10.1000/duplicate-doi" {
+		t.Fatalf("canonical paper key was not upgraded to the DOI identity: %s", key)
 	}
 	feedback, err := store.ListFeedback()
 	if err != nil {
@@ -92,6 +101,64 @@ func TestApplyCleanupOperationsDeletesDuplicateAndMovesReferences(t *testing.T) 
 	}
 	if zotero == nil || !zotero.Saved || zotero.ItemKey == nil || *zotero.ItemKey != "ABC" {
 		t.Fatalf("Zotero status was not moved to canonical paper: %#v", zotero)
+	}
+}
+
+// 被删重复行的 DOI 只有在它是随 feed 条目入库时才交给幸存行；enrichment 后来
+// 按标题搜索补上的猜测值不接管。
+func TestApplyCleanupOperationsKeepsEnrichmentDOIOffTheSurvivor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "literature.sqlite")
+	store, err := OpenOrCreate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 9, 14, 8, 0, 0, 0, time.UTC)
+
+	canonicalID, _, err := store.UpsertPaper(Paper{
+		SourceURL: "https://example.com/feed",
+		Title:     "Kept article",
+		URL:       "https://example.com/kept",
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateID, _, err := store.UpsertPaper(Paper{
+		SourceURL: "https://example.com/feed",
+		Title:     "Kept article",
+		URL:       "https://example.com/duplicate",
+	}, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 入库时没有 DOI（键是 url:），DOI 是之后 enrichment 补写进来的。
+	if _, _, err := store.UpsertPaperWithKey(Paper{
+		SourceURL: "https://example.com/feed",
+		Title:     "Kept article",
+		URL:       "https://example.com/duplicate",
+		DOI:       stringPointer("10.1000/guessed-doi"),
+	}, "url:https://example.com/duplicate", now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.ApplyCleanupOperations(context.Background(), []CleanupOperation{{
+		Kind: CleanupOperationDeleteDuplicate, CandidatePaperID: duplicateID, CanonicalPaperID: canonicalID, Identity: CleanupIdentityURL,
+	}}, now.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := store.PaperByID(canonicalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged == nil || merged.DOI != nil {
+		t.Fatalf("an enrichment-guessed DOI must not move to the survivor: %#v", merged)
+	}
+	key, err := store.StoredPaperKey(canonicalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "url:https://example.com/kept" {
+		t.Fatalf("survivor key must stay on the URL identity: %s", key)
 	}
 }
 
