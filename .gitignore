@@ -29,15 +29,18 @@ build/
 dist/
 *.spec
 
-data/*.sqlite
-data/*.sqlite-*
-data/classification_profile.json
-data/rss_feeds.json
-data/verification-profiles/
-data/verification-sessions.json
-data/
-logs/
-reports/
+# Source-mode runtime state lives under the repository root. The leading slash
+# anchors these rules there: an unanchored `data/` also matches source
+# directories such as web/src/data, which then needs `git add -f`.
+/data/*.sqlite
+/data/*.sqlite-*
+/data/classification_profile.json
+/data/rss_feeds.json
+/data/verification-profiles/
+/data/verification-sessions.json
+/data/
+/logs/
+/reports/
 build/
 dist/
 
