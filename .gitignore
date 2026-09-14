@@ -41,6 +41,8 @@ dist/
 /data/
 /logs/
 /reports/
+# Experiment scratch (runners, notes, local results) stays on this machine.
+/experiments/
 build/
 dist/
 
