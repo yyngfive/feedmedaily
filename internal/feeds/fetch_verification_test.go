@@ -393,6 +393,81 @@ func TestFetchAllSkipsSameHostAfterVerificationFailureAndContinues(t *testing.T)
 	}
 }
 
+// 验证通道可能把成功也报成 warning（窗口在启动宽限期内抓完就退出时）。此时
+// 已经拿到的 XML 必须照常使用：丢弃会让保护源在滚动窗口里永久缺文章。warning
+// 只落到真正没带回 XML 的那个 feed 上。
+func TestFetchAllKeepsVerifiedXMLWhenVerificationAlsoWarns(t *testing.T) {
+	oldBackoffs := fetchRetryBackoffs
+	fetchRetryBackoffs = []time.Duration{0}
+	defer func() { fetchRetryBackoffs = oldBackoffs }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Host + r.URL.Path {
+		case "pubs.acs.org/acs1", "pubs.acs.org/acs2":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<!doctype html><html><head><title>Just a moment...</title></head><body>Enable JavaScript and cookies to continue</body></html>`))
+		case "z.example/rss":
+			writeTestRSS(w, "Z Paper", "https://z.example/paper")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	targetURL, err := neturl.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousClient := fetchHTTPClient
+	fetchHTTPClient = &http.Client{
+		Timeout: previousClient.Timeout,
+		Transport: rewriteFeedTestTransport{
+			target: targetURL,
+			base:   http.DefaultTransport,
+		},
+	}
+	defer func() { fetchHTTPClient = previousClient }()
+
+	root := t.TempDir()
+	feedsPath := filepath.Join(root, "data", "rss_feeds.json")
+	if err := os.MkdirAll(filepath.Dir(feedsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedsPath, []byte(`[
+  {"journal":"ACS One","url":"https://pubs.acs.org/acs1"},
+  {"journal":"ACS Two","url":"https://pubs.acs.org/acs2"},
+  {"journal":"Z","url":"https://z.example/rss"}
+]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := FetchAll(feedsPath, FetchOptions{
+		BodyCache: map[string][]byte{},
+		VerifyHost: func(requests []VerificationRequest) VerificationResult {
+			if len(requests) != 2 {
+				t.Fatalf("verification requests = %#v", requests)
+			}
+			return VerificationResult{
+				Warning: "open verification browser: the verification window exited before RSS XML was captured",
+				FeedBodies: map[string][]byte{
+					"https://pubs.acs.org/acs1": []byte(testRSS("ACS One Paper", "https://pubs.acs.org/one")),
+				},
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Papers) != 2 {
+		t.Fatalf("verified XML was dropped: papers = %#v", result.Papers)
+	}
+	if result.Papers[0].Title != "ACS One Paper" || result.Papers[1].Title != "Z Paper" {
+		t.Fatalf("papers = %#v", result.Papers)
+	}
+	if len(result.Errors) != 1 || !strings.Contains(result.Errors[0], "https://pubs.acs.org/acs2") {
+		t.Fatalf("the warning must only land on the feed without XML: %#v", result.Errors)
+	}
+}
+
 type rewriteFeedTestTransport struct {
 	target *neturl.URL
 	base   http.RoundTripper

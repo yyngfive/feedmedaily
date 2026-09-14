@@ -447,17 +447,19 @@ func hostVerificationRequests(subscriptions []Subscription, start int, verificat
 
 func resolveHostVerification(requests []VerificationRequest, opts FetchOptions, result *FetchResult) []store.Paper {
 	verification := opts.VerifyHost(requests)
-	if strings.TrimSpace(verification.Warning) != "" {
-		for _, request := range requests {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", request.URL, strings.TrimSpace(verification.Warning)))
-		}
-		return nil
-	}
+	warning := strings.TrimSpace(verification.Warning)
 	papers := []store.Paper{}
 	for _, request := range requests {
 		body, ok := verification.FeedBodies[request.URL]
 		if !ok || len(body) == 0 {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: verification did not return feed XML", request.URL))
+			// 只有确实没带回 XML 的 feed 才记成验证失败。带回了 XML 的 feed 不因为
+			// warning 丢掉内容：验证通道偶发地把成功也报成 warning，丢弃已抓到的
+			// XML 会让这个源在滚动窗口里永久缺文章。
+			detail := warning
+			if detail == "" {
+				detail = "verification did not return feed XML"
+			}
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", request.URL, detail))
 			continue
 		}
 		parsed, err := parseFeedBody(request.URL, 0, body)

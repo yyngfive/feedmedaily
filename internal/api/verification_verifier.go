@@ -135,24 +135,45 @@ func startVerifierProcess(settings config.Settings, pending *pendingVerification
 	case err := <-done:
 		exitCode := verifierExitCode(cmd, err)
 		markVerifierProcessExited(pending.ID, exitCode, err)
-		logVerificationProcessExit(settings, pending, process, exitCode, err)
-		detail := strings.TrimSpace(stderr.String())
-		if detail == "" && err != nil {
-			detail = err.Error()
-		}
-		if detail == "" {
-			detail = "verification window exited immediately"
-		}
-		return fmt.Errorf("open verification browser: %s", detail)
-	case <-time.After(900 * time.Millisecond):
+		logVerificationProcessExit(settings, pending, process, exitCode, err, stderr.String())
+		return verifierStartFailure(pending.ID, exitCode, err)
+	case <-time.After(verifierStartupGracePeriod):
 		go func() {
 			err := <-done
 			exitCode := verifierExitCode(cmd, err)
 			markVerifierProcessExited(pending.ID, exitCode, err)
-			logVerificationProcessExit(settings, pending, process, exitCode, err)
+			logVerificationProcessExit(settings, pending, process, exitCode, err, stderr.String())
 		}()
 		return nil
 	}
+}
+
+// verifierStartupGracePeriod 是"窗口已打开、正在等人处理"的宽限期，超过它仍在
+// 运行就算启动成功。
+const verifierStartupGracePeriod = 900 * time.Millisecond
+
+// verifierStartFailure 判断验证窗口在宽限期内退出算不算启动失败。
+// 只看退出快慢不行：持久 profile 里的 Cloudflare 放行仍然有效时，窗口不需要人工
+// 介入，抓完 XML 就退出（实测 500-600ms），那是一次成功而不是失败。真正的判据是
+// 交付状态——回调已经把 XML 投递进来，就说明这次验证拿到了内容。
+func verifierStartFailure(verificationID string, exitCode int, waitErr error) error {
+	callbackReceived, delivered := verificationDeliveryState(verificationID)
+	if delivered || (callbackReceived && exitCode == 0 && waitErr == nil) {
+		return nil
+	}
+	return fmt.Errorf("open verification browser: %s", verifierExitDetail(exitCode, waitErr))
+}
+
+// verifierExitDetail 给出窗口提前退出时对用户可读的原因。进程 stderr 里通常只有
+// WebView2 的信息级日志，不能当成失败原因展示，它只进日志。
+func verifierExitDetail(exitCode int, waitErr error) string {
+	if waitErr != nil {
+		return fmt.Sprintf("the verification window exited before RSS XML was captured (%v)", waitErr)
+	}
+	if exitCode != 0 {
+		return fmt.Sprintf("the verification window exited before RSS XML was captured (exit code %d)", exitCode)
+	}
+	return "the verification window exited before RSS XML was captured"
 }
 
 func newVerifierCommand(binaryPath string, commandArgs []string) *exec.Cmd {
@@ -365,7 +386,7 @@ func terminateVerifierProcess(settings config.Settings, verificationID string) {
 	logJobEvent(settings.LogsDir, &jobInfo{ID: process.JobID}, "warning", "verification_process_terminated", "pipeline.feeds.verification_required", "Verifier process was still running, so FeedMeDaily cleared it before continuing.", "", logData)
 }
 
-func logVerificationProcessExit(settings config.Settings, pending *pendingVerification, process *verifierProcess, exitCode int, err error) {
+func logVerificationProcessExit(settings config.Settings, pending *pendingVerification, process *verifierProcess, exitCode int, err error, stderr string) {
 	callbackReceived, delivered := verificationDeliveryState(pending.ID)
 	data := map[string]any{
 		"verification_id":        pending.ID,
@@ -377,9 +398,23 @@ func logVerificationProcessExit(settings config.Settings, pending *pendingVerifi
 		"delivered":              delivered,
 		"elapsed_ms":             time.Since(process.StartedAt).Milliseconds(),
 	}
+	// 窗口 stderr 里多是 WebView2 的信息级日志，只留作诊断，不进用户可见的错误文案。
+	if detail := truncateVerifierStderr(stderr); detail != "" {
+		data["verification_stderr"] = detail
+	}
 	if err != nil {
 		logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "warning", "verification_process_exited", "pipeline.feeds.verification_required", "", err.Error(), data)
 		return
 	}
 	logJobEvent(settings.LogsDir, &jobInfo{ID: pending.JobID}, "info", "verification_process_exited", "pipeline.feeds.verification_required", "Verifier window process exited.", "", data)
+}
+
+const verifierStderrLogLimit = 2000
+
+func truncateVerifierStderr(raw string) string {
+	detail := strings.TrimSpace(raw)
+	if len(detail) <= verifierStderrLogLimit {
+		return detail
+	}
+	return detail[:verifierStderrLogLimit] + "…"
 }

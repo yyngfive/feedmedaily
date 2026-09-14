@@ -94,21 +94,27 @@ func verifyFeedHostContext(ctx context.Context, settings config.Settings, jobID 
 		callbacks.OnWaiting(pending)
 	}
 
-	if err := startVerificationFlowFunc(settings, pending); err != nil {
-		deletePendingVerification(pending.ID)
-		if callbacks.OnVerificationStartFailed != nil {
-			callbacks.OnVerificationStartFailed(pending, err)
+	startErr := startVerificationFlowFunc(settings, pending)
+	if startErr != nil {
+		// 启动报错不等于验证失败：持久 profile 已放行时，窗口会在启动宽限期内
+		// 抓完 XML 并退出，回调此时已经把内容投递进来了。这种情况按成功继续
+		// 走下面的等待路径，否则会连同抓到的 XML 一起丢掉。
+		if _, delivered := verificationDeliveryState(pending.ID); !delivered {
+			deletePendingVerification(pending.ID)
+			if callbacks.OnVerificationStartFailed != nil {
+				callbacks.OnVerificationStartFailed(pending, startErr)
+			}
+			return feeds.VerificationResult{Warning: startErr.Error()}
 		}
-		return feeds.VerificationResult{Warning: err.Error()}
-	}
-	if err := ctx.Err(); err != nil {
-		terminateVerifierProcess(settings, pending.ID)
-		deletePendingVerification(pending.ID)
-		return feeds.VerificationResult{Warning: "sync cancellation requested"}
-	}
-
-	if callbacks.OnVerificationStarted != nil {
-		callbacks.OnVerificationStarted(pending)
+	} else {
+		if err := ctx.Err(); err != nil {
+			terminateVerifierProcess(settings, pending.ID)
+			deletePendingVerification(pending.ID)
+			return feeds.VerificationResult{Warning: "sync cancellation requested"}
+		}
+		if callbacks.OnVerificationStarted != nil {
+			callbacks.OnVerificationStarted(pending)
+		}
 	}
 
 	resumeResult := waitForVerificationContext(ctx, pending, 10*time.Minute)
