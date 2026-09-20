@@ -1,5 +1,5 @@
 import React from "react";
-import {journalAlias, journalSelection, toggleJournalSelection} from "./journalAliases";
+import {journalDisplay, journalKey, toggleJournalSelection} from "./journalAliases";
 import {flushSync} from "react-dom";
 
 import {createFeedback, createProfileTopic, deleteFeedback, fetchZoteroCollections, markPaperRead, saveToZotero} from "../../api/client";
@@ -31,15 +31,14 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
       ? {...paper, read_at: pendingReadOverrides[paper.id]}
       : paper,
   ), [pendingReadOverrides, report.papers]);
-  const journals = React.useMemo(() => Array.from(new Set(effectivePapers.map((paper) => journalAlias(paper.journal)).filter(Boolean) as string[])).sort(), [effectivePapers]);
-  const journalOptions = React.useMemo(() => journals.map((item) => ({value: item, label: item})), [journals]);
-  const normalizedSelectedJournals = React.useMemo(() => journalSelection(selectedJournals), [selectedJournals]);
+  const journalOptions = React.useMemo(() => Array.from(new Map(effectivePapers.map((paper) => [journalKey(paper), {value: journalKey(paper), label: journalDisplay(paper)}])).values()).sort((a, b) => a.label.localeCompare(b.label)), [effectivePapers]);
+  const normalizedSelectedJournals = React.useMemo(() => Array.from(new Set(selectedJournals)), [selectedJournals]);
   const selectedJournalSet = React.useMemo(() => new Set(normalizedSelectedJournals), [normalizedSelectedJournals]);
   const filteredBase = React.useMemo(() => effectivePapers.filter((paper) => {
-    const haystack = [paper.title, paper.classification.translated_title_zh ?? "", paper.abstract ?? "", paper.journal ?? "", journalAlias(paper.journal), paper.authors?.join(" ") ?? "", paper.feedback_status?.note ?? ""].join(" ").toLowerCase();
+    const haystack = [paper.title, paper.classification.translated_title_zh ?? "", paper.abstract ?? "", paper.journal ?? "", journalDisplay(paper), paper.authors?.join(" ") ?? "", paper.feedback_status?.note ?? ""].join(" ").toLowerCase();
     const hasFeedback = Boolean(paper.feedback_status?.has_feedback);
     return (!deferredQuery || haystack.includes(deferredQuery.toLowerCase())) &&
-      (selectedJournalSet.size === 0 || Boolean(paper.journal && selectedJournalSet.has(journalAlias(paper.journal)))) &&
+      (selectedJournalSet.size === 0 || selectedJournalSet.has(journalKey(paper))) &&
       (readFilter === "all" || (readFilter === "read" ? Boolean(paper.read_at) : !paper.read_at)) &&
       (feedbackFilter === "all" || (feedbackFilter === "marked" ? hasFeedback : !hasFeedback)) &&
       matchesTopicFilter(paper, topicFilter, report.topics) &&
@@ -51,7 +50,7 @@ export function useReviewWorkspace(state: AppState, data: AppData) {
   const sortedFiltered = React.useMemo(() => {
     const byDate = (paper: Paper) => paper.published_date ?? paper.seen_date;
     return [...filtered].sort((left, right) => {
-      if (sortOption === "journal-asc") return journalAlias(left.journal).localeCompare(journalAlias(right.journal)) || byDate(right).localeCompare(byDate(left));
+      if (sortOption === "journal-asc") return journalDisplay(left).localeCompare(journalDisplay(right)) || byDate(right).localeCompare(byDate(left));
       if (sortOption === "confidence-desc" || sortOption === "confidence-asc") {
         const difference = left.classification.confidence - right.classification.confidence;
         return difference ? (sortOption === "confidence-desc" ? -difference : difference) : byDate(right).localeCompare(byDate(left));

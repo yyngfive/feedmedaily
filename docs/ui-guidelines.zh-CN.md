@@ -99,7 +99,7 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 
 ### 6.1 阅读工作区
 
-- Journal 筛选将 ACS 期刊的 `advanceAccess` 后缀和 Cell 的完整卷期后缀归并到基础期刊名；选项、勾选状态、匹配、期刊排序共用别名规则，搜索同时保留原始名称。未知名称不做模糊合并，卡片、详情及存储元数据保留原值。
+- Journal 筛选、论文卡片、详情与排序统一消费报告中的 `journal_display` / `journal_key`。发布构建按 sci-rss-list 的 feed URL、`feed_scope` 和 `canonical_journal` 生成嵌入目录；单刊 feed 优先使用 URL 映射的标准刊名，只有跨刊聚合源优先使用文章级刊名，学科分类源保留平台和分类身份。上游字段尚未提供时，生成器从该条目的标签和备注做有限兼容推断，不维护出版社 URL 白名单。卷期兜底仅在没有适用的 URL 映射时使用，且只清理目录中已知刊名的后缀；搜索仍可匹配原始刊名和 feed 标题，未知名称不做模糊合并。运行时使用嵌入目录，不联网请求。
 - 主界面采用三栏布局：左侧筛选、中央论文列表、右侧详情。
 - 左栏只保留更新时间、Profile 与筛选控件，不重复显示筛选后数量和分类计数卡；分类计数统一放在中央列表顶部标签。
 - 阅读工作区不显示底栏；Exit App 与版本、运行模式、更新检查和打开目录集中在 Settings → App，退出按钮保留退出中禁用状态。
@@ -120,12 +120,14 @@ HeroUI 负责可访问性、键盘行为、焦点管理、ARIA 语义和基础�
 - Settings 保持右侧抽屉和 `Dashboard`、`Feeds`、`Profile`、`Model`、`App` 五个稳定顶层页面。
 - 桌面使用左侧导航，窄屏退化为横向标签；标题、导航和关闭按钮固定，仅右侧内容滚动。
 - Admin 负责 feed 编辑、手动任务、反馈、Profile proposal 和应用配置。
-- Dashboard 优先展示运行中任务、验证状态和主要 Sync；定向 Sync、Reclassify、用量等低频项渐进披露，Database cleanup 放在 Dashboard 最底部。Database cleanup 只保留一个 `Run cleanup` 入口，未分类数量以按钮旁文字显示，人工复核队列默认折叠且不提供 defer；标题重复和 DOI 冲突的两个条目在桌面宽度下并列显示、窄屏下再上下排列。标题重复复核显示 Item A/Item B，并提供“删除 Item A”“删除 Item B”“Keep current”三个方向，DOI 冲突复核只提供清除 Item A DOI、清除 Item B DOI 或保持两者不变，不得提供删除文章按钮；删除文章或清理 DOI 必须二次确认，复核卡片中的 DOI 应可直接跳转。Keep/clear-DOI 决策只完成清理并让文章留在未分类队列，不得立即调用分类器；只要仍有待复核项，cleanup 不得批量调用分类器。Reclassify 作业完成后，Latest activity 面板展示 feedback 纠正对账：`已落实 n / 共 m` 汇总行 + 未落实清单的渐进披露（论文标题 + "纠正值 … ；当前值 …"，主题用后端解析好的 label）。
+- Dashboard 优先展示运行中任务、验证状态和主要 Sync；定向 Sync、Reclassify、用量等低频项渐进披露，Database cleanup 放在 Dashboard 最底部。重分类使用单选范围下拉；`Custom range` 展开刊名搜索、多选、已选标签、可选入库日期边界和匹配/分类状态预览，启动时提交预览指纹。期刊条件与日期条件取交集，日期包含首尾日，全部不填时禁用启动。数据库忙时禁用冲突操作。
+- Database cleanup 只保留一个 `Run cleanup` 入口，未分类数量以按钮旁文字显示，人工复核队列默认折叠且不提供 defer；标题重复和 DOI 冲突的两个条目在桌面宽度下并列显示、窄屏下再上下排列。标题重复复核显示 Item A/Item B，并提供“删除 Item A”“删除 Item B”“Keep current”三个方向，DOI 冲突复核只提供清除 Item A DOI、清除 Item B DOI 或保持两者不变，不得提供删除文章按钮；删除文章或清理 DOI 必须二次确认，复核卡片中的 DOI 应可直接跳转。Keep/clear-DOI 决策只完成清理并让文章留在未分类队列，不得立即调用分类器；只要仍有待复核项，cleanup 不得批量调用分类器。Reclassify 作业完成后，Latest activity 面板展示 feedback 纠正对账：`已落实 n / 共 m` 汇总行 + 未落实清单的渐进披露（论文标题 + "纠正值 … ；当前值 …"，主题用后端解析好的 label）。
 - Feeds 使用独立本地草稿；取消必须恢复已保存值，未保存修改不能污染阅读状态。
 - Profile 使用一个主要审阅文档；反馈队列位于下方作为次级区域。Profile 编辑态包含一个 Topics 章节：主题条支持新建、改名与删除（删除用 danger 样式），未被任何规则引用的主题在只读视图标注 `unused`。规则编辑保持多行文本形态：unrelated 规则沿用整体多行文本框（一行一条）；direct/indirect 规则因需按条打标，每条规则一个多行文本框，主题用单选下拉（每条规则最多归属一个主题，选项含"无主题"），Remove 与下拉同行靠右，不套边框盒子，unrelated 不提供打标入口。
 - Model 常显连接与默认模型，低频调优进入 Advanced，并使用一个统一保存动作；token 价格由后端内置且不可编辑。
 - Model Advanced 中的分类思考只提供全局启用/关闭选择；启用后由后端映射到各供应商最低档，GLM 的说明必须明确其始终为 low、不能关闭。
 - App 顶部常显 About、更新和运行信息；打开或刷新 Web UI 时后台自动强制检查更新，检测到新版本时使用顶栏现有消息栏提示，下载入口仍在 Settings → App；Zotero、Scheduled sync、Local app 使用相同的独立 Disclosure。
+- Local app Disclosure 中，主机和端口设置的 `Save app settings` 紧邻设置表单；Work data backup 是独立操作区，提供创建入口、后台任务状态、备份日期与大小及下载链接。说明创建备份会在本地数据目录生成 ZIP，下载会复制 ZIP 到用户电脑；备份包含数据库、profile 和订阅，不包括密钥或应用配置。每个 ZIP 附带手动恢复步骤。
 - Zotero 使用 Web API 和应用内 collection picker，不依赖浏览器 connector。
 
 ### 6.3 Onboarding 与 Profile

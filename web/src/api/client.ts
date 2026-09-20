@@ -454,7 +454,33 @@ export async function launchAdminJob(
   return payload.job;
 }
 
-export type ReclassifyScope = "today" | "feedback" | "all" | "count" | "unclassified" | "topics";
+export type ReclassifyScope = "today" | "feedback" | "all" | "count" | "unclassified" | "topics" | "custom";
+
+export type BackupEntry = {id: string; created_at: string; size: number};
+export async function fetchBackups(): Promise<{backups: BackupEntry[]; database_exists: boolean}> {
+  return localJSONRequest("/api/admin/backups", undefined, "load backups", "Could not load backups");
+}
+export async function createBackup(): Promise<JobInfo> {
+  const response = await localJSONRequest<{job: JobInfo}>("/api/admin/backups", {method: "POST"}, "create a backup", "Could not create a backup");
+  return response.job;
+}
+
+export type CustomPaperFilter = {journal_keys: string[]; date_from: string; date_to: string};
+export type CustomReclassifyRequest = CustomPaperFilter & {fingerprint: string};
+export type CustomReclassifyPreview = {total: number; classified: number; unclassified: number; fingerprint: string; timezone: string};
+export type JournalOption = {key: string; label: string};
+
+export async function fetchJournalOptions(): Promise<{journals: JournalOption[]; timezone: string}> {
+  return localJSONRequest("/api/admin/journals", undefined, "load journals", "Could not load journals");
+}
+
+export async function previewCustomReclassify(filter: CustomPaperFilter): Promise<CustomReclassifyPreview> {
+	return localJSONRequest("/api/admin/reclassify/preview", {
+		method: "POST",
+		headers: {"Content-Type": "application/json"},
+		body: JSON.stringify(filter),
+	}, "preview the range", "Could not preview the range");
+}
 
 export type ReclassifyOptions = {
   paper_count: number;
@@ -482,7 +508,7 @@ export async function fetchReclassifyOptions(limit?: number): Promise<Reclassify
 export async function launchReclassifyJob(input: {
   scope: ReclassifyScope;
   limit: number;
-}): Promise<JobInfo> {
+} & Partial<CustomReclassifyRequest>): Promise<JobInfo> {
   const payload = await localJSONRequest<{job: JobInfo}>(
     "/api/admin/reclassify",
     {

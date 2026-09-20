@@ -19,7 +19,7 @@ type TextInputFieldProps = {
   inputMode?: InputHTMLAttributes<HTMLInputElement>["inputMode"];
   label: string;
   placeholder?: string;
-  type?: "text" | "password" | "url" | "number";
+  type?: "text" | "password" | "url" | "number" | "date";
   value: string;
   onChange: (value: string) => void;
 };

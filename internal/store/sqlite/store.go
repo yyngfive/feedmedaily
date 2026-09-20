@@ -93,6 +93,8 @@ type ZoteroStatus struct {
 }
 
 type ReportPaper struct {
+	JournalKey     string          `json:"journal_key"`
+	JournalDisplay string          `json:"journal_display"`
 	ID             int64           `json:"id"`
 	SourceURL      string          `json:"source_url"`
 	FeedTitle      *string         `json:"feed_title"`

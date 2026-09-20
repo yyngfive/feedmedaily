@@ -1,3 +1,4 @@
+import type {CustomReclassifyRequest} from "../api/client";
 import React from "react";
 
 import {
@@ -273,9 +274,9 @@ export function useAdminActions(state: AppState, data: AppData) {
     } catch (error) { setVerificationSubmitError(errorText(error, "Could not submit protected feed XML.")); }
     finally { setVerificationSubmitting(false); }
   }, [errorText, pushMessage, setVerificationSubmitError, setVerificationSubmitting]);
-  const handleReclassify = async (scope: ReclassifyScope, limit = 0) => {
-    try { registerJob(await launchReclassifyJob({scope, limit})); pushMessage("job.reclassify.started"); }
-    catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not start the reclassification job."); }
+  const handleReclassify = async (scope: ReclassifyScope, limit = 0, custom?: CustomReclassifyRequest) => {
+    try { registerJob(await launchReclassifyJob({scope, limit, ...custom})); pushMessage("job.reclassify.started"); }
+    catch (error) { if (scope === "custom") throw error; pushErrorMessage("app.service.unavailable", error, "Could not start the reclassification job."); }
   };
   const handleCleanup = React.useCallback(async () => {
     try { registerJob(await launchCleanupJob()); pushMessage("cleanup.started"); }

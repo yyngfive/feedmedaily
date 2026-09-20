@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/yyngfive/scirssagent/internal/journals"
 	_ "modernc.org/sqlite"
 	"strings"
 	"time"
@@ -205,7 +206,10 @@ func buildReportPaper(base paperRow, classification Classification, feedbackStat
 	if err != nil {
 		return ReportPaper{}, fmt.Errorf("parse raw payload for paper %d: %w", base.ID, err)
 	}
+	identity := journals.Resolve(base.SourceURL, base.Journal, base.FeedTitle)
 	return ReportPaper{
+		JournalKey:     identity.Key,
+		JournalDisplay: identity.Label,
 		ID:             base.ID,
 		SourceURL:      base.SourceURL,
 		FeedTitle:      base.FeedTitle,

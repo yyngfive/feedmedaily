@@ -20,6 +20,10 @@ import (
 )
 
 func (s *Server) handleProfileCurrent(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPut {
+		workDataConfigMu.Lock()
+		defer workDataConfigMu.Unlock()
+	}
 	serverSettings := s.snapshotSettings()
 	switch r.Method {
 	case http.MethodGet:
@@ -182,6 +186,8 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProfileTopicCreate(w http.ResponseWriter, r *http.Request) {
+	workDataConfigMu.Lock()
+	defer workDataConfigMu.Unlock()
 	// 反馈弹窗的窄接口：往当前 profile 注册表追加一个主题（label 幂等）。
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -532,6 +538,8 @@ func (s *Server) handleProfileProposalDetail(w http.ResponseWriter, proposalID i
 }
 
 func (s *Server) handleProfileProposalApply(w http.ResponseWriter, r *http.Request, proposalID int64) {
+	workDataConfigMu.Lock()
+	defer workDataConfigMu.Unlock()
 	// 支持 legacy 整份 apply，以及带 accepted/rejected change ids 的局部 apply。
 	serverSettings := s.snapshotSettings()
 	sqliteStore, err := s.getWriteStore()

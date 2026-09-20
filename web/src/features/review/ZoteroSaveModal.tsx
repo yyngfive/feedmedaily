@@ -1,3 +1,4 @@
+import {journalDisplay} from "./journalAliases";
 import React, {type Key} from "react";
 import {Button, Input, Label, ListBox, ListBoxItem, TextField} from "@heroui/react";
 
@@ -67,7 +68,7 @@ export function ZoteroSaveModal({
       <div className="min-w-0 space-y-2 rounded-md border border-(--line) bg-(--paper) p-3 text-sm [overflow-wrap:anywhere]">
         <div className="space-y-1 text-muted">
           <p>Title: {paper.title}</p>
-          <p>Journal: {paper.journal || paper.feed_title || "Unknown journal"}</p>
+          <p>Journal: {journalDisplay(paper)}</p>
           <p>Authors: {authorsLabel}</p>
           <p>Year/Date: {yearLabel} / {dateLabel}</p>
           <p>DOI: {paper.doi || "—"}</p>

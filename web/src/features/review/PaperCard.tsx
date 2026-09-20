@@ -1,3 +1,4 @@
+import {journalDisplay} from "./journalAliases";
 import {Card, Chip} from "@heroui/react";
 import React from "react";
 
@@ -99,7 +100,7 @@ export function PaperCard({
               </Card.Description>
             ) : null}
           </div>
-          <p className="text-sm text-muted">{paper.journal || "Unknown journal"}</p>
+          <p className="text-sm text-muted">{journalDisplay(paper)}</p>
           <p className="text-sm text-muted">
             {paperDate(paper)} · {authorsLine(paper)}
           </p>

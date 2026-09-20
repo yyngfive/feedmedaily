@@ -1,3 +1,4 @@
+import type {CustomReclassifyRequest} from "../../api/client";
 import {Button} from "@heroui/react";
 import React from "react";
 
@@ -56,6 +57,7 @@ export type AdminPanelProps = {
   feedsSaving: boolean;
   hasFeeds: boolean;
   jobs: JobInfo[];
+  onJob: (job: JobInfo) => void;
   onApplyProposal: (id: number, selection?: {accepted_change_ids: string[]; rejected_change_ids: string[]}) => Promise<void> | void;
   onCheckForUpdates: () => void;
   onClose: () => void;
@@ -65,7 +67,7 @@ export type AdminPanelProps = {
   onOpenVerificationInBrowser: (job: JobInfo) => void;
   onCleanup: () => Promise<void> | void;
   onCleanupReview: (reviewID: number, decision: CleanupReviewDecision) => Promise<void> | void;
-  onReclassify: (scope: ReclassifyScope, limit?: number) => Promise<void> | void;
+  onReclassify: (scope: ReclassifyScope, limit?: number, custom?: CustomReclassifyRequest) => Promise<void> | void;
   onRejectProposal: (id: number) => void;
   onRunSync: (feedURLs?: string[]) => void;
   onStopJob: (jobID: string, jobType: "sync" | "reclassify" | "cleanup" | "cleanup-review") => Promise<void> | void;
@@ -258,7 +260,7 @@ export function AdminPanel(props: AdminPanelProps) {
               </AdminDisclosure>
             </div>
             <div hidden={props.activeTab !== "app"}>
-              <AppTab appControlBusy={props.appControlBusy} onExitApp={props.onExitApp} onOpenAppTarget={props.onOpenAppTarget} appMeta={props.appMeta} appUpdate={props.appUpdate} appUpdateChecking={props.appUpdateChecking} configFields={appFields} configSaving={props.configSaving} onCheckForUpdates={props.onCheckForUpdates} onDeleteScheduler={props.onDeleteScheduler} onSaveConfig={props.onSaveConfig} onSaveScheduler={props.onSaveScheduler} scheduler={props.scheduler} schedulerSaving={props.schedulerSaving} />
+              <AppTab jobs={props.jobs} onJob={props.onJob} appControlBusy={props.appControlBusy} onExitApp={props.onExitApp} onOpenAppTarget={props.onOpenAppTarget} appMeta={props.appMeta} appUpdate={props.appUpdate} appUpdateChecking={props.appUpdateChecking} configFields={appFields} configSaving={props.configSaving} onCheckForUpdates={props.onCheckForUpdates} onDeleteScheduler={props.onDeleteScheduler} onSaveConfig={props.onSaveConfig} onSaveScheduler={props.onSaveScheduler} scheduler={props.scheduler} schedulerSaving={props.schedulerSaving} />
             </div>
           </main>
         </div>

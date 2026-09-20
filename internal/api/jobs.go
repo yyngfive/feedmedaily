@@ -345,6 +345,9 @@ func finishCancelledLocalJob(settings config.Settings, job *jobInfo, jobType str
 
 func finalizeLLMUsage(settings config.Settings, jobID string, jobType string, status string, collector *llmusage.Collector, finished time.Time) llmusage.Summary {
 	summary := collector.Summary()
+	if jobType == "backup" {
+		return summary
+	}
 	if len(summary.Models) == 0 {
 		switch jobType {
 		case "sync", "reclassify", "cleanup", "cleanup-review", "model-test":

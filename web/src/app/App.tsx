@@ -64,6 +64,7 @@ export function App() {
       <TopBar message={state.message} onOpenAdmin={() => state.setAdminOpen(true)} onToggleTheme={toggleTheme} resolvedTheme={state.resolvedTheme} usingSystemTheme={state.themePreference === "system"} />
       {state.adminHydrationWarning ? <StatusBanner className="mx-auto mt-3 w-full max-w-375 px-4" tone="warning">{state.adminHydrationWarning}</StatusBanner> : null}
       <AdminPanel
+        onJob={admin.registerJob}
         activeTab={state.adminTab}
         appMeta={state.appMeta}
         appUpdate={state.appUpdate}

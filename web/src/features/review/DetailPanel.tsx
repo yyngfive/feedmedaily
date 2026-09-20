@@ -1,3 +1,4 @@
+import {journalDisplay} from "./journalAliases";
 import { Button } from "@heroui/react";
 
 import { feedbackLabel, paperDate, paperLinkHref } from "../../app/utils";
@@ -79,7 +80,7 @@ export function DetailPanel({
       <div className="space-y-3">
         <h2 className="text-xl font-semibold leading-7 text-(--ink)">{paper.title}</h2>
         {paper.classification.translated_title_zh ? <p className="text-lg leading-7 text-(--subtle-ink)">{paper.classification.translated_title_zh}</p> : null}
-        <p className="text-base leading-6 text-muted">{paper.journal || "Unknown journal"}</p>
+        <p className="text-base leading-6 text-muted">{journalDisplay(paper)}</p>
         <p className="text-sm leading-6 text-muted">{paperDate(paper)}</p>
       </div>
 

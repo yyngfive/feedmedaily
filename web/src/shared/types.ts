@@ -210,6 +210,8 @@ export type ZoteroCollectionsResponse = {
 };
 
 export type Paper = {
+  journal_key?: string;
+  journal_display?: string;
   id: number;
   title: string;
   url: string;

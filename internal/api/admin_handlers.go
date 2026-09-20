@@ -9,6 +9,7 @@ import (
 	jobruntime "github.com/yyngfive/scirssagent/internal/jobs"
 	"github.com/yyngfive/scirssagent/internal/llmusage"
 	"github.com/yyngfive/scirssagent/internal/logging"
+	store "github.com/yyngfive/scirssagent/internal/store/sqlite"
 	"io"
 	"net/http"
 	"os"
@@ -104,6 +105,10 @@ func validateSelectedFeedURLs(feedsPath string, requested []string) ([]string, e
 }
 
 func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && r.URL.Query().Get("scope") == "custom" {
+		s.previewCustomReclassify(w, r)
+		return
+	}
 	serverSettings := s.snapshotSettings()
 	if r.Method == http.MethodGet {
 		paperCount, err := jobruntime.CountPapers(serverSettings)
@@ -159,9 +164,15 @@ func (s *Server) handleAdminReclassify(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		Scope string `json:"scope"`
 		Limit int    `json:"limit"`
+		store.PaperFilter
+		Fingerprint string `json:"fingerprint"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid JSON body.")
+		return
+	}
+	if payload.Scope == "custom" {
+		s.launchCustomReclassify(w, payload.PaperFilter, payload.Fingerprint)
 		return
 	}
 	if strings.TrimSpace(payload.Scope) == "" {

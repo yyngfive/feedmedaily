@@ -215,6 +215,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/zotero/save/", s.handleZoteroSave)
 	mux.HandleFunc("/api/admin/run", s.handleAdminRun)
 	mux.HandleFunc("/api/admin/reclassify", s.handleAdminReclassify)
+	mux.HandleFunc("/api/admin/reclassify/preview", func(w http.ResponseWriter, r *http.Request) {
+		if !requireMethod(w, r, http.MethodPost) {
+			return
+		}
+		s.previewCustomReclassifyPost(w, r)
+	})
+	mux.HandleFunc("/api/admin/journals", s.handleJournalOptions)
+	mux.HandleFunc("/api/admin/backups", s.handleBackups)
+	mux.HandleFunc("/api/admin/backups/", s.handleBackupDownload)
 	mux.HandleFunc("/api/admin/cleanup/reviews/", s.handleAdminCleanupReviewByID)
 	mux.HandleFunc("/api/admin/cleanup/reviews", s.handleAdminCleanupReviews)
 	mux.HandleFunc("/api/admin/cleanup", s.handleAdminCleanup)

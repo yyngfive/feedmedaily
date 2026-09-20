@@ -1,3 +1,6 @@
+import {CustomReclassifyForm} from "./CustomReclassifyForm";
+import {SelectField} from "../../shared/components/SelectField";
+import type {CustomReclassifyRequest} from "../../api/client";
 import {Button, Chip, Spinner} from "@heroui/react";
 import React from "react";
 
@@ -244,7 +247,7 @@ export function DashboardTab({
   onOpenVerificationInBrowser: (job: JobInfo) => void;
   onCleanup: () => Promise<void> | void;
   onCleanupReview: (reviewID: number, decision: CleanupReviewDecision) => Promise<void> | void;
-  onReclassify: (scope: ReclassifyScope, limit?: number) => Promise<void> | void;
+  onReclassify: (scope: ReclassifyScope, limit?: number, custom?: CustomReclassifyRequest) => Promise<void> | void;
   onRunSync: (feedURLs?: string[]) => void;
   onStopJob: (jobID: string, jobType: "sync" | "reclassify" | "cleanup" | "cleanup-review") => Promise<void> | void;
   onStartVerification: (job: JobInfo) => void;
@@ -267,6 +270,7 @@ export function DashboardTab({
   const [stoppingCleanup, setStoppingCleanup] = React.useState(false);
   const latestJob = jobs[0] ?? null;
   const activeSyncJob = jobs.find((job) => job.job_type === "sync" && ["queued", "running", "waiting_for_user"].includes(job.status)) ?? null;
+  const activeBackupJob = jobs.find((job) => job.job_type === "backup" && ["queued", "running"].includes(job.status)) ?? null;
   const activeReclassifyJob = jobs.find((job) => job.job_type === "reclassify" && ["queued", "running"].includes(job.status)) ?? null;
   const activeCleanupJob = jobs.find((job) => (job.job_type === "cleanup" || job.job_type === "cleanup-review") && ["queued", "running"].includes(job.status)) ?? null;
   const cleanupRefreshKey = `${latestJob?.id ?? ""}:${latestJob?.status ?? ""}:${latestJob?.finished_at ?? ""}|${jobs
@@ -398,7 +402,7 @@ export function DashboardTab({
         <h3 className="text-sm font-semibold text-(--ink)">Sync</h3>
         {!hasFeeds ? <p className="mt-2 text-sm leading-6 text-muted">Add and save at least one RSS feed before running a manual sync.</p> : null}
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button isDisabled={!hasFeeds || Boolean(activeSyncJob) || Boolean(activeReclassifyJob) || Boolean(activeCleanupJob)} size="sm" onPress={runSync}>{activeSyncJob ? "Sync running" : activeReclassifyJob ? "Reclassification running" : activeCleanupJob ? "Cleanup running" : "Sync now"}</Button>
+          <Button isDisabled={!hasFeeds || Boolean(activeSyncJob) || Boolean(activeReclassifyJob) || Boolean(activeCleanupJob || activeBackupJob)} size="sm" onPress={runSync}>{activeSyncJob ? "Sync running" : activeReclassifyJob ? "Reclassification running" : activeCleanupJob ? "Cleanup running" : activeBackupJob ? "Backup running" : "Sync now"}</Button>
           {activeSyncJob ? <Button isDisabled={stoppingSync || Boolean(activeSyncJob.cancel_requested)} size="sm" variant="danger" onPress={stopSync}>{stoppingSync || activeSyncJob.cancel_requested ? "Stopping…" : "Stop sync"}</Button> : null}
         </div>
         {hasFeeds ? (
@@ -418,17 +422,16 @@ export function DashboardTab({
         ) : null}
         <div className="mt-4"><AdminDisclosure title="Reclassify papers">
           <div className="space-y-3">
-            <div className="flex flex-wrap gap-2" role="group" aria-label="Reclassification range">
-              {([
-                ["today", "Today"],
-                ["feedback", "Feedback papers"],
-                ["all", "All papers"],
-                ["count", "Specific count"],
-                ["topics", "Topic backfill"],
-              ] as Array<[ReclassifyScope, string]>).map(([scope, label]) => (
-                <Button key={scope} aria-pressed={reclassifyScope === scope} size="sm" variant={reclassifyScope === scope ? "secondary" : "outline"} onPress={() => setReclassifyScope(scope)}>{label}</Button>
-              ))}
-            </div>
+            <SelectField label="Range" value={reclassifyScope} onChange={(value) => setReclassifyScope(value as ReclassifyScope)} options={[
+              {value: "today", label: "Today"}, {value: "feedback", label: "Feedback papers"},
+              {value: "all", label: "All papers"}, {value: "count", label: "Specific count"},
+              {value: "topics", label: "Topic backfill"}, {value: "custom", label: "Custom range"},
+            ]}/>
+            {reclassifyScope === "custom" ? <CustomReclassifyForm
+              busy={Boolean(activeSyncJob || activeReclassifyJob || activeCleanupJob || activeBackupJob)}
+              onRun={(request) => onReclassify("custom", 0, request)}
+              stopButton={activeReclassifyJob ? <Button size="sm" variant="danger" isDisabled={stoppingReclassify || Boolean(activeReclassifyJob.cancel_requested)} onPress={stopReclassify}>{stoppingReclassify || activeReclassifyJob.cancel_requested ? "Stopping…" : "Stop reclassification"}</Button> : null}
+            /> : <>
             {reclassifyScope === "count" ? (
               <TextInputField
                 className="max-w-72"
@@ -445,8 +448,8 @@ export function DashboardTab({
             {!reclassifyLimitValid ? <p className="text-sm text-rose-700">Enter a whole number from 0 to {reclassifyPaperCount ?? 0}.</p> : null}
             {reclassifyPreview ? <p className="text-sm leading-6 text-muted">{reclassifyPreview}</p> : null}
             <div className="flex flex-wrap gap-2">
-              <Button isDisabled={!reclassifyLimitValid || reclassifying || Boolean(activeReclassifyJob) || Boolean(activeSyncJob) || Boolean(activeCleanupJob)} size="sm" onPress={confirmReclassify}>
-                {reclassifying || activeReclassifyJob ? "Reclassifying…" : activeSyncJob ? "Sync running" : activeCleanupJob ? "Cleanup running" : "Confirm reclassification"}
+              <Button isDisabled={!reclassifyLimitValid || reclassifying || Boolean(activeReclassifyJob) || Boolean(activeSyncJob) || Boolean(activeCleanupJob || activeBackupJob)} size="sm" onPress={confirmReclassify}>
+                {reclassifying || activeReclassifyJob ? "Reclassifying…" : activeSyncJob ? "Sync running" : activeCleanupJob ? "Cleanup running" : activeBackupJob ? "Backup running" : "Confirm reclassification"}
               </Button>
               {activeReclassifyJob ? (
                 <Button isDisabled={stoppingReclassify || Boolean(activeReclassifyJob.cancel_requested)} size="sm" variant="danger" onPress={stopReclassify}>
@@ -454,6 +457,7 @@ export function DashboardTab({
                 </Button>
               ) : null}
             </div>
+            </>}
           </div>
         </AdminDisclosure></div>
       </section>
@@ -471,7 +475,7 @@ export function DashboardTab({
 
       <UnclassifiedCleanupPanel
         activeJob={activeCleanupJob}
-        pipelineBusy={Boolean(activeSyncJob) || Boolean(activeReclassifyJob) || Boolean(activeCleanupJob)}
+        pipelineBusy={Boolean(activeSyncJob) || Boolean(activeReclassifyJob) || Boolean(activeCleanupJob || activeBackupJob)}
         onCleanup={onCleanup}
         onCleanupReview={onCleanupReview}
         refreshKey={cleanupRefreshKey}

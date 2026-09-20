@@ -55,6 +55,10 @@ func (s *Server) handleSettingsConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSettingsFeeds(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPut {
+		workDataConfigMu.Lock()
+		defer workDataConfigMu.Unlock()
+	}
 	settings := s.snapshotSettings()
 	switch r.Method {
 	case http.MethodGet:

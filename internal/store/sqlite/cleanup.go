@@ -650,6 +650,10 @@ func (s *Store) ApplyCleanupReviewDecision(ctx context.Context, reviewID int64, 
 // BackupTo creates a consistent SQLite snapshot before a cleanup mutation.
 // VACUUM INTO includes WAL state and refuses to overwrite an existing file.
 func (s *Store) BackupTo(path string) error {
+	return s.BackupToContext(context.Background(), path)
+}
+
+func (s *Store) BackupToContext(ctx context.Context, path string) error {
 	clean := filepath.Clean(strings.TrimSpace(path))
 	if clean == "." || clean == "" {
 		return fmt.Errorf("backup path cannot be blank")
@@ -662,7 +666,7 @@ func (s *Store) BackupTo(path string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("check backup path: %w", err)
 	}
-	if _, err := s.db.Exec(`VACUUM INTO ?`, clean); err != nil {
+	if _, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, clean); err != nil {
 		return fmt.Errorf("backup sqlite database: %w", err)
 	}
 	return nil

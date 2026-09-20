@@ -1,3 +1,5 @@
+import {WorkDataBackup} from "./WorkDataBackup";
+import type {JobInfo} from "../../shared/types";
 import { Button, Chip, Spinner } from "@heroui/react";
 import React from "react";
 
@@ -11,7 +13,9 @@ function fieldValue(fields: SettingsConfigField[], key: string) {
   return fields.find((field) => field.key === key)?.value ?? "";
 }
 
-export function AppTab({ appControlBusy, onExitApp, onOpenAppTarget, appMeta, appUpdate, appUpdateChecking, configFields, configSaving, onCheckForUpdates, onDeleteScheduler, onSaveConfig, onSaveScheduler, scheduler, schedulerSaving }: {
+export function AppTab({ jobs, onJob, appControlBusy, onExitApp, onOpenAppTarget, appMeta, appUpdate, appUpdateChecking, configFields, configSaving, onCheckForUpdates, onDeleteScheduler, onSaveConfig, onSaveScheduler, scheduler, schedulerSaving }: {
+  jobs: JobInfo[];
+  onJob: (job: JobInfo) => void;
   appControlBusy: boolean;
   onExitApp: () => void;
   onOpenAppTarget: (target: "data_dir" | "logs_dir" | "install_dir") => void;
@@ -145,7 +149,8 @@ export function AppTab({ appControlBusy, onExitApp, onOpenAppTarget, appMeta, ap
         <AdminDisclosure title="Local app">
           <p className="mb-3 text-sm text-muted">Host and port changes take effect after the local service restarts.</p>
           <SettingsConfigEditor ref={localAppRef} fields={localAppFields} hideGroupTitles saving={configSaving} showHeader={false} showSaveAction={false} title="Local app" onSave={onSaveConfig} />
-          <Button className="mt-4" isDisabled={configSaving} size="sm" onPress={() => void onSaveConfig(localAppRef.current?.getPayload() ?? {})}>{configSaving ? "Saving..." : "Save"}</Button>
+          <Button className="mt-4" isDisabled={configSaving} size="sm" onPress={() => void onSaveConfig(localAppRef.current?.getPayload() ?? {})}>{configSaving ? "Saving..." : "Save app settings"}</Button>
+          <WorkDataBackup jobs={jobs} onJob={onJob}/>
         </AdminDisclosure>
       </div>
     </div>
