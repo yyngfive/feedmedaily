@@ -5,8 +5,9 @@
 ## Feeds
 
 - [X] 补充 PNAS 官方学科订阅。
-- [ ] 补充APS订阅源（通过sci-rss-list项目）
-- [ ] 订阅源增加current issue和asap标注（通过sci-rss-list项目）
+- [X] 补充 APS 订阅源（通过 sci-rss-list 项目）。
+- [X] 订阅源增加 Current Issue 和 ASAP 标注（通过 sci-rss-list 项目）。
+- [ ] 核实并修正 sci-rss-list 中 ChemRxiv 最新预印本 feed 的范围（当前标为 `single_journal`，应使用 `platform_collection`）。
 
 ## Models
 

@@ -73,8 +73,8 @@ function Get-FeedScope {
     return $scope
   }
 
-  # Compatibility for the current SRL schema. New entries should set feed_scope
-  # explicitly; this reads only source labels and notes and keeps no local URL map.
+  # Compatibility fallback for legacy entries that do not define feed_scope.
+  # Current SRL records provide it explicitly; inference uses only labels and notes.
   if ($Publisher -eq 'bioRxiv/medRxiv' -and
       ($Journal -match '^(bioRxiv|medRxiv):\s*.+$' -or $Notes -match '(?i)\bsubject collection\b')) {
     return 'subject_collection'
@@ -239,9 +239,9 @@ if ($catalog.Count -eq 0) {
   throw "Feed catalog is empty."
 }
 
-# Every verified entry in sci-rss-list supplies the source URL and feed scope.
-# Explicit canonical_journal values drive single-journal mappings. Legacy entries
-# use source-record inference until sci-rss-list publishes feed_scope directly.
+# Current SRL entries provide source URLs and explicit identity fields.
+# Use canonical_journal and feed_scope when present; retain limited inference for
+# legacy entries that predate those fields.
 $journalFeeds = @($catalog | ForEach-Object {
   [ordered]@{
     url              = $_.url

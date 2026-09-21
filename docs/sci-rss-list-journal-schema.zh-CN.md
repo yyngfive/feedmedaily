@@ -1,12 +1,14 @@
-# Sci-RSS-List 期刊与 Feed 身份字段提案
+# Sci-RSS-List 期刊与 Feed 身份字段说明
+
+> 状态：Sci-RSS-List 当前数据已采用本文描述的字段。本文记录字段约定及 FeedMeDaily 的导入规则。
 
 ## 目标
 
 将“刊物身份”和“RSS feed 类型”拆成独立字段，使导入程序可以直接采用上游标准刊名，不必从刊名字符串、出版社域名或自由文本备注中推断单刊、聚合源和学科分类源。
 
-当前 `journal` 字段同时承担订阅源标签和刊名：例如 ACS 同一期刊的 ASAP 与 Current Issue 有不同字符串，APS 的 Recently Published、Recently Accepted 和 Editors' Suggestions 也带有 feed 类型；跨刊聚合源和 bioRxiv/medRxiv 学科分类源则被放进同一个字段。仅靠删除括号、冒号或卷期文字会误伤真实刊名或目录分区。
+为兼容旧客户端，`journal` 保留订阅标签，仍可能包含 feed 类型或目录分区。新客户端使用独立字段识别刊物身份和 feed 范围：例如 ACS 同一期刊的 ASAP 与 Current Issue 共享标准刊名，APS 的分区与跨刊聚合源则各自明确标注。仅靠删除括号、冒号或卷期文字会误伤真实刊名或目录分区。
 
-## 建议新增字段
+## 字段定义
 
 保留现有 `journal`、`url`、`publisher`、`subjects`、`source`、`method`、`status` 和 `notes`。新增字段使用 snake_case，并保持 `data/feeds.json` 当前根数组结构不变。
 
@@ -15,11 +17,11 @@
 | `canonical_journal` | 单刊 feed 的正式全名；不包含 RSS 类型或文章卷期。聚合源、平台源和学科分类源填`null`。                                                                                                                  |
 | `issn_l`            | 可选的 ISSN-L，用于同刊多条 feed 共享稳定身份；尚未核实则填`null`。                                                                                                                                    |
 | `feed_scope`        | 必填枚举：`single_journal`、`multi_journal`、`subject_collection`、`platform_collection`。                                                                                                       |
-| `feed_type`         | 稳定的小写下划线值，如`asap`、`current_issue`、`recently_published`、`recently_accepted`、`editors_suggestions`、`toc_section`、`subject_collection`、`latest_preprints`。允许后续扩展。 |
-| `feed_name`         | 给用户看的该条 feed 标签，如`ASAP`、`Recently Published` 或 `Atomic, Molecular, and Optical Physics`。                                                                                             |
+| `feed_type`         | 稳定的小写下划线值，如`asap`、`current_issue`、`recently_published`、`recently_accepted`、`editors_suggestions`、`toc_section`、`subject_collection`、`latest_preprints`。无额外类型的普通单刊 feed 可填`null`。 |
+| `feed_name`         | 与 `feed_type` 同时填写或同时为`null`；给用户看的该条 feed 标签，如`ASAP`、`Recently Published` 或 `Atomic, Molecular, and Optical Physics`。 |
 | `collection`        | 仅学科分类源使用：包含`platform`、稳定 `id` 和正式分类名 `name`。其他 feed 可省略或填 `null`。                                                                                                   |
 
-迁移期间，`journal` 保留现有值作为旧版客户端使用的订阅标签；新客户端以 `canonical_journal` 判断真实刊名，以 `feed_name` 区分同刊的不同订阅源。不要在不迁移旧客户端的情况下悄悄改变 `journal` 的含义。
+兼容约定：`journal` 保留现有值供旧版客户端作为订阅标签使用；新客户端以 `canonical_journal` 判断真实刊名，以 `feed_name` 区分同刊的不同订阅源。不要在未迁移旧客户端的情况下改变 `journal` 的含义。
 
 ## 刊名格式
 
@@ -114,7 +116,7 @@ APS 的 PRL 目录分区 feed 仍映射到 `Physical Review Letters`，并把分
 4. `platform_collection`：使用目录中的平台 feed 身份；只有 `multi_journal` 明确表示跨刊聚合，因此才优先使用文章级刊名。
 5. 没有新字段的旧条目只通过有限的兼容逻辑判断；上游新增或修订条目应显式提供 `feed_scope`，不得要求客户端维护出版社 URL 白名单。通用卷期清理仅在没有适用 URL 映射时兜底，并且只有清理后的名称能匹配目录刊名才生效。
 
-## 验收条件
+## 数据校验条件
 
 - 同一刊物的多个 feed 使用相同 `canonical_journal` 和 `issn_l`，但保留不同 URL、`feed_type` 和 `feed_name`。
 - `single_journal` 必须提供非空 `canonical_journal`；其他 scope 的 `canonical_journal` 为 `null`。
