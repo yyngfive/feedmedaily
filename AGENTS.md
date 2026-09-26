@@ -75,11 +75,12 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 - `CHANGELOG.md` is the canonical versioned changelog for user-facing product changes.
 - Maintain changelog entries grouped by version number, starting from `0.2.0`.
 - Each version section should describe changes relative to the previous released version, not as an all-time cumulative list.
-- The latest released version is `0.6.2`; the current rolling unreleased section is `0.7.0` until `0.7.0` ships.
+- The latest released version is `0.7.0`; the current rolling unreleased section is `0.7.1` until `0.7.1` ships.
 - When a version is released, convert that section from unreleased to dated release notes and open a new unreleased section for the next planned version.
 - Add behavior changes, bug fixes, runtime changes, packaging changes, and notable UX changes that matter to users or release notes readers.
 - Avoid filling the changelog with pure planning-only edits, internal note reshuffles, or agent-policy-only changes unless they have a user-visible release impact.
 - A temporary release draft under `docs/release-notes-v*.md` should stay very short and use a simple bullet list style.
+- Follow the established release-draft format: `# FeedMeDaily vX.Y.Z`, `## 更新`, and, when a current issue is confirmed, `## 已知问题`. Write short Chinese bullets for user-visible changes since the previous release; combine related changes, avoid implementation details and prices, and do not carry forward issues fixed in this version.
 - Treat `CHANGELOG.md` as the detailed canonical source and remove a temporary release draft after publishing that release.
 
 ## Current Architecture
