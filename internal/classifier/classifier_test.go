@@ -116,7 +116,7 @@ func TestManagedClassifierAdaptersSetProviderThinkingAndDoNotFallbackAcrossProvi
 		{name: "deepseek", provider: "deepseek", model: "deepseek-v4-flash", wantType: "disabled"},
 		{name: "glm", provider: "zhipu", model: "glm-5.3-flash", wantType: "enabled", wantEffort: "low", wantDoSample: true, failPrimary: true},
 		{name: "qwen", provider: "qwen", model: "qwen3.8-flash", wantEffort: "none"},
-		{name: "mimo", provider: "mimo", model: "mimo-v2.5", wantType: "disabled", wantMaxCompletion: true},
+		{name: "mimo", provider: "mimo", model: "mimo-v2.6-flash", wantType: "disabled", wantMaxCompletion: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -199,7 +199,7 @@ func TestTestConnectionUsesManagedProviderPayload(t *testing.T) {
 		{name: "deepseek", provider: "deepseek", model: "deepseek-v4-flash", wantType: "disabled"},
 		{name: "glm", provider: "zhipu", model: "glm-5.3-flash", wantType: "enabled", wantEffort: "low", wantSample: func() *bool { value := false; return &value }()},
 		{name: "qwen", provider: "qwen", model: "qwen3.8-flash", wantEffort: "none"},
-		{name: "mimo", provider: "mimo", model: "mimo-v2.5", wantType: "disabled", wantMaxCompletion: true},
+		{name: "mimo", provider: "mimo", model: "mimo-v2.6-flash", wantType: "disabled", wantMaxCompletion: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -264,7 +264,7 @@ func TestApplyProviderControlsAllowsExplicitExperimentOverrides(t *testing.T) {
 		{"deepseek low", LLMConfig{Provider: "deepseek", Model: "deepseek-v4-flash", Thinking: "enabled", ReasoningEffort: "low", UseConfiguredProviderControls: true}, "enabled", "low", false},
 		{"qwen low", LLMConfig{Provider: "qwen", Model: "qwen3.8-flash", Thinking: "enabled", ReasoningEffort: "low", UseConfiguredProviderControls: true}, "", "low", false},
 		{"qwen none", LLMConfig{Provider: "qwen", Model: "qwen3.8-flash", Thinking: "disabled", ReasoningEffort: "none", UseConfiguredProviderControls: true}, "", "none", false},
-		{"mimo enabled", LLMConfig{Provider: "mimo", Model: "mimo-v2.5", Thinking: "enabled", ReasoningEffort: "low", UseConfiguredProviderControls: true}, "enabled", "", true},
+		{"mimo enabled", LLMConfig{Provider: "mimo", Model: "mimo-v2.6-flash", Thinking: "enabled", ReasoningEffort: "low", UseConfiguredProviderControls: true}, "enabled", "", true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -299,7 +299,7 @@ func TestClassifyPapersUsesThinkingTokenFloorForDeepSeekAndMiMo(t *testing.T) {
 		wantMaxField          string
 	}{
 		{"deepseek", "deepseek", "deepseek-v4-flash", "max_tokens"},
-		{"mimo", "mimo", "mimo-v2.5", "max_completion_tokens"},
+		{"mimo", "mimo", "mimo-v2.6-flash", "max_completion_tokens"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var request map[string]any

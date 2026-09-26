@@ -149,7 +149,7 @@ go run .\cmd\feedmedaily-tray --root .
 2. `Classification models` 多选至少保留一个模型，`Default classifier` 只列出已选模型。
 3. 每个模型只显示一行“模型名 + API key + Test connection”；默认模型使用与 Filter 一致的下拉样式，并且只列出已有 key 或当前新填 key 的模型。
 4. `Test connection` 进入 `model-test` job，并提示会消耗少量额度；临时 key 不保存。
-5. 选择 DeepSeek 且已有 key 时，一次性复用到 Profile 的选项默认勾选；已有 Profile key 不会被覆盖；仅 GLM 时没有 Profile key 不允许生成。
+5. 分类和 Profile 的模型列表包含相同的八个 ID，两个角色可独立选默认模型；配置某供应商 key 后，该供应商的模型在两个角色中均显示为可用。
 6. `Save Settings` 可以只保存本地设置，不强制生成 Profile。
 7. 输入兴趣描述后启动初始 Profile 生成。
 8. job 状态从 queued/running 更新到 completed 或 failed。

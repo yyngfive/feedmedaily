@@ -10,13 +10,15 @@ import (
 )
 
 const (
-	PricingSnapshotDeepSeekCNY    = "deepseek-cny-2026-09-10"
-	PricingSnapshotGLM53FlashCNY  = "zhipu-glm-5.3-flash-cny-2026-09-10"
-	PricingSnapshotGLM53CNY       = "zhipu-glm-5.3-cny-2026-09-12"
-	PricingSnapshotQwen38FlashCNY = "aliyun-qwen3.8-flash-cny-2026-08-29"
-	PricingSnapshotQwen38MaxCNY   = "aliyun-qwen3.8-max-0902-cny-2026-09-12"
-	PricingSnapshotMiMoV25CNY     = "xiaomi-mimo-v2.5-cny-2026-08-29"
-	PricingSnapshotZenFreeCNY     = "opencode-zen-mimo-v2.5-free-cny-2026-09-04"
+	PricingSnapshotDeepSeekCNY     = "deepseek-cny-2026-09-10"
+	PricingSnapshotGLM53FlashCNY   = "zhipu-glm-5.3-flash-cny-2026-09-10"
+	PricingSnapshotGLM53CNY        = "zhipu-glm-5.3-cny-2026-09-12"
+	PricingSnapshotQwen38FlashCNY  = "aliyun-qwen3.8-flash-cny-2026-08-29"
+	PricingSnapshotQwen38MaxCNY    = "aliyun-qwen3.8-max-0902-cny-2026-09-12"
+	PricingSnapshotMiMoV25CNY      = "xiaomi-mimo-v2.5-cny-2026-08-29"
+	PricingSnapshotMiMoV26FlashCNY = "xiaomi-mimo-v2.6-flash-cny-2026-09-26"
+	PricingSnapshotMiMoV26ProCNY   = "xiaomi-mimo-v2.6-pro-cny-2026-09-26"
+	PricingSnapshotZenFreeCNY      = "opencode-zen-mimo-v2.5-free-cny-2026-09-04"
 )
 
 const (
@@ -64,19 +66,23 @@ type tieredRates struct {
 }
 
 type pricingCatalog struct {
-	Snapshot            string
-	Flash               tieredRates
-	Pro                 tieredRates
-	GLM53Flash          tokenRates
-	GLM53FlashSnapshot  string
-	GLM53               tokenRates
-	GLM53Snapshot       string
-	Qwen38Flash         tokenRates
-	Qwen38FlashSnapshot string
-	Qwen38Max           tokenRates
-	Qwen38MaxSnapshot   string
-	MiMoV25             tokenRates
-	MiMoV25Snapshot     string
+	Snapshot             string
+	Flash                tieredRates
+	Pro                  tieredRates
+	GLM53Flash           tokenRates
+	GLM53FlashSnapshot   string
+	GLM53                tokenRates
+	GLM53Snapshot        string
+	Qwen38Flash          tokenRates
+	Qwen38FlashSnapshot  string
+	Qwen38Max            tokenRates
+	Qwen38MaxSnapshot    string
+	MiMoV25              tokenRates
+	MiMoV25Snapshot      string
+	MiMoV26Flash         tokenRates
+	MiMoV26FlashSnapshot string
+	MiMoV26Pro           tokenRates
+	MiMoV26ProSnapshot   string
 }
 
 type Summary struct {
@@ -110,8 +116,8 @@ func builtInPricing() pricingCatalog {
 			OffPeak: tokenRates{CacheHitNanoCNYPerToken: 150, CacheMissNanoCNYPerToken: 4_500, CompletionNanoCNYPerToken: 13_500},
 			Peak:    tokenRates{CacheHitNanoCNYPerToken: 300, CacheMissNanoCNYPerToken: 9_000, CompletionNanoCNYPerToken: 27_000},
 		},
-		GLM53Flash:          tokenRates{CacheHitNanoCNYPerToken: 230, CacheMissNanoCNYPerToken: 800, CompletionNanoCNYPerToken: 2_800},
-		GLM53FlashSnapshot:  PricingSnapshotGLM53FlashCNY,
+		GLM53Flash:         tokenRates{CacheHitNanoCNYPerToken: 230, CacheMissNanoCNYPerToken: 800, CompletionNanoCNYPerToken: 2_800},
+		GLM53FlashSnapshot: PricingSnapshotGLM53FlashCNY,
 		// GLM-5.3 flagship rate card from docs.bigmodel.cn/cn/guide/start/pricing
 		// (2026-09-12): input 8, cache hit 2, output 28 CNY per 1M; billing does
 		// not vary with reasoning_effort.
@@ -122,10 +128,14 @@ func builtInPricing() pricingCatalog {
 		// qwen3.8-max-0902 rate card from help.aliyun.com model pricing
 		// (2026-09-12): single tier, input 12, output 36 CNY per 1M, and
 		// context-cache hits bill at 10% of the input rate.
-		Qwen38Max:           tokenRates{CacheHitNanoCNYPerToken: 1_200, CacheMissNanoCNYPerToken: 12_000, CompletionNanoCNYPerToken: 36_000},
-		Qwen38MaxSnapshot:   PricingSnapshotQwen38MaxCNY,
-		MiMoV25:             tokenRates{CacheHitNanoCNYPerToken: 20, CacheMissNanoCNYPerToken: 1_000, CompletionNanoCNYPerToken: 2_000},
-		MiMoV25Snapshot:     PricingSnapshotMiMoV25CNY,
+		Qwen38Max:            tokenRates{CacheHitNanoCNYPerToken: 1_200, CacheMissNanoCNYPerToken: 12_000, CompletionNanoCNYPerToken: 36_000},
+		Qwen38MaxSnapshot:    PricingSnapshotQwen38MaxCNY,
+		MiMoV25:              tokenRates{CacheHitNanoCNYPerToken: 20, CacheMissNanoCNYPerToken: 1_000, CompletionNanoCNYPerToken: 2_000},
+		MiMoV25Snapshot:      PricingSnapshotMiMoV25CNY,
+		MiMoV26Flash:         tokenRates{CacheHitNanoCNYPerToken: 20, CacheMissNanoCNYPerToken: 1_000, CompletionNanoCNYPerToken: 2_000},
+		MiMoV26FlashSnapshot: PricingSnapshotMiMoV26FlashCNY,
+		MiMoV26Pro:           tokenRates{CacheHitNanoCNYPerToken: 25, CacheMissNanoCNYPerToken: 3_000, CompletionNanoCNYPerToken: 6_000},
+		MiMoV26ProSnapshot:   PricingSnapshotMiMoV26ProCNY,
 	}
 }
 
@@ -242,6 +252,14 @@ func providerRates(baseURL string, model string, occurredAt time.Time, pricing p
 	if strings.EqualFold(parsed.Hostname(), "dashscope.aliyuncs.com") && strings.EqualFold(strings.TrimSpace(model), "qwen3.8-max-0902") {
 		return standardBreakdown(model, pricing.Qwen38MaxSnapshot, pricing.Qwen38Max), true
 	}
+	if strings.EqualFold(parsed.Hostname(), "api.xiaomimimo.com") && strings.EqualFold(strings.TrimSpace(model), "mimo-v2.6-flash") {
+		return standardBreakdown(model, pricing.MiMoV26FlashSnapshot, pricing.MiMoV26Flash), true
+	}
+	if strings.EqualFold(parsed.Hostname(), "api.xiaomimimo.com") && strings.EqualFold(strings.TrimSpace(model), "mimo-v2.6-pro") {
+		return standardBreakdown(model, pricing.MiMoV26ProSnapshot, pricing.MiMoV26Pro), true
+	}
+	// Keep the old rate card for persisted V2.5 usage rows; active model
+	// configuration resolves the legacy ID to V2.6 before sending requests.
 	if strings.EqualFold(parsed.Hostname(), "api.xiaomimimo.com") && strings.EqualFold(strings.TrimSpace(model), "mimo-v2.5") {
 		return standardBreakdown(model, pricing.MiMoV25Snapshot, pricing.MiMoV25), true
 	}

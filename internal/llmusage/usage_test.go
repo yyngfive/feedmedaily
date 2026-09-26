@@ -169,7 +169,7 @@ func TestCollectorPricesQwenAndMiMoOfficialMainlandRates(t *testing.T) {
 		name, baseURL, model, snapshot, cost string
 	}{
 		{"qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen3.8-flash", llmusage.PricingSnapshotQwen38FlashCNY, "3.600000"},
-		{"mimo", "https://api.xiaomimimo.com/v1", "mimo-v2.5", llmusage.PricingSnapshotMiMoV25CNY, "3.020000"},
+		{"mimo", "https://api.xiaomimimo.com/v1", "mimo-v2.6-flash", llmusage.PricingSnapshotMiMoV26FlashCNY, "3.020000"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

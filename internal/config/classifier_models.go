@@ -16,7 +16,7 @@ const (
 	ClassifierModelDeepSeekFlash = "deepseek-flash"
 	ClassifierModelGLM53Flash    = "glm-5.3-flash"
 	ClassifierModelQwen38Flash   = "qwen3.8-flash"
-	ClassifierModelMiMoV25       = "mimo-v2.5"
+	ClassifierModelMiMoV26Flash  = "mimo-v2.6-flash"
 	ClassifierModelMiMoZenFree   = "mimo-v2.5-free"
 
 	classifierEnabledModelsKey = "SCIRSS_CLASSIFIER_ENABLED_MODELS"
@@ -90,11 +90,21 @@ type ClassifierModelsUpdate struct {
 	ReuseDeepSeekKeyForProfile bool                                 `json:"reuse_deepseek_key_for_profile"`
 }
 
+// classifierModelCatalog is the shared supported-model list for classification
+// and Profile generation. Each role keeps its own default selection.
 var classifierModelCatalog = []ClassifierModelSpec{
 	{
 		ID:              ClassifierModelDeepSeekFlash,
 		Provider:        "deepseek",
 		Label:           "DeepSeek V4.1 Flash",
+		BaseURL:         "https://api.deepseek.com",
+		Thinking:        "disabled",
+		ReasoningEffort: "",
+	},
+	{
+		ID:              ProfileModelDeepSeekV4Pro,
+		Provider:        "deepseek",
+		Label:           "DeepSeek V4 Pro",
 		BaseURL:         "https://api.deepseek.com",
 		Thinking:        "disabled",
 		ReasoningEffort: "",
@@ -108,6 +118,14 @@ var classifierModelCatalog = []ClassifierModelSpec{
 		ReasoningEffort: "low",
 	},
 	{
+		ID:              ProfileModelGLM53,
+		Provider:        "zhipu",
+		Label:           "GLM-5.3",
+		BaseURL:         "https://open.bigmodel.cn/api/paas/v4",
+		Thinking:        "enabled",
+		ReasoningEffort: "low",
+	},
+	{
 		ID:              ClassifierModelQwen38Flash,
 		Provider:        "qwen",
 		Label:           "Qwen3.8-Flash",
@@ -116,25 +134,42 @@ var classifierModelCatalog = []ClassifierModelSpec{
 		ReasoningEffort: "none",
 	},
 	{
-		ID:              ClassifierModelMiMoV25,
+		ID:              ProfileModelQwen38Max0902,
+		Provider:        "qwen",
+		Label:           "Qwen3.8-Max-0902",
+		BaseURL:         "https://dashscope.aliyuncs.com/compatible-mode/v1",
+		Thinking:        "disabled",
+		ReasoningEffort: "none",
+	},
+	{
+		ID:              ClassifierModelMiMoV26Flash,
 		Provider:        "mimo",
-		Label:           "MiMo-V2.5",
+		Label:           "MiMo-V2.6-Flash",
+		BaseURL:         "https://api.xiaomimimo.com/v1",
+		Thinking:        "disabled",
+		ReasoningEffort: "",
+	},
+	{
+		ID:              ProfileModelMiMoV26Pro,
+		Provider:        "mimo",
+		Label:           "MiMo-V2.6-Pro",
 		BaseURL:         "https://api.xiaomimimo.com/v1",
 		Thinking:        "disabled",
 		ReasoningEffort: "",
 	},
 }
 
-// classifierModelAliases maps provider call names that were retired onto the
-// catalog entry that now serves them, so saved selections, .env files, and API
-// callers written against an older name keep resolving to a live model.
+// classifierModelAliases maps legacy IDs onto current catalog entries so saved
+// selections, .env files, and API callers continue resolving after model changes.
 var classifierModelAliases = map[string]string{
 	"deepseek-v4-flash":                   ClassifierModelDeepSeekFlash,
 	"deepseek-v4.1-flash":                 ClassifierModelDeepSeekFlash,
 	"deepseek-v4.1-flash-expires-on-0910": ClassifierModelDeepSeekFlash,
+	"mimo-v2.5":                           ClassifierModelMiMoV26Flash,
+	"mimo-v2.5-pro":                       ProfileModelMiMoV26Pro,
 }
 
-// classifierModelIDFromAlias resolves a retired call name to its catalog entry.
+// classifierModelIDFromAlias resolves a legacy model ID to its catalog entry.
 func classifierModelIDFromAlias(modelID string) string {
 	id := strings.TrimSpace(modelID)
 	if canonical, ok := classifierModelAliases[strings.ToLower(id)]; ok {
@@ -417,7 +452,8 @@ func parseClassifierModelIDs(raw string) []string {
 func normalizeResolvedClassifierModels(enabled []string, configuredDefault string, legacyID string, legacyConfigured bool) ([]string, string) {
 	validated := make([]string, 0, len(enabled))
 	seen := map[string]struct{}{}
-	for _, id := range enabled {
+	for _, rawID := range enabled {
+		id := classifierModelIDFromAlias(rawID)
 		if _, ok := classifierModelSpec(id); !ok {
 			continue
 		}
@@ -434,7 +470,7 @@ func normalizeResolvedClassifierModels(enabled []string, configuredDefault strin
 			validated = []string{ClassifierModelDeepSeekFlash}
 		}
 	}
-	defaultID := strings.TrimSpace(configuredDefault)
+	defaultID := classifierModelIDFromAlias(configuredDefault)
 	if _, ok := seen[defaultID]; !ok {
 		defaultID = ""
 	}
@@ -449,20 +485,38 @@ func normalizeResolvedClassifierModels(enabled []string, configuredDefault strin
 
 func classifierModelIDFromLegacy(model string, baseURL string) string {
 	normalizedModel := strings.ToLower(strings.TrimSpace(model))
-	if normalizedModel == ClassifierModelDeepSeekFlash || normalizedModel == "deepseek-chat" || normalizedModel == "deepseek-reasoner" || strings.Contains(normalizedModel, "deepseek") {
+	if strings.Contains(normalizedModel, ProfileModelDeepSeekV4Pro) {
+		return ProfileModelDeepSeekV4Pro
+	}
+	if normalizedModel == ClassifierModelDeepSeekFlash || normalizedModel == "deepseek-chat" || normalizedModel == "deepseek-reasoner" || strings.Contains(normalizedModel, "deepseek") || strings.Contains(strings.ToLower(baseURL), "api.deepseek.com") {
 		return ClassifierModelDeepSeekFlash
 	}
-	if normalizedModel == ClassifierModelGLM53Flash || strings.Contains(normalizedModel, "glm-5.3-flash") || strings.Contains(strings.ToLower(baseURL), "bigmodel.cn") {
+	if strings.Contains(normalizedModel, "glm-5.3-flash") {
 		return ClassifierModelGLM53Flash
 	}
-	if normalizedModel == ClassifierModelQwen38Flash || strings.Contains(normalizedModel, "qwen3.8-flash") || strings.Contains(strings.ToLower(baseURL), "dashscope.aliyuncs.com") {
+	if strings.Contains(normalizedModel, ProfileModelGLM53) {
+		return ProfileModelGLM53
+	}
+	if strings.Contains(strings.ToLower(baseURL), "bigmodel.cn") {
+		return ClassifierModelGLM53Flash
+	}
+	if strings.Contains(normalizedModel, "qwen3.8-flash") {
+		return ClassifierModelQwen38Flash
+	}
+	if strings.Contains(normalizedModel, ProfileModelQwen38Max0902) {
+		return ProfileModelQwen38Max0902
+	}
+	if strings.Contains(strings.ToLower(baseURL), "dashscope.aliyuncs.com") {
 		return ClassifierModelQwen38Flash
 	}
 	if normalizedModel == ClassifierModelMiMoZenFree || strings.Contains(normalizedModel, "mimo-v2.5-free") || strings.Contains(strings.ToLower(baseURL), "opencode.ai") {
 		return "" // Retired provider: do not migrate its credentials to another provider.
 	}
-	if normalizedModel == ClassifierModelMiMoV25 || strings.Contains(normalizedModel, "mimo-v2.5") || strings.Contains(strings.ToLower(baseURL), "xiaomimimo.com") {
-		return ClassifierModelMiMoV25
+	if strings.Contains(normalizedModel, ProfileModelMiMoV26Pro) || strings.Contains(normalizedModel, "mimo-v2.5-pro") {
+		return ProfileModelMiMoV26Pro
+	}
+	if strings.Contains(normalizedModel, "mimo-v2.5") || strings.Contains(normalizedModel, "mimo-v2.6") || strings.Contains(strings.ToLower(baseURL), "xiaomimimo.com") {
+		return ClassifierModelMiMoV26Flash
 	}
 	// Unknown legacy OpenAI-compatible classifier models cannot be represented by
 	// the managed catalog; keep the migration deterministic by selecting DeepSeek.
@@ -489,7 +543,7 @@ func UpdateLocalSettingsWithClassifierModels(root string, fields map[string]Sett
 	if err != nil {
 		return SettingsConfigResponse{}, err
 	}
-	if update.ReuseDeepSeekKeyForProfile && !containsClassifierModel(enabled, ClassifierModelDeepSeekFlash) {
+	if update.ReuseDeepSeekKeyForProfile && !containsClassifierProvider(enabled, "deepseek") {
 		return SettingsConfigResponse{}, fmt.Errorf("DeepSeek classifier model must be enabled to reuse its key for Profile generation")
 	}
 	for _, modelID := range enabled {
@@ -561,13 +615,13 @@ func UpdateLocalSettingsWithClassifierModels(root string, fields map[string]Sett
 
 func classifierCredentialKey(modelID string) (string, bool) {
 	switch classifierModelIDFromAlias(modelID) {
-	case ClassifierModelDeepSeekFlash:
+	case ClassifierModelDeepSeekFlash, ProfileModelDeepSeekV4Pro:
 		return classifierDeepSeekAPIKey, true
-	case ClassifierModelGLM53Flash:
+	case ClassifierModelGLM53Flash, ProfileModelGLM53:
 		return classifierGLMAPIKey, true
-	case ClassifierModelQwen38Flash:
+	case ClassifierModelQwen38Flash, ProfileModelQwen38Max0902:
 		return classifierQwenAPIKey, true
-	case ClassifierModelMiMoV25:
+	case ClassifierModelMiMoV26Flash, ProfileModelMiMoV26Pro:
 		return classifierMiMoAPIKey, true
 	case ClassifierModelMiMoZenFree:
 		return classifierZenAPIKey, true
@@ -704,7 +758,7 @@ func validateClassifierModelsUpdate(update ClassifierModelsUpdate) ([]string, st
 	if len(enabled) == 0 {
 		return nil, "", fmt.Errorf("at least one classifier model must be enabled")
 	}
-	defaultID := strings.TrimSpace(update.DefaultModelID)
+	defaultID := classifierModelIDFromAlias(update.DefaultModelID)
 	if len(enabled) == 1 {
 		// A single enabled model is always the default, even when the caller is
 		// removing the previous default in the same update.
@@ -723,6 +777,15 @@ func validateClassifierModelsUpdate(update ClassifierModelsUpdate) ([]string, st
 func containsClassifierModel(models []string, wanted string) bool {
 	for _, model := range models {
 		if model == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func containsClassifierProvider(models []string, provider string) bool {
+	for _, model := range models {
+		if spec, ok := classifierModelSpec(model); ok && spec.Provider == provider {
 			return true
 		}
 	}

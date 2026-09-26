@@ -182,7 +182,7 @@ var Options = []Option{
 	{
 		Key:         classifierMiMoAPIKey,
 		Label:       "MiMo classifier API key",
-		Description: "Used for mimo-v2.5 classification requests.",
+		Description: "Used for mimo-v2.6-flash classification requests.",
 		Section:     "Managed classifier models",
 		InputType:   "password",
 		Secret:      true,

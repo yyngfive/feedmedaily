@@ -11,7 +11,7 @@ const (
 	ProfileModelDeepSeekV4Pro = "deepseek-v4-pro"
 	ProfileModelGLM53         = "glm-5.3"
 	ProfileModelQwen38Max0902 = "qwen3.8-max-0902"
-	ProfileModelMiMoV25Pro    = "mimo-v2.5-pro"
+	ProfileModelMiMoV26Pro    = "mimo-v2.6-pro"
 
 	profileDefaultModelKey = "SCIRSS_PROFILE_DEFAULT_MODEL"
 	profileLegacyAPIKey    = "SCIRSS_PROFILE_API_KEY"
@@ -62,35 +62,21 @@ type ProfileModelsResponse struct {
 	DefaultModelID string             `json:"default_model_id"`
 }
 
-var profileModelCatalog = []ProfileModelSpec{
-	{
-		ID:       ProfileModelDeepSeekV4Pro,
-		Provider: "deepseek",
-		Label:    "DeepSeek V4 Pro",
-		BaseURL:  "https://api.deepseek.com",
-	},
-	{
-		ID:       ProfileModelGLM53,
-		Provider: "zhipu",
-		Label:    "GLM-5.3",
-		BaseURL:  "https://open.bigmodel.cn/api/paas/v4",
-	},
-	{
-		ID:       ProfileModelQwen38Max0902,
-		Provider: "qwen",
-		Label:    "Qwen3.8-Max-0902",
-		BaseURL:  "https://dashscope.aliyuncs.com/compatible-mode/v1",
-	},
-	{
-		ID:       ProfileModelMiMoV25Pro,
-		Provider: "mimo",
-		Label:    "MiMo-V2.5-Pro",
-		BaseURL:  "https://api.xiaomimimo.com/v1",
-	},
-}
+var profileModelCatalog = func() []ProfileModelSpec {
+	catalog := make([]ProfileModelSpec, 0, len(classifierModelCatalog))
+	for _, model := range classifierModelCatalog {
+		catalog = append(catalog, ProfileModelSpec{
+			ID:       model.ID,
+			Provider: model.Provider,
+			Label:    model.Label,
+			BaseURL:  model.BaseURL,
+		})
+	}
+	return catalog
+}()
 
 func profileModelSpec(modelID string) (ProfileModelSpec, bool) {
-	id := strings.TrimSpace(modelID)
+	id := classifierModelIDFromAlias(modelID)
 	for _, spec := range profileModelCatalog {
 		if spec.ID == id {
 			return spec, true
@@ -173,7 +159,7 @@ func profileModelsFromResolvedValues(values []ResolvedValue) ProfileModels {
 		}
 	}
 
-	defaultID := strings.TrimSpace(newDefault.Value)
+	defaultID := classifierModelIDFromAlias(newDefault.Value)
 	newSelectionWins := isNonDefaultResolvedValue(newDefault) && resolvedValuePriority(newDefault.Source) >= legacyPriority
 	_, newDefaultKnown := profileModelSpec(defaultID)
 	switch {
@@ -203,15 +189,23 @@ func profileModelsFromResolvedValues(values []ResolvedValue) ProfileModels {
 func profileModelIDFromLegacy(model string, baseURL string) string {
 	normalizedModel := strings.ToLower(strings.TrimSpace(model))
 	normalizedBaseURL := strings.ToLower(strings.TrimSpace(baseURL))
+	if canonical := classifierModelIDFromAlias(normalizedModel); canonical != normalizedModel {
+		if spec, ok := profileModelSpec(canonical); ok {
+			return spec.ID
+		}
+	}
+	if spec, ok := profileModelSpec(normalizedModel); ok {
+		return spec.ID
+	}
 	switch {
-	case normalizedModel == ProfileModelDeepSeekV4Pro || strings.Contains(normalizedModel, "deepseek") || strings.Contains(normalizedBaseURL, "api.deepseek.com"):
+	case strings.Contains(normalizedModel, "deepseek") || strings.Contains(normalizedBaseURL, "api.deepseek.com"):
 		return ProfileModelDeepSeekV4Pro
-	case normalizedModel == ProfileModelGLM53 || strings.Contains(normalizedModel, "glm-5.3") || strings.Contains(normalizedBaseURL, "bigmodel.cn"):
+	case strings.Contains(normalizedModel, "glm-5.3") || strings.Contains(normalizedBaseURL, "bigmodel.cn"):
 		return ProfileModelGLM53
-	case normalizedModel == ProfileModelQwen38Max0902 || strings.Contains(normalizedModel, "qwen3.8-max") || strings.Contains(normalizedBaseURL, "dashscope.aliyuncs.com"):
+	case strings.Contains(normalizedModel, "qwen3.8") || strings.Contains(normalizedBaseURL, "dashscope.aliyuncs.com"):
 		return ProfileModelQwen38Max0902
-	case normalizedModel == ProfileModelMiMoV25Pro || strings.Contains(normalizedModel, "mimo-v2.5") || strings.Contains(normalizedBaseURL, "xiaomimimo.com"):
-		return ProfileModelMiMoV25Pro
+	case strings.Contains(normalizedModel, "mimo-v2.5") || strings.Contains(normalizedModel, "mimo-v2.6") || strings.Contains(normalizedBaseURL, "xiaomimimo.com"):
+		return ProfileModelMiMoV26Pro
 	default:
 		return ""
 	}

@@ -274,7 +274,7 @@ Query：
 
 ### `GET /api/settings/config`
 
-用途：读取可编辑配置字段、字段来源，以及固定分类模型目录的启用状态、默认模型和密钥元数据。
+用途：读取可编辑配置字段、字段来源，以及分类与 Profile 共用模型目录的启用状态、默认模型和密钥元数据。
 
 请求体：无。
 
@@ -337,9 +337,9 @@ Query：
 
 secret 字段和 `classifier_models` 中的 key 均不以明文返回。`source=environment` 且 `environment_override=true` 表示系统环境变量覆盖了本地值。
 
-当前固定分类目录为 DeepSeek V4.1 Flash、Zhipu GLM-5.3-Flash、Qwen3.8-Flash 和 MiMo-V2.5。`SCIRSS_CLASSIFIER_THINKING` 只控制最低思考档：GLM 始终为 low；DeepSeek/Qwen 开启时为 low；MiMo 开启时为 enabled。DeepSeek/MiMo 开启时使用至少 4096 completion tokens。分类器默认 batch size 为 `5`。模型响应不要求 `decision_trace` 或 `recommended_action`；报告 API 中保留的 `recommended_action` 由后端按 relevance 确定。
+分类和 Profile 共用固定模型目录：DeepSeek V4.1 Flash、DeepSeek V4 Pro、Zhipu GLM-5.3-Flash、GLM-5.3、Qwen3.8-Flash、Qwen3.8-Max-0902、MiMo-V2.6-Flash、MiMo-V2.6-Pro。两个角色独立选择默认模型，并按供应商共享 API key。旧 `mimo-v2.5` 分类器 ID 会迁移到 `mimo-v2.6-flash`；旧 Profile ID `mimo-v2.5-pro` 会迁移到 `mimo-v2.6-pro`。`SCIRSS_CLASSIFIER_THINKING` 只控制最低思考档：GLM 始终为 low；DeepSeek/Qwen 开启时为 low；MiMo 开启时为 enabled。DeepSeek/MiMo 开启时使用至少 4096 completion tokens。分类器默认 batch size 为 `5`。模型响应不要求 `decision_trace` 或 `recommended_action`；报告 API 中保留的 `recommended_action` 由后端按 relevance 确定。
 
-Profile 生成同样使用固定目录，并通过 `profile_models` 字段返回：`deepseek-v4-pro`（默认）、`glm-5.3`、`qwen3.8-max-0902`、`mimo-v2.5-pro`。每个条目的 `configured` 表示对应 classifier 供应商 key 已配置——profile 角色与分类角色共用同一套供应商 API key；DeepSeek 条目在共享 key 缺失时仍回退到 legacy 的 `SCIRSS_PROFILE_API_KEY`。默认模型用 `SCIRSS_PROFILE_DEFAULT_MODEL` 选择；`SCIRSS_PROFILE_BASE_URL/MODEL/API_KEY` 成为 legacy 迁移字段，未知的自定义 legacy 供应商保持原样运行，不受目录接管。Profile 请求由后端按供应商适配思考参数：DeepSeek 发送 `thinking.type` 并钉住 `reasoning_effort=low`（V4 系列支持 low/high/max 三档），输出预算下限 16384——low 档在 proposal 任务上的推理实测也会超过 8192；Qwen 使用 `reasoning_effort`（开启即 low，预算下限 8192）；MiMo 使用 `thinking.type` 加 `max_completion_tokens`，因无档位参数且默认深度推理单独即超过 8192 tokens，开启思考时预算下限为 16384；GLM-5.3 常思考，不接受 disabled，同样钉 `reasoning_effort=low`。所有开思考请求的输出预算下限保证思考与 JSON 共享预算时不截断，响应日志记录 `finish_reason` 与 reasoning tokens；模型误带到 unrelated/scope 变更上的主题标签会被确定性剥离。开启思考的请求超时放宽到 300 秒。
+`profile_models` 返回与 `classifier_models` 相同的八个模型 ID，默认值由 `SCIRSS_PROFILE_DEFAULT_MODEL` 独立选择。每个条目的 `configured` 表示对应 classifier 供应商 key 已配置；DeepSeek 条目在共享 key 缺失时仍回退到 legacy 的 `SCIRSS_PROFILE_API_KEY`。`SCIRSS_PROFILE_BASE_URL/MODEL/API_KEY` 成为 legacy 迁移字段，未知的自定义 legacy 供应商保持原样运行，不受目录接管。Profile 请求由后端按供应商适配思考参数：DeepSeek 发送 `thinking.type` 并钉住 `reasoning_effort=low`（V4 系列支持 low/high/max 三档），输出预算下限 16384——low 档在 proposal 任务上的推理实测也会超过 8192；Qwen 使用 `reasoning_effort`（开启即 low，预算下限 8192）；MiMo 使用 `thinking.type` 加 `max_completion_tokens`，因无档位参数且默认深度推理单独即超过 8192 tokens，开启思考时预算下限为 16384；GLM-5.3 常思考，不接受 disabled，同样钉 `reasoning_effort=low`。所有开思考请求的输出预算下限保证思考与 JSON 共享预算时不截断，响应日志记录 `finish_reason` 与 reasoning tokens；模型误带到 unrelated/scope 变更上的主题标签会被确定性剥离。开启思考的请求超时放宽到 300 秒。
 
 模型价格由后端 `internal/llmusage` 内置，按 provider 和响应时间选择，单位为 CNY / 1M tokens。`/api/settings/config` 不返回价格配置字段，也不接受价格更新；旧版本遗留在 `.env` 或 release `settings.json` 中的价格键会在启动时清理。
 
@@ -398,7 +398,7 @@ Profile 生成同样使用固定目录，并通过 `profile_models` 字段返回
 请求体：
 
 ```json
-{"model_id":"mimo-v2.5-pro"}
+{"model_id":"mimo-v2.6-pro"}
 ```
 
 成功响应为 `{ "job": JobInfo }`；未知模型或该模型对应的共享 classifier key 未配置时返回 400。

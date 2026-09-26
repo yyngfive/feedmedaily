@@ -22,30 +22,30 @@ FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载
 
 说明：
 
-- 分类模型目前固定提供 `DeepSeek V4.1 Flash (deepseek-flash)`、`GLM-5.3-Flash (glm-5.3-flash)`、`Qwen3.8-Flash (qwen3.8-flash)`、`MiMo-V2.5 (mimo-v2.5)`；配置对应 key 即启用模型，默认模型菜单只显示已可用的模型，每个 sync/reclassify job 只使用入队时的默认模型。DeepSeek 已下线旧的 `deepseek-v4-flash` 调用名，旧配置会自动指向同一模型继续使用。
+- 分类和 Profile 角色共享同一份固定模型目录：`deepseek-flash`、`deepseek-v4-pro`、`glm-5.3-flash`、`glm-5.3`、`qwen3.8-flash`、`qwen3.8-max-0902`、`mimo-v2.6-flash`、`mimo-v2.6-pro`。两个角色分别选择默认模型，API key 按供应商共享；每个 sync/reclassify job 使用入队时的分类默认模型。旧 MiMo V2.5 配置会迁移到对应的 V2.6 模型。
 
 ### 模型设置
 
-分类模型均使用各供应商官方的 OpenAI 兼容 API。在 `Settings → Model`（或首次引导）中录入对应 API Key 即可启用对应模型；源码模式下也可以通过 `.env` 中的 `SCIRSS_DEEPSEEK_API_KEY`、`SCIRSS_GLM_API_KEY`、`QWEN_API_KEY`、`MIMO_API_KEY` 提供。各模型 API Key 的获取方式：
+分类和 Profile 模型均使用各供应商官方的 OpenAI 兼容 API。在 `Settings → Model`（或首次引导）中录入对应 API Key 即可启用该供应商的模型；源码模式下也可以通过 `.env` 中的 `SCIRSS_DEEPSEEK_API_KEY`、`SCIRSS_GLM_API_KEY`、`QWEN_API_KEY`、`MIMO_API_KEY` 提供。各供应商 API Key 的获取方式：
 
 模型 token 价格由应用内置并按 provider/时段自动选择，不在 Settings 或环境变量中保存，也不允许修改。历史 usage 记录会保留实际采用的价格快照。
 
-#### DeepSeek V4.1 Flash
+#### DeepSeek V4.1 Flash 和 V4 Pro
 
 1. 在 [DeepSeek Platform](https://platform.deepseek.com/) 注册并登录
 2. 在 [API Keys](https://platform.deepseek.com/api_keys) 页面创建 API Key
 
-#### GLM-5.3-Flash
+#### GLM-5.3-Flash 和 GLM-5.3
 
 1. 在 [智谱 BigModel 开放平台](https://open.bigmodel.cn/) 注册并登录
 2. 在 [API Keys](https://bigmodel.cn/usercenter/proj-mgmt/apikeys) 页面创建 API Key
 
-#### Qwen3.8-Flash
+#### Qwen3.8-Flash 和 Qwen3.8-Max-0902
 
 1. 在 [阿里云百炼控制台](https://bailian.console.aliyun.com/) 注册并登录
 2. 按照[获取与配置 API Key](https://help.aliyun.com/zh/model-studio/get-api-key/)的指引创建 API Key；本应用固定使用中国大陆百炼端点，国际版 Key 无法使用
 
-#### MiMo-V2.5
+#### MiMo-V2.6-Flash 和 MiMo-V2.6-Pro
 
 1. 在 [小米 MiMo API 开放平台](https://mimo.mi.com/) 注册并登录
 2. 在控制台的 API Keys 页面申请按量付费 API Key；Token Plan 套餐专属 Key（`tp-` 开头）与本应用的按量付费端点不通用

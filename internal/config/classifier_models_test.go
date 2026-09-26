@@ -87,24 +87,24 @@ func TestClassifierModelsStructuredSourceConfigKeepsDisabledKeys(t *testing.T) {
 func TestClassifierModelsResolveQwenAndMiMoEnvironmentKeys(t *testing.T) {
 	root := t.TempDir()
 	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
-	writeConfigTestFile(t, filepath.Join(root, ".env"), "QWEN_API_KEY=qwen-key\nMIMO_API_KEY=mimo-key\n")
+	writeConfigTestFile(t, filepath.Join(root, ".env"), "QWEN_API_KEY=qwen-key\nMIMO_API_KEY=mimo-key\nSCIRSS_CLASSIFIER_ENABLED_MODELS=qwen3.8-flash,mimo-v2.5\nSCIRSS_CLASSIFIER_DEFAULT_MODEL=mimo-v2.5\n")
 
 	settings, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsClassifierModel(settings.ClassifierModels.EnabledModelIDs, ClassifierModelQwen38Flash) || !containsClassifierModel(settings.ClassifierModels.EnabledModelIDs, ClassifierModelMiMoV25) {
+	if !containsClassifierModel(settings.ClassifierModels.EnabledModelIDs, ClassifierModelQwen38Flash) || !containsClassifierModel(settings.ClassifierModels.EnabledModelIDs, ClassifierModelMiMoV26Flash) {
 		t.Fatalf("configured models were not enabled: %#v", settings.ClassifierModels.EnabledModelIDs)
 	}
 	qwen := settings.ClassifierModels.Models[ClassifierModelQwen38Flash]
 	if qwen.APIKey != "qwen-key" || qwen.BaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1" || qwen.Thinking != "disabled" || qwen.ReasoningEffort != "none" {
 		t.Fatalf("Qwen provider contract not resolved: %#v", qwen)
 	}
-	mimo := settings.ClassifierModels.Models[ClassifierModelMiMoV25]
+	mimo := settings.ClassifierModels.Models[ClassifierModelMiMoV26Flash]
 	if mimo.APIKey != "mimo-key" || mimo.BaseURL != "https://api.xiaomimimo.com/v1" || mimo.Thinking != "disabled" || mimo.ReasoningEffort != "" {
 		t.Fatalf("MiMo provider contract not resolved: %#v", mimo)
 	}
-	if ClassifierModelStorageKey(ClassifierModelQwen38Flash) != "QWEN_API_KEY" || ClassifierModelStorageKey(ClassifierModelMiMoV25) != "MIMO_API_KEY" {
+	if ClassifierModelStorageKey(ClassifierModelQwen38Flash) != "QWEN_API_KEY" || ClassifierModelStorageKey(ClassifierModelMiMoV26Flash) != "MIMO_API_KEY" {
 		t.Fatal("Qwen and MiMo storage keys must match their existing environment variable names")
 	}
 }
@@ -125,7 +125,7 @@ func TestClassifierModelConfigForIDAppliesGlobalThinkingPreference(t *testing.T)
 	}{
 		{ClassifierModelDeepSeekFlash, "enabled", "low"},
 		{ClassifierModelQwen38Flash, "enabled", "low"},
-		{ClassifierModelMiMoV25, "enabled", ""},
+		{ClassifierModelMiMoV26Flash, "enabled", ""},
 	} {
 		model, err := ClassifierModelConfigForID(settings, test.id)
 		if err != nil {
@@ -240,12 +240,12 @@ func mustJSON(t *testing.T, value any) []byte {
 }
 
 func TestClassifierModelRetiredOpenCodeSelection(t *testing.T) {
-	for _, enabled := range [][]string{{ClassifierModelMiMoZenFree}, {ClassifierModelMiMoZenFree, ClassifierModelMiMoV25}} {
+	for _, enabled := range [][]string{{ClassifierModelMiMoZenFree}, {ClassifierModelMiMoZenFree, ClassifierModelMiMoV26Flash}} {
 		ids, selected := normalizeResolvedClassifierModels(enabled, ClassifierModelMiMoZenFree, "", false)
 		if containsClassifierModel(ids, ClassifierModelMiMoZenFree) || selected == ClassifierModelMiMoZenFree {
 			t.Fatalf("retired model survived normalization: %v, %s", ids, selected)
 		}
-		if len(enabled) == 2 && selected != ClassifierModelMiMoV25 {
+		if len(enabled) == 2 && selected != ClassifierModelMiMoV26Flash {
 			t.Fatalf("remaining official MiMo should be retained: %v, %s", ids, selected)
 		}
 	}

@@ -27,7 +27,7 @@ func TestProfileModelsFreshInstallDefaultsToDeepSeek(t *testing.T) {
 		t.Fatalf("flat profile settings not resolved from the catalog: %#v", settings)
 	}
 	response := ProfileModelsForSettings(settings)
-	if len(response.Models) != 4 {
+	if len(response.Models) != len(ClassifierModelCatalog()) {
 		t.Fatalf("catalog size = %d", len(response.Models))
 	}
 	for _, model := range response.Models {
@@ -67,7 +67,7 @@ func TestProfileModelsShareClassifierKeysAndDefaultSelection(t *testing.T) {
 	if settings.ProfileModels.Models[ProfileModelQwen38Max0902].APIKey != "qwen-key" {
 		t.Fatalf("qwen profile entry must share QWEN_API_KEY: %#v", settings.ProfileModels.Models[ProfileModelQwen38Max0902])
 	}
-	if settings.ProfileModels.Models[ProfileModelMiMoV25Pro].APIKey != "" {
+	if settings.ProfileModels.Models[ProfileModelMiMoV26Pro].APIKey != "" {
 		t.Fatal("mimo profile entry must stay unconfigured without MIMO_API_KEY")
 	}
 	response := ProfileModelsForSettings(settings)
@@ -103,7 +103,7 @@ func TestProfileModelForIDRequiresSharedKey(t *testing.T) {
 	if _, err := ProfileModelForID(settings, "unknown-model"); err == nil {
 		t.Fatal("unknown profile model must be rejected")
 	}
-	if _, err := ProfileModelForID(settings, ProfileModelMiMoV25Pro); err == nil {
+	if _, err := ProfileModelForID(settings, ProfileModelMiMoV26Pro); err == nil {
 		t.Fatal("unconfigured profile model must be rejected")
 	}
 	model, err := ProfileModelForID(settings, ProfileModelDeepSeekV4Pro)

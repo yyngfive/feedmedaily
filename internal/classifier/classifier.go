@@ -856,18 +856,18 @@ func applyProviderControls(cfg LLMConfig, payload map[string]any, forceDisabled 
 	model := strings.ToLower(strings.TrimSpace(cfg.Model))
 	if provider == "" {
 		switch {
-		case model == "glm-5.3-flash" || strings.Contains(model, "glm-5.3-flash"):
+		case strings.HasPrefix(model, "glm-5.3"):
 			provider = "zhipu"
-		case model == "qwen3.8-flash" || strings.Contains(model, "qwen3.8-flash"):
+		case strings.HasPrefix(model, "qwen3.8"):
 			provider = "qwen"
-		case model == "mimo-v2.5" || strings.Contains(model, "mimo-v2.5"):
+		case strings.HasPrefix(model, "mimo-v2.6"):
 			provider = "mimo"
 		case strings.Contains(model, "deepseek"):
 			provider = "deepseek"
 		}
 	}
 	if forceDisabled {
-		if provider == "qwen" || model == "qwen3.8-flash" {
+		if provider == "qwen" || strings.HasPrefix(model, "qwen3.8") {
 			delete(payload, "thinking")
 			delete(payload, "enable_thinking")
 			payload["reasoning_effort"] = "none"
@@ -879,7 +879,7 @@ func applyProviderControls(cfg LLMConfig, payload map[string]any, forceDisabled 
 	}
 	if cfg.UseConfiguredProviderControls {
 		thinking := normalizedThinking(cfg.Thinking)
-		if provider == "mimo" || model == "mimo-v2.5" {
+		if provider == "mimo" || strings.HasPrefix(model, "mimo-v2.6") {
 			if maxTokens, ok := payload["max_tokens"]; ok {
 				payload["max_completion_tokens"] = maxTokens
 				delete(payload, "max_tokens")
@@ -888,7 +888,7 @@ func applyProviderControls(cfg LLMConfig, payload map[string]any, forceDisabled 
 			delete(payload, "reasoning_effort")
 			return
 		}
-		if provider == "qwen" || model == "qwen3.8-flash" {
+		if provider == "qwen" || strings.HasPrefix(model, "qwen3.8") {
 			delete(payload, "thinking")
 			delete(payload, "enable_thinking")
 			if effort := strings.TrimSpace(cfg.ReasoningEffort); effort != "" {
@@ -904,12 +904,12 @@ func applyProviderControls(cfg LLMConfig, payload map[string]any, forceDisabled 
 		} else if effort := strings.TrimSpace(cfg.ReasoningEffort); effort != "" {
 			payload["reasoning_effort"] = effort
 		}
-		if provider == "zhipu" || model == "glm-5.3-flash" {
+		if provider == "zhipu" || strings.HasPrefix(model, "glm-5.3") {
 			payload["do_sample"] = false
 		}
 		return
 	}
-	if provider == "zhipu" || model == "glm-5.3-flash" {
+	if provider == "zhipu" || strings.HasPrefix(model, "glm-5.3") {
 		payload["thinking"] = map[string]string{"type": "enabled"}
 		payload["reasoning_effort"] = "low"
 		// GLM accepts temperature, but do_sample=false makes classification deterministic.
@@ -921,13 +921,13 @@ func applyProviderControls(cfg LLMConfig, payload map[string]any, forceDisabled 
 		delete(payload, "reasoning_effort")
 		return
 	}
-	if provider == "qwen" || model == "qwen3.8-flash" {
+	if provider == "qwen" || strings.HasPrefix(model, "qwen3.8") {
 		delete(payload, "thinking")
 		delete(payload, "enable_thinking")
 		payload["reasoning_effort"] = "none"
 		return
 	}
-	if provider == "mimo" || model == "mimo-v2.5" {
+	if provider == "mimo" || strings.HasPrefix(model, "mimo-v2.6") {
 		if maxTokens, ok := payload["max_tokens"]; ok {
 			payload["max_completion_tokens"] = maxTokens
 			delete(payload, "max_tokens")
@@ -956,7 +956,7 @@ func supportsThinkingFallback(cfg LLMConfig) bool {
 	if provider == "zhipu" || provider == "deepseek" || provider == "qwen" || provider == "mimo" {
 		return false
 	}
-	if model == "glm-5.3-flash" || strings.Contains(model, "glm-5.3-flash") || isDeepSeekFlashModel(model) || model == "qwen3.8-flash" || model == "mimo-v2.5" {
+	if strings.HasPrefix(model, "glm-5.3") || strings.Contains(model, "deepseek") || strings.HasPrefix(model, "qwen3.8") || strings.HasPrefix(model, "mimo-v2.6") {
 		return false
 	}
 	return normalizedThinking(cfg.Thinking) != "disabled"
@@ -968,7 +968,7 @@ func isManagedClassifierProvider(cfg LLMConfig) bool {
 	}
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	model := strings.ToLower(strings.TrimSpace(cfg.Model))
-	return provider == "deepseek" || provider == "zhipu" || provider == "qwen" || provider == "mimo" || isDeepSeekFlashModel(model) || model == "glm-5.3-flash" || model == "qwen3.8-flash" || model == "mimo-v2.5"
+	return provider == "deepseek" || provider == "zhipu" || provider == "qwen" || provider == "mimo" || strings.Contains(model, "deepseek") || strings.HasPrefix(model, "glm-5.3") || strings.HasPrefix(model, "qwen3.8") || strings.HasPrefix(model, "mimo-v2.6")
 }
 
 // isDeepSeekFlashModel covers the current Flash call name plus the retired
