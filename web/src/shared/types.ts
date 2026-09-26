@@ -256,6 +256,7 @@ export type FeedbackRecord = {
   id: number;
   paper_id: number;
   paper_title: string;
+  paper_url: string;
   original_relevance: Relevance;
   corrected_relevance: Relevance;
   original_topic?: string | null;
@@ -433,6 +434,7 @@ export type CorrectionStatus = {
   feedback_id: number;
   paper_id: number;
   paper_title: string;
+  paper_url: string;
   original_relevance: string;
   corrected_relevance: string;
   current_relevance: string;

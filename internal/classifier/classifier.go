@@ -83,7 +83,9 @@ type chatCompletionResponse struct {
 	} `json:"usage"`
 }
 
-var classifierHTTPClient = &http.Client{Timeout: 60 * time.Second}
+const classifierRequestAttemptTimeout = 60 * time.Second
+
+var classifierHTTPClient = &http.Client{Timeout: 2 * classifierRequestAttemptTimeout}
 
 const classifierMaxAttempts = 2
 
@@ -340,7 +342,13 @@ func requestJSONContent(cfg LLMConfig, payload map[string]any, operation string,
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	requestTimeout := classifierRequestAttemptTimeout
+	if attempt > 1 {
+		requestTimeout *= 2
+	}
+	requestContext, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestContext, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("build classifier request: %w", err)
 	}
@@ -479,7 +487,8 @@ func requestJSONContentWithFallback(cfg LLMConfig, payload map[string]any, opera
 	})
 	fallbackPayload := clonePayload(payload)
 	applyProviderControls(cfg, fallbackPayload, true)
-	content, fallbackErr := requestJSONContentWithRetries(cfg, fallbackPayload, operation, "thinking_disabled", 1)
+	// The initial request used attempt 1; keep the fallback within the two-attempt budget.
+	content, fallbackErr := requestJSONContentWithRetries(cfg, fallbackPayload, operation, "thinking_disabled", 2)
 	if fallbackErr != nil {
 		_, _ = logging.WriteDefault(logging.Event{
 			Level:     "error",

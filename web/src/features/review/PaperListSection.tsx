@@ -81,7 +81,7 @@ export function PaperListSection({
     <section className="flex h-full min-w-0 min-h-0 flex-col gap-4">
       <div className="flex-none rounded-lg border border-(--line) bg-(--paper-accent) p-4">
         {reportErrors.length ? (
-          <StatusBanner className="mb-4" tone="danger">
+          <StatusBanner className="mb-4 [overflow-wrap:anywhere]" tone="danger">
             {reportErrors.map((item) => (
               <div key={item}>{item}</div>
             ))}

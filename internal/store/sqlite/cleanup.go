@@ -445,11 +445,11 @@ func (s *Store) ApplyCleanupOperations(ctx context.Context, operations []Cleanup
 		switch operation.Kind {
 		case CleanupOperationDeleteDuplicate:
 			if operation.CanonicalPaperID <= 0 || operation.CanonicalPaperID == operation.CandidatePaperID {
-				return result, fmt.Errorf("invalid cleanup canonical paper for %d", operation.CandidatePaperID)
+				return result, fmt.Errorf("invalid cleanup canonical paper for %s: canonical paper id %d", paperRecordLabel(*candidate), operation.CanonicalPaperID)
 			}
 			canonical, err := s.paperByIDTx(tx, operation.CanonicalPaperID)
 			if err != nil {
-				return result, err
+				return result, fmt.Errorf("read canonical paper %d while cleaning %s: %w", operation.CanonicalPaperID, paperRecordLabel(*candidate), err)
 			}
 			if canonical == nil {
 				result.Skipped++
@@ -458,27 +458,27 @@ func (s *Store) ApplyCleanupOperations(ctx context.Context, operations []Cleanup
 			// 重复行的来源要在删除前读出来，它决定 DOI 是否能交给幸存行。
 			candidateKey, err := s.storedPaperKeyTx(tx, operation.CandidatePaperID)
 			if err != nil {
-				return result, err
+				return result, fmt.Errorf("read stored key for %s: %w", paperRecordLabel(*candidate), err)
 			}
 			if err := s.repointPaperReferencesTx(tx, operation.CandidatePaperID, operation.CanonicalPaperID); err != nil {
-				return result, err
+				return result, fmt.Errorf("move references from %s to %s: %w", paperRecordLabel(*candidate), paperRecordLabel(*canonical), err)
 			}
 			if err := s.markCleanupReviewsDeletedTx(tx, operation.CandidatePaperID, now); err != nil {
-				return result, err
+				return result, fmt.Errorf("close reviews for %s: %w", paperRecordLabel(*candidate), err)
 			}
 			// 先删掉重复行再合并：paper_key 是 UNIQUE，幸存行只有在重复行让出
 			// doi: 键之后才能接管它。合并本身只读内存里的重复行快照，删除不
 			// 影响它写入的内容。
 			if _, err := tx.Exec(`DELETE FROM papers WHERE id = ?`, operation.CandidatePaperID); err != nil {
-				return result, fmt.Errorf("delete duplicate paper %d: %w", operation.CandidatePaperID, err)
+				return result, fmt.Errorf("delete duplicate %s: %w", paperRecordLabel(*candidate), err)
 			}
 			if err := s.mergeDuplicatePaperTx(tx, *canonical, *candidate, candidateKey, now); err != nil {
-				return result, err
+				return result, fmt.Errorf("merge %s into %s: %w", paperRecordLabel(*candidate), paperRecordLabel(*canonical), err)
 			}
 			result.DeletedDuplicates++
 		case CleanupOperationClearDOI:
 			if err := s.clearPaperDOITx(tx, operation.CandidatePaperID); err != nil {
-				return result, err
+				return result, fmt.Errorf("clear DOI for %s: %w", paperRecordLabel(*candidate), err)
 			}
 			result.RepairedDOI++
 		default:
@@ -547,7 +547,7 @@ func (s *Store) ApplyCleanupReviewDecision(ctx context.Context, reviewID int64, 
 		return result, ErrCleanupReviewNotFound
 	}
 	if s.paperHasClassificationTx(tx, candidateID) {
-		return result, fmt.Errorf("paper %d is already classified", candidateID)
+		return result, fmt.Errorf("%s is already classified", paperRecordLabel(*candidate))
 	}
 	result.PaperID = candidateID
 
@@ -596,32 +596,32 @@ func (s *Store) ApplyCleanupReviewDecision(ctx context.Context, reviewID int64, 
 			duplicate = *matched
 		}
 		if err := s.repointPaperReferencesTx(tx, duplicateID, canonicalID); err != nil {
-			return result, err
+			return result, fmt.Errorf("move references from %s to %s: %w", paperRecordLabel(duplicate), paperRecordLabel(canonical), err)
 		}
 		if decision == CleanupDecisionDeleteMatch {
 			if err := s.deletePaperClassificationsTx(tx, duplicateID); err != nil {
-				return result, err
+				return result, fmt.Errorf("delete classifications for %s: %w", paperRecordLabel(duplicate), err)
 			}
 		}
 		if err := s.markCleanupReviewsDeletedTx(tx, duplicateID, now); err != nil {
-			return result, err
+			return result, fmt.Errorf("close reviews for %s: %w", paperRecordLabel(duplicate), err)
 		}
 		duplicateKey, err := s.storedPaperKeyTx(tx, duplicateID)
 		if err != nil {
-			return result, err
+			return result, fmt.Errorf("read stored key for %s: %w", paperRecordLabel(duplicate), err)
 		}
 		// 与确定性删除同理：先让出纸键，幸存行才能接管重复行的 doi: 键。
 		if _, err := tx.Exec(`DELETE FROM papers WHERE id = ?`, duplicateID); err != nil {
-			return result, fmt.Errorf("delete reviewed duplicate paper %d: %w", duplicateID, err)
+			return result, fmt.Errorf("delete reviewed duplicate %s: %w", paperRecordLabel(duplicate), err)
 		}
 		if err := s.mergeDuplicatePaperTx(tx, canonical, duplicate, duplicateKey, now); err != nil {
-			return result, err
+			return result, fmt.Errorf("merge %s into %s: %w", paperRecordLabel(duplicate), paperRecordLabel(canonical), err)
 		}
 		result.Deleted = true
 		result.DeletedPaperID = duplicateID
 	case CleanupDecisionClearDOI:
 		if err := s.clearPaperDOITx(tx, candidateID); err != nil {
-			return result, err
+			return result, fmt.Errorf("clear DOI for %s: %w", paperRecordLabel(*candidate), err)
 		}
 		result.DOICleared = true
 	case CleanupDecisionClearMatchDOI:
@@ -630,13 +630,13 @@ func (s *Store) ApplyCleanupReviewDecision(ctx context.Context, reviewID int64, 
 		}
 		matched, err := s.paperByIDTx(tx, matchedID.Int64)
 		if err != nil {
-			return result, err
+			return result, fmt.Errorf("read matched paper %d for cleanup of %s: %w", matchedID.Int64, paperRecordLabel(*candidate), err)
 		}
 		if matched == nil {
 			return result, ErrCleanupReviewNotFound
 		}
 		if err := s.clearPaperDOITx(tx, matchedID.Int64); err != nil {
-			return result, err
+			return result, fmt.Errorf("clear DOI for %s: %w", paperRecordLabel(*matched), err)
 		}
 		result.DOICleared = true
 	}
@@ -873,9 +873,12 @@ func (s *Store) clearPaperDOITx(tx *sql.Tx, paperID int64) error {
 	}
 	key := paperKey(Paper{Title: title, URL: urlValue})
 	var collisionID int64
-	err := tx.QueryRow(`SELECT id FROM papers WHERE paper_key = ? AND id <> ? LIMIT 1`, key, paperID).Scan(&collisionID)
+	var collisionTitle, collisionURL string
+	err := tx.QueryRow(`SELECT id, title, url FROM papers WHERE paper_key = ? AND id <> ? LIMIT 1`, key, paperID).Scan(&collisionID, &collisionTitle, &collisionURL)
 	if err == nil {
-		return fmt.Errorf("%w: paper %d conflicts with paper %d", ErrCleanupKeyCollision, paperID, collisionID)
+		return fmt.Errorf("%w: %s conflicts with %s", ErrCleanupKeyCollision,
+			paperRecordLabel(Paper{ID: paperID, Title: title, URL: urlValue}),
+			paperRecordLabel(Paper{ID: collisionID, Title: collisionTitle, URL: collisionURL}))
 	}
 	if !errors.Is(err, sql.ErrNoRows) && !strings.Contains(err.Error(), "sql: no rows in result set") {
 		return fmt.Errorf("check paper key collision for %d: %w", paperID, err)
@@ -884,6 +887,18 @@ func (s *Store) clearPaperDOITx(tx *sql.Tx, paperID int64) error {
 		return fmt.Errorf("clear paper doi and repair key %d: %w", paperID, err)
 	}
 	return nil
+}
+
+func paperRecordLabel(paper Paper) string {
+	title := strings.TrimSpace(paper.Title)
+	if title == "" {
+		title = "(untitled)"
+	}
+	url := strings.TrimSpace(paper.URL)
+	if url == "" {
+		url = "(RSS URL unavailable)"
+	}
+	return fmt.Sprintf("paper %d, title %q, RSS article URL %s", paper.ID, title, url)
 }
 
 func (s *Store) repointPaperReferencesTx(tx *sql.Tx, fromID int64, toID int64) error {

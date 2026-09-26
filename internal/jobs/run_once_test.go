@@ -490,7 +490,7 @@ func TestRepairRejectedDOIDegradesKeyCollisionToWarning(t *testing.T) {
 
 	// 清 DOI 需要把键退回 url:，而该键已被重复行占用：这里必须降级成 warning，
 	// 让调用方继续分类，而不是中断整批任务。
-	warning := repairRejectedDOI(sqliteStore, doiKeyedID)
+	warning := repairRejectedDOI(sqliteStore, store.Paper{ID: doiKeyedID, Title: "Shared article", URL: "https://example.com/article"})
 	if warning == "" {
 		t.Fatalf("expected a warning when the repaired URL key is taken")
 	}
@@ -512,7 +512,7 @@ func TestRepairRejectedDOIDegradesKeyCollisionToWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if warning := repairRejectedDOI(sqliteStore, soloID); warning != "" {
+	if warning := repairRejectedDOI(sqliteStore, store.Paper{ID: soloID, Title: "Solo article", URL: "https://example.com/solo"}); warning != "" {
 		t.Fatalf("unexpected warning for a collision-free repair: %s", warning)
 	}
 	solo, err := sqliteStore.PaperByID(soloID)

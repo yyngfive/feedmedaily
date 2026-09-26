@@ -14,7 +14,7 @@ func (s *Store) ListFeedback() ([]FeedbackRecord, error) {
 		return []FeedbackRecord{}, nil
 	}
 	rows, err := s.db.Query(fmt.Sprintf(`
-		SELECT f.id, f.paper_id, p.title AS paper_title,
+		SELECT f.id, f.paper_id, p.title AS paper_title, p.url AS paper_url,
 			f.original_relevance, f.corrected_relevance,
 			%s AS original_topic, %s AS corrected_topic, f.note,
 			%s AS state, %s AS used_in_prompt, f.created_at
@@ -110,7 +110,7 @@ func (s *Store) FeedbackByID(id int64) (*FeedbackRecord, error) {
 		return nil, nil
 	}
 	row := s.db.QueryRow(fmt.Sprintf(`
-		SELECT f.id, f.paper_id, p.title AS paper_title,
+		SELECT f.id, f.paper_id, p.title AS paper_title, p.url AS paper_url,
 			f.original_relevance, f.corrected_relevance,
 			%s AS original_topic, %s AS corrected_topic, f.note,
 			%s AS state, %s AS used_in_prompt, f.created_at
@@ -206,7 +206,7 @@ func (s *Store) FeedbackByIDs(ids []int64) ([]FeedbackRecord, error) {
 		args = append(args, id)
 	}
 	rows, err := s.db.Query(fmt.Sprintf(`
-		SELECT f.id, f.paper_id, p.title AS paper_title,
+		SELECT f.id, f.paper_id, p.title AS paper_title, p.url AS paper_url,
 			f.original_relevance, f.corrected_relevance,
 			%s AS original_topic, %s AS corrected_topic, f.note,
 			%s AS state, %s AS used_in_prompt, f.created_at
@@ -252,7 +252,7 @@ func (s *Store) OpenFeedbackForPapers(paperIDs []int64) ([]FeedbackRecord, error
 		args = append(args, paperID)
 	}
 	rows, err := s.db.Query(fmt.Sprintf(`
-		SELECT f.id, f.paper_id, p.title AS paper_title,
+		SELECT f.id, f.paper_id, p.title AS paper_title, p.url AS paper_url,
 			f.original_relevance, f.corrected_relevance,
 			%s AS original_topic, %s AS corrected_topic, f.note,
 			%s AS state, %s AS used_in_prompt, f.created_at
@@ -339,7 +339,7 @@ func scanFeedbackRecord(scanner interface{ Scan(dest ...any) error }) (FeedbackR
 	var note sql.NullString
 	var usedInPrompt int64
 	var createdAt string
-	if err := scanner.Scan(&record.ID, &record.PaperID, &record.PaperTitle, &record.OriginalRelevance, &record.CorrectedRelevance, &originalTopic, &correctedTopic, &note, &record.State, &usedInPrompt, &createdAt); err != nil {
+	if err := scanner.Scan(&record.ID, &record.PaperID, &record.PaperTitle, &record.PaperURL, &record.OriginalRelevance, &record.CorrectedRelevance, &originalTopic, &correctedTopic, &note, &record.State, &usedInPrompt, &createdAt); err != nil {
 		return FeedbackRecord{}, fmt.Errorf("scan feedback row: %w", err)
 	}
 	parsed, err := parseTime(createdAt)

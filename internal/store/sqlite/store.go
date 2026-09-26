@@ -145,6 +145,7 @@ type FeedbackRecord struct {
 	ID                 int64     `json:"id"`
 	PaperID            int64     `json:"paper_id"`
 	PaperTitle         string    `json:"paper_title"`
+	PaperURL           string    `json:"paper_url"`
 	OriginalRelevance  string    `json:"original_relevance"`
 	CorrectedRelevance string    `json:"corrected_relevance"`
 	OriginalTopic      *string   `json:"original_topic"`

@@ -64,10 +64,12 @@ function LatestJobPanel({feeds, job}: {feeds: FeedSubscription[]; job: JobInfo})
   const feedNames = new Map(feeds.map((feed) => [feed.url.trim(), feed.journal.trim()]));
   const errors = jobResultErrors(job).map((value) => {
     const divider = value.indexOf(": ");
-    const url = divider < 0 ? "" : value.slice(0, divider).trim();
+    const candidateURL = divider < 0 ? "" : value.slice(0, divider).trim();
+    const isFeedWarning = /^https?:\/\/\S+$/i.test(candidateURL);
+    const url = isFeedWarning ? candidateURL : "";
     return {
-      detail: divider < 0 ? value.trim() : value.slice(divider + 2).trim(),
-      label: url ? feedNames.get(url) || url : "Other warning",
+      detail: isFeedWarning ? value.slice(divider + 2).trim() : value.trim(),
+      label: isFeedWarning ? feedNames.get(url) || url : "Other warning",
       url,
     };
   });
@@ -131,6 +133,7 @@ function LatestJobPanel({feeds, job}: {feeds: FeedSubscription[]; job: JobInfo})
                 {reconciliation.unfulfilled.map((item) => (
                   <div key={item.feedback_id}>
                     <p className="font-medium text-(--ink)">{item.paper_title}</p>
+                    <p className="break-all text-xs text-muted">RSS article URL: {item.paper_url || "Unavailable"}</p>
                     <p className="mt-1 leading-6 text-(--body)">
                       Corrected to {relevanceLabel[item.corrected_relevance as keyof typeof relevanceLabel] ?? item.corrected_relevance}
                       {item.corrected_topic ? ` · topic "${item.corrected_topic}"` : ""}; current is {relevanceLabel[item.current_relevance as keyof typeof relevanceLabel] ?? item.current_relevance}
@@ -143,10 +146,10 @@ function LatestJobPanel({feeds, job}: {feeds: FeedSubscription[]; job: JobInfo})
           ) : null}
         </div>
       ) : null}
-      {job.error ? <p className="mt-3 text-rose-700">{job.error}</p> : null}
+      {job.error ? <p className="mt-3 break-words text-rose-700 [overflow-wrap:anywhere]">{job.error}</p> : null}
       {errors.length > 0 ? (
         <div className="mt-3"><AdminDisclosure title={`Warnings (${errors.length})`}>
-          <div className="space-y-3">{errors.map((item, index) => (
+          <div className="space-y-3 [overflow-wrap:anywhere]">{errors.map((item, index) => (
             <div key={`${item.url}-${index}`}>
               <p className="font-medium text-(--ink)">{item.label}</p>
               {item.url ? <p className="break-all text-xs text-muted">{item.url}</p> : null}

@@ -13,6 +13,7 @@ type CorrectionStatus struct {
 	FeedbackID         int64   `json:"feedback_id"`
 	PaperID            int64   `json:"paper_id"`
 	PaperTitle         string  `json:"paper_title"`
+	PaperURL           string  `json:"paper_url"`
 	OriginalRelevance  string  `json:"original_relevance"`
 	CorrectedRelevance string  `json:"corrected_relevance"`
 	CurrentRelevance   string  `json:"current_relevance"`
@@ -124,6 +125,7 @@ func evaluateCorrection(record store.FeedbackRecord, classification store.Classi
 		FeedbackID:         record.ID,
 		PaperID:            record.PaperID,
 		PaperTitle:         record.PaperTitle,
+		PaperURL:           record.PaperURL,
 		OriginalRelevance:  record.OriginalRelevance,
 		CorrectedRelevance: record.CorrectedRelevance,
 		CurrentRelevance:   classification.Relevance,

@@ -86,7 +86,10 @@ export function ProfileTab({
                   <tbody>
                     {openFeedback.map((item) => (
                       <tr key={item.id} className="border-t border-(--line) align-top">
-                        <td className="px-3 py-2 text-(--ink)">{item.paper_title}</td>
+                        <td className="px-3 py-2 text-(--ink)">
+                          <p>{item.paper_title}</p>
+                          <p className="mt-1 break-all text-xs text-muted">RSS article URL: {item.paper_url || "Unavailable"}</p>
+                        </td>
                         <td className="px-3 py-2 text-muted">{relevanceLabel[item.original_relevance]}</td>
                         <td className="px-3 py-2 text-muted">{relevanceLabel[item.corrected_relevance]}</td>
                         <td className="px-3 py-2 leading-6 text-(--body)">{item.note?.trim() ? item.note : "-"}</td>

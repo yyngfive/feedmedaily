@@ -19,6 +19,7 @@ Changes since `0.6.2`:
 
 ### Changed
 
+- Classifier requests now have a 60-second first-attempt timeout and a 120-second timeout for the single retry. The retry limit remains two attempts, and canceling the parent job still cancels the active request or retry wait.
 - Replaced MiMo-V2.5 with MiMo-V2.6-Flash and MiMo-V2.6-Pro in the shared model catalog; both are selectable for classification and Profile generation. Saved V2.5 IDs migrate to their V2.6 equivalents. Added current MiMo V2.6 rate snapshots: Flash at cache hit/input/output ¥0.02/¥1/¥2 and Pro at ¥0.025/¥3/¥6 per 1M tokens.
 - Clarified the Local app actions: `Save app settings` now sits beside the host/port fields, while work-data backup creation and ZIP download are presented as a separate section.
 - Updated built-in pricing for the newer Profile models: added GLM-5.3 and qwen3.8-max-0902 rate cards and normalized OpenAI-style cached-token usage for Zhipu and DashScope. DeepSeek V4 Pro keeps Pro pricing after the provider withdrew its planned Flash-price routing.
@@ -27,6 +28,7 @@ Changes since `0.6.2`:
 
 ### Fixed
 
+- Paper-specific sync warnings, classification errors, feedback records, reconciliation items, cleanup reviews, and confirmations now show the RSS title and article URL. DOI key-collision warnings identify both conflicting records.
 - Fixed a database-cleanup deadlock: when a review's matched article was deleted by an exact-duplicate removal or another review decision, the remaining review stayed pending with no actionable button and paused bulk classification forever. Reviews that reference a deleted paper now close automatically, already-broken reviews are repaired at startup, and the next cleanup run rebuilds an actionable review against a surviving article.
 - Keeping a title-duplicate review no longer produces a mirrored review for the other article on the next cleanup run. Reviews are now keyed per article pair, so one decision covers both scan directions and classification resumes without a redundant second decision.
 - Database-cleanup backup snapshots (`literature.sqlite.pre-cleanup-*`) are now pruned to the newest ten so per-decision backups no longer accumulate without bound.

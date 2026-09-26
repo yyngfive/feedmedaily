@@ -196,15 +196,16 @@ func (s *Store) latestFeedbackStatus(paperID int64) (*FeedbackStatus, error) {
 }
 
 func buildReportPaper(base paperRow, classification Classification, feedbackStatus *FeedbackStatus, zoteroStatus *ZoteroStatus) (ReportPaper, error) {
+	recordContext := paperRecordLabel(Paper{ID: base.ID, Title: base.Title, URL: base.URL})
 	authors := []string{}
 	if strings.TrimSpace(base.AuthorsJSON) != "" {
 		if err := json.Unmarshal([]byte(base.AuthorsJSON), &authors); err != nil {
-			return ReportPaper{}, fmt.Errorf("parse authors for paper %d: %w", base.ID, err)
+			return ReportPaper{}, fmt.Errorf("parse authors for %s: %w", recordContext, err)
 		}
 	}
 	abstractHTML, abstractImages, err := parseReportRawPayload(base.RawJSON)
 	if err != nil {
-		return ReportPaper{}, fmt.Errorf("parse raw payload for paper %d: %w", base.ID, err)
+		return ReportPaper{}, fmt.Errorf("parse raw payload for %s: %w", recordContext, err)
 	}
 	identity := journals.Resolve(base.SourceURL, base.Journal, base.FeedTitle)
 	return ReportPaper{
@@ -300,6 +301,7 @@ func scanReportPaper(scanner interface{ Scan(dest ...any) error }) (ReportPaper,
 	); err != nil {
 		return ReportPaper{}, fmt.Errorf("scan report paper row: %w", err)
 	}
+	recordContext := paperRecordLabel(Paper{ID: base.ID, Title: base.Title, URL: base.URL})
 
 	parsedFirstSeenAt, err := parseTime(firstSeenAt)
 	if err != nil {
@@ -324,15 +326,15 @@ func scanReportPaper(scanner interface{ Scan(dest ...any) error }) (ReportPaper,
 
 	classification, err := decodeClassification(relevance, confidence, reason, topicTagsJSON, recommendedAction, model, translatedTitleZH)
 	if err != nil {
-		return ReportPaper{}, fmt.Errorf("parse report classification for paper %d: %w", base.ID, err)
+		return ReportPaper{}, fmt.Errorf("parse report classification for %s: %w", recordContext, err)
 	}
 	feedbackStatus, err := decodeFeedbackStatus(nullableString(correctedRelevance), correctedTopic, feedbackNote, nullableString(feedbackCreatedAt), nullableString(feedbackState), feedbackUsedInPrompt)
 	if err != nil {
-		return ReportPaper{}, fmt.Errorf("parse report feedback status for paper %d: %w", base.ID, err)
+		return ReportPaper{}, fmt.Errorf("parse report feedback status for %s: %w", recordContext, err)
 	}
 	zoteroStatus, err := decodeZoteroStatus(zoteroState, zoteroItemKey, zoteroErrorMessage, zoteroAttemptedAt, zoteroSavedAt)
 	if err != nil {
-		return ReportPaper{}, fmt.Errorf("parse report zotero status for paper %d: %w", base.ID, err)
+		return ReportPaper{}, fmt.Errorf("parse report zotero status for %s: %w", recordContext, err)
 	}
 	return buildReportPaper(base, *classification, feedbackStatus, zoteroStatus)
 }

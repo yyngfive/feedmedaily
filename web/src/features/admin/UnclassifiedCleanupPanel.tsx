@@ -231,6 +231,7 @@ export function UnclassifiedCleanupPanel({
           <p className="text-sm leading-6 text-(--body)">{confirmedAction.description}</p>
           <div className="rounded-md border border-amber-300/70 bg-amber-50 px-3 py-3 text-sm leading-6 text-amber-950">
             <p className="font-medium">{confirmationPaper(confirmedAction).title}</p>
+            <p className="mt-1 break-all text-xs">RSS article URL: {confirmationPaper(confirmedAction).url || "Unavailable"}</p>
             <p className="mt-1"><PaperMeta paper={confirmationPaper(confirmedAction)} /></p>
           </div>
         </ModalShell>
@@ -274,12 +275,14 @@ function CleanupReviewCard({
             <div className="min-w-0 rounded-md border border-(--line) p-3">
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Item A</p>
               <h4 className="mt-1 font-semibold text-(--ink)">{candidate.title}</h4>
+              <p className="mt-1 break-all text-xs text-muted">RSS article URL: {candidate.url || "Unavailable"}</p>
               <p className="mt-1 text-xs leading-5 text-muted"><PaperMeta paper={candidate} /> · first seen {formatDate(candidate.first_seen_at)}</p>
             </div>
             {matched ? (
               <div className="min-w-0 rounded-md border border-(--line) p-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Item B</p>
                 <p className="mt-1 font-medium text-(--ink)">{matched.title}</p>
+                <p className="mt-1 break-all text-xs text-muted">RSS article URL: {matched.url || "Unavailable"}</p>
                 <p className="mt-1 text-xs leading-5 text-muted"><PaperMeta paper={matched} /> · first seen {formatDate(matched.first_seen_at)}</p>
               </div>
             ) : null}
@@ -288,6 +291,7 @@ function CleanupReviewCard({
           <>
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Current article</p>
             <h4 className="mt-1 font-semibold text-(--ink)">{candidate.title}</h4>
+            <p className="mt-1 break-all text-xs text-muted">RSS article URL: {candidate.url || "Unavailable"}</p>
             <p className="mt-1 text-xs leading-5 text-muted"><PaperMeta paper={candidate} /> · first seen {formatDate(candidate.first_seen_at)}</p>
           </>
         )}

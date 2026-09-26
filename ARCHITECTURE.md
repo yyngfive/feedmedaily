@@ -35,6 +35,8 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 8. `feedmedailyd` serves `web/dist` and exposes the local JSON API surface.
 9. The API service keeps a long-lived SQLite handle open for request reuse, and the UI reads the latest report through `/api/report/latest`, rebuilt from SQLite-backed state rather than replayed from disk report snapshots.
 
+`papers.id` is an internal SQLite record identifier, not a user-readable paper identity. Any paper-specific UI/job notice or structured diagnostic log (including sync warnings, classification errors, feedback/reconciliation items, cleanup reviews, and confirmations) must provide the RSS title and article URL together; the numeric ID may be supplemental. If DOI repair tries to re-key a paper to a URL key that another row already owns, it reports the collision and leaves both rows intact. The normal classification flow treats each remaining unclassified row independently; later cleanup applies its existing conservative duplicate rules, and already-classified duplicate rows are kept.
+
 ## Runtime Surfaces
 
 ### Go backend service

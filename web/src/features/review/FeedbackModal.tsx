@@ -87,6 +87,7 @@ export function FeedbackModal({
       onClose={onClose}
       title={paper.title}
     >
+      <p className="mb-2 break-all text-xs text-muted">RSS article URL: {paper.url || "Unavailable"}</p>
       <SelectField
         label="Correct label"
         options={[...feedbackOptions]}

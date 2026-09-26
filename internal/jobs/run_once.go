@@ -206,16 +206,18 @@ func reclassifyExistingPapers(sqliteStore *store.Store, settings config.Settings
 // 重建 URL 键时撞上另一行，说明库里已经存在同一篇论文的重复行占用了该键；
 // 合并重复是数据库清理的职责，所以这里把失败降级成 warning 描述返回，而不是
 // 让一篇论文的键修复失败中断整批分类。
-func repairRejectedDOI(sqliteStore *store.Store, paperID int64) string {
-	if err := sqliteStore.ClearPaperDOI(paperID); err != nil {
-		warning := fmt.Sprintf("paper %d: could not clear the rejected DOI: %v", paperID, err)
+func repairRejectedDOI(sqliteStore *store.Store, paper store.Paper) string {
+	if err := sqliteStore.ClearPaperDOI(paper.ID); err != nil {
+		warning := fmt.Sprintf("Could not clear the rejected DOI for %s: %v", paperDescription(paper), err)
 		_, _ = logging.WriteDefault(logging.Event{
 			Level:     "warning",
 			Component: "jobs.sync",
 			Action:    "doi_repair_skipped",
 			Message:   warning,
 			Data: map[string]any{
-				"paper_id": paperID,
+				"paper_id":    paper.ID,
+				"paper_title": paper.Title,
+				"paper_url":   paper.URL,
 			},
 		})
 		return warning
@@ -263,7 +265,7 @@ func reclassifyExistingPapersContext(sqliteStore *store.Store, settings config.S
 		}
 		if doiRejected {
 			// DOI 与标题、日期都对不上：清掉错误 DOI，界面回退到出版社 URL。
-			if warning := repairRejectedDOI(sqliteStore, paperID); warning != "" {
+			if warning := repairRejectedDOI(sqliteStore, enriched); warning != "" {
 				classificationWarnings = append(classificationWarnings, warning)
 			}
 		}
@@ -360,7 +362,7 @@ func classifyAndSaveBatch(sqliteStore *store.Store, component string, batch []cl
 				return 0, nil, ctxErr
 			}
 			if err := sqliteStore.SaveClassification(batch[index].PaperID, result, time.Now().UTC()); err != nil {
-				return 0, nil, err
+				return 0, nil, fmt.Errorf("save classification for %s: %w", paperDescription(batch[index].Paper), err)
 			}
 		}
 		return len(results), nil, nil
@@ -369,7 +371,7 @@ func classifyAndSaveBatch(sqliteStore *store.Store, component string, batch []cl
 		return 0, nil, err
 	}
 	if len(batch) == 1 {
-		warning := classificationWarning(batch[0].PaperID, err)
+		warning := classificationWarning(batch[0].Paper, err)
 		logClassificationWarning(component, "single_failed", warning, err, 1)
 		return 0, []string{warning}, nil
 	}
@@ -385,27 +387,39 @@ func classifyAndSaveBatch(sqliteStore *store.Store, component string, batch []cl
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return classified, warnings, err
 			}
-			warning := classificationWarning(pair.PaperID, err)
+			warning := classificationWarning(pair.Paper, err)
 			warnings = append(warnings, warning)
 			logClassificationWarning(component, "single_failed", warning, err, 1)
 			continue
 		}
 		if len(results) != 1 {
-			warning := fmt.Sprintf("classification failed for paper %d: single-paper response returned %d results", pair.PaperID, len(results))
+			warning := fmt.Sprintf("classification failed for %s: single-paper response returned %d results", paperDescription(pair.Paper), len(results))
 			warnings = append(warnings, warning)
 			logClassificationWarning(component, "single_result_mismatch", warning, nil, 1)
 			continue
 		}
 		if err := sqliteStore.SaveClassification(pair.PaperID, results[0], time.Now().UTC()); err != nil {
-			return classified, warnings, err
+			return classified, warnings, fmt.Errorf("save classification for %s: %w", paperDescription(pair.Paper), err)
 		}
 		classified++
 	}
 	return classified, warnings, nil
 }
 
-func classificationWarning(paperID int64, err error) string {
-	return fmt.Sprintf("classification failed for paper %d: %s", paperID, err.Error())
+func classificationWarning(paper store.Paper, err error) string {
+	return fmt.Sprintf("classification failed for %s: %s", paperDescription(paper), err.Error())
+}
+
+func paperDescription(paper store.Paper) string {
+	title := strings.TrimSpace(paper.Title)
+	if title == "" {
+		title = "(untitled)"
+	}
+	url := strings.TrimSpace(paper.URL)
+	if url == "" {
+		url = "(RSS URL unavailable)"
+	}
+	return fmt.Sprintf("paper %d, title %q, RSS article URL %s", paper.ID, title, url)
 }
 
 func logClassificationWarning(component string, action string, message string, err error, batchSize int) {
