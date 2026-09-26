@@ -21,9 +21,8 @@ import type {
 import {AppTab} from "./AppTab";
 import {AdminDisclosure} from "./AdminDisclosure";
 import {DashboardTab} from "./DashboardTab";
-import {ClassifierModelsEditor, classifierModelsDraftHasRequiredKeys, classifierModelsUpdateFromDraft, createClassifierModelsDraft, type ClassifierModelsDraft} from "./ClassifierModelsEditor";
+import {classifierModelsDraftHasRequiredKeys, classifierModelsUpdateFromDraft, createClassifierModelsDraft, createProfileModelsDraft, ModelSettingsEditor, type ClassifierModelsDraft, type ProfileModelsDraft} from "./ModelSettingsEditor";
 import {FeedsTab} from "./FeedsTab";
-import {ProfileModelsEditor, createProfileModelsDraft, type ProfileModelsDraft} from "./ProfileModelsEditor";
 import {ProfileTab} from "./ProfileTab";
 import {SettingsConfigEditor, type SettingsConfigEditorHandle} from "./SettingsConfigEditor";
 
@@ -73,7 +72,6 @@ export type AdminPanelProps = {
   onStopJob: (jobID: string, jobType: "sync" | "reclassify" | "cleanup" | "cleanup-review") => Promise<void> | void;
   onSaveConfig: (fields: Record<string, SettingsConfigUpdate>, classifierModels?: ClassifierModelsUpdate) => Promise<void>;
   onTestClassifierModel: (modelID: string, apiKey?: string) => Promise<JobInfo>;
-  onTestProfileModel: (modelID: string) => Promise<JobInfo>;
   onSaveFeeds: (feeds?: FeedSubscription[]) => Promise<boolean | void> | boolean | void;
   onSaveProfile: (profile: ClassificationProfile) => Promise<void> | void;
   onSaveScheduler: (dailyTime: string) => Promise<void>;
@@ -160,7 +158,7 @@ export function AdminPanel(props: AdminPanelProps) {
     if (profileDraft.defaultModelId) {
       fields.SCIRSS_PROFILE_DEFAULT_MODEL = {value: profileDraft.defaultModelId};
     }
-    return props.onSaveConfig(fields, classifierModelsUpdateFromDraft(classifierDraft));
+    return props.onSaveConfig(fields, classifierModelsUpdateFromDraft(classifierDraft, props.classifierModels));
   };
 
   return (
@@ -233,24 +231,16 @@ export function AdminPanel(props: AdminPanelProps) {
                     {props.configSaving ? "Saving..." : "Save model settings"}
                   </Button>
               </div>
-              <section className="space-y-4 border-b border-(--line) pb-6">
-                <h3 className="text-sm font-semibold text-(--ink)">Classifier</h3>
-                  <ClassifierModelsEditor
-                    draft={classifierDraft}
-                    jobs={props.jobs}
-                    models={props.classifierModels}
-                    onChange={setClassifierDraft}
-                    onTest={props.onTestClassifierModel}
-                  />
-              </section>
               <section className="border-b border-(--line) pb-6">
-                <h3 className="mb-3 text-sm font-semibold text-(--ink)">Profile generator</h3>
-                <ProfileModelsEditor
-                  draft={profileDraft}
+                <ModelSettingsEditor
+                  classifierDraft={classifierDraft}
                   jobs={props.jobs}
-                  models={props.profileModels}
-                  onChange={setProfileDraft}
-                  onTest={props.onTestProfileModel}
+                  models={props.classifierModels}
+                  onClassifierChange={setClassifierDraft}
+                  onProfileChange={setProfileDraft}
+                  onTest={props.onTestClassifierModel}
+                  profileDraft={profileDraft}
+                  profileModels={props.profileModels}
                 />
               </section>
               <AdminDisclosure title="Advanced model settings">

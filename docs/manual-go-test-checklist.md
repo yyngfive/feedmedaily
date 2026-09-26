@@ -146,10 +146,10 @@ go run .\cmd\feedmedaily-tray --root .
 检查：
 
 1. 页面显示基础设置和可展开的高级设置。
-2. `Classification models` 多选至少保留一个模型，`Default classifier` 只列出已选模型。
-3. 每个模型只显示一行“模型名 + API key + Test connection”；默认模型使用与 Filter 一致的下拉样式，并且只列出已有 key 或当前新填 key 的模型。
+2. 顶部依次显示 `Default classifier` 和 `Default profile model` 两个独立下拉框，各占一行；选项只包含已配置供应商的模型。
+3. API key 区域按供应商分组，每个供应商只显示一个 key 输入框和一个 `Test connection` 按钮，并列出该供应商支持的模型。
 4. `Test connection` 进入 `model-test` job，并提示会消耗少量额度；临时 key 不保存。
-5. 分类和 Profile 的模型列表包含相同的八个 ID，两个角色可独立选默认模型；配置某供应商 key 后，该供应商的模型在两个角色中均显示为可用。
+5. 分类和 Profile 共用相同的八个模型选项，但可独立设置默认模型；配置某供应商 key 后，该供应商的模型在两个角色中均显示为可用。
 6. `Save Settings` 可以只保存本地设置，不强制生成 Profile。
 7. 输入兴趣描述后启动初始 Profile 生成。
 8. job 状态从 queued/running 更新到 completed 或 failed。
@@ -190,12 +190,13 @@ go run .\cmd\feedmedaily-tray --root .
 
 ### 7.4 Model
 
-- `Classification models` 多选、按模型 key、启用/停用和默认模型联动正确；默认值不能脱离启用集合。
+- 分类与 Profile 的默认模型下拉框分两行显示，均只列出可用模型；供应商 key 只需输入一次，两个角色即可使用该供应商的模型。
+- 每个供应商仅显示一个 key 输入框和连接测试按钮；按钮启动该供应商的模型连接测试并显示对应状态。
 - 高级设置关闭思考时，DeepSeek/Qwen/MiMo 均关闭，GLM 仍使用 `thinking=enabled` + `reasoning_effort=low`；开启时只发送各模型最低档，且 DeepSeek/MiMo 的 completion 上限至少为 4096。
 - `Test connection` 以后台 `model-test` job 运行，成功/失败状态可轮询，且日志不出现 key。
 - secret 值不回显明文。
 - environment override 状态清楚显示。
-- 停用模型保留 key；只有明确 `Clear key` 后才删除。
+- 环境变量提供的 key 不可在 UI 中编辑，并明确显示由环境管理。
 - 保存后同一进程内启动的新 job 使用新设置。
 - Token pricing 费率由后端内置并按 provider/时段自动选择，不在 Settings 中提供编辑入口，也不读取价格环境变量。
 - 旧版本 `.env` 或 release `settings.json` 中的价格键在启动时被清理；已完成或正在运行的 job 继续显示其原有价格快照，不被回算。

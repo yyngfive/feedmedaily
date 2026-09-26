@@ -14,8 +14,7 @@ import type {
 import {TextAreaField, TextInputField} from "../../shared/components/FormFields";
 import {SelectField} from "../../shared/components/SelectField";
 import {StatusBanner, type StatusTone} from "../../shared/components/StatusBanner";
-import {ClassifierModelsEditor, classifierModelsDraftHasRequiredKeys, classifierModelsUpdateFromDraft, createClassifierModelsDraft, type ClassifierModelsDraft} from "../admin/ClassifierModelsEditor";
-import {ProfileModelsEditor, createProfileModelsDraft, type ProfileModelsDraft} from "../admin/ProfileModelsEditor";
+import {classifierModelsDraftHasRequiredKeys, classifierModelsUpdateFromDraft, createClassifierModelsDraft, createProfileModelsDraft, ModelSettingsEditor, type ClassifierModelsDraft, type ProfileModelsDraft} from "../admin/ModelSettingsEditor";
 
 const aiAdvancedKeys = [
   "SCIRSS_CLASSIFIER_BATCH_SIZE",
@@ -410,7 +409,6 @@ export function Onboarding({
   onSaveSettings,
   onSaveAndBootstrap,
   onTestClassifierModel,
-  onTestProfileModel,
   profileModels,
   proposals,
 }: {
@@ -431,7 +429,6 @@ export function Onboarding({
     interestDescription: string,
   ) => Promise<{message: string; ok: boolean; tone: StatusTone}>;
   onTestClassifierModel: (modelID: string, apiKey?: string) => Promise<JobInfo>;
-  onTestProfileModel: (modelID: string) => Promise<JobInfo>;
   profileModels: ProfileModelsResponse;
   proposals: ProfileProposal[];
 }) {
@@ -505,8 +502,10 @@ export function Onboarding({
 
   const classifierSelectionValid = classifierDraft.enabledModelIds.length > 0 && classifierDraft.enabledModelIds.includes(classifierDraft.defaultModelId);
   const classifierKeysReady = classifierModelsDraftHasRequiredKeys(classifierDraft, classifierModels);
+  const profileModelKeyReady = Boolean(profileDefaultModel?.configured) ||
+    Boolean(profileDefaultModel && classifierDraft.enabledModelIds.includes(profileDefaultModel.id) && classifierKeysReady);
   const canGenerate = classifierSelectionValid && classifierKeysReady &&
-    Boolean(interestDescription.trim()) && Boolean(profileDefaultModel?.configured);
+    Boolean(interestDescription.trim()) && profileModelKeyReady;
 
   React.useEffect(() => {
     const currentPendingProposal = pendingProposal;
@@ -535,7 +534,7 @@ export function Onboarding({
     setProposalMessage(null);
     const result = await onSaveAndBootstrap(
       buildSettingsPayload(editableSettingsFields, advancedValues, profileModelsDraft.defaultModelId),
-      classifierModelsUpdateFromDraft(classifierDraft),
+      classifierModelsUpdateFromDraft(classifierDraft, classifierModels),
       interestDescription.trim(),
     );
     setSettingsMessage({tone: result.tone, text: result.message});
@@ -546,7 +545,7 @@ export function Onboarding({
     setProposalMessage(null);
     const result = await onSaveSettings(
       buildSettingsPayload(editableSettingsFields, advancedValues, profileModelsDraft.defaultModelId),
-      classifierModelsUpdateFromDraft(classifierDraft),
+      classifierModelsUpdateFromDraft(classifierDraft, classifierModels),
     );
     setSettingsMessage({tone: result.tone, text: result.message});
   };
@@ -606,19 +605,15 @@ export function Onboarding({
                 onChange={setInterestDescription}
               />
               <div className="space-y-5 p-2">
-                <ClassifierModelsEditor
-                  draft={classifierDraft}
+                <ModelSettingsEditor
+                  classifierDraft={classifierDraft}
                   jobs={jobs}
                   models={classifierModels}
-                  onChange={setClassifierDraft}
+                  onClassifierChange={setClassifierDraft}
+                  onProfileChange={setProfileModelsDraft}
                   onTest={onTestClassifierModel}
-                />
-                <ProfileModelsEditor
-                  draft={profileModelsDraft}
-                  jobs={jobs}
-                  models={profileModels}
-                  onChange={setProfileModelsDraft}
-                  onTest={onTestProfileModel}
+                  profileDraft={profileModelsDraft}
+                  profileModels={profileModels}
                 />
               </div>
 

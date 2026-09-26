@@ -53,7 +53,6 @@ export function App() {
           onSaveSettings={admin.handleOnboardingSaveSettings}
           onSaveAndBootstrap={admin.handleOnboardingSaveAndBootstrap}
           onTestClassifierModel={admin.handleTestClassifierModel}
-          onTestProfileModel={admin.handleTestProfileModel}
         />
       </>
     );
@@ -90,7 +89,6 @@ export function App() {
         onCheckForUpdates={() => void data.handleCheckAppUpdate()}
         onSaveConfig={admin.handleSaveConfig}
         onTestClassifierModel={admin.handleTestClassifierModel}
-        onTestProfileModel={admin.handleTestProfileModel}
         onSaveProfile={admin.handleSaveProfile}
         onSaveScheduler={admin.handleSaveScheduler}
         onSaveFeeds={admin.handleSaveFeeds}

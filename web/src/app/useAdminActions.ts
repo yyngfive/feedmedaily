@@ -22,7 +22,6 @@ import {
   startFeedVerification,
   submitFeedVerificationXML,
   testClassifierModel,
-  testProfileModel,
 } from "../api/client";
 import type {CleanupReviewDecision, ReclassifyScope} from "../api/client";
 import type {ClassifierModelsUpdate, ClassificationProfile, FeedSubscription, JobInfo, SettingsConfigUpdate} from "../shared/types";
@@ -185,18 +184,6 @@ export function useAdminActions(state: AppState, data: AppData) {
     }
   }, [pushErrorMessage, pushMessage, registerJob]);
 
-  const handleTestProfileModel = React.useCallback(async (modelId: string) => {
-    try {
-      const job = await testProfileModel(modelId);
-      registerJob(job, false);
-      pushMessage("profile.model.test.started", {text: "Connection test queued. It uses a small amount of provider quota.", tone: "info"});
-      return job;
-    } catch (error) {
-      pushErrorMessage("profile.model.test.failed", error, "Could not start the profile model connection test.");
-      throw error;
-    }
-  }, [pushErrorMessage, pushMessage, registerJob]);
-
   const handleGenerateProposal = async () => {
     try { registerJob(await launchProfileProposalGeneration()); pushMessage("profile.proposal.started"); }
     catch (error) { pushErrorMessage("app.service.unavailable", error, "Could not start profile proposal generation."); }
@@ -298,7 +285,7 @@ export function useAdminActions(state: AppState, data: AppData) {
 
   return {
     registerJob, handleSaveFeeds,
-    handleSaveConfig, handleSaveScheduler, handleSaveProfile, handleDeleteScheduler, handleTestClassifierModel, handleTestProfileModel,
+    handleSaveConfig, handleSaveScheduler, handleSaveProfile, handleDeleteScheduler, handleTestClassifierModel,
     handleOpenAppTarget, handleExitApp, handleOnboardingSaveAndBootstrap,
     handleOnboardingSaveSettings, handleGenerateProposal, handleApplyProposal,
     handleRejectProposal, handleOnboardingAcceptDraft, handleOnboardingRejectProposal,

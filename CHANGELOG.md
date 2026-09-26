@@ -2,28 +2,27 @@
 
 This changelog is grouped by version number and records each version relative to the previous released version.
 
-The latest released version is `0.6.1`. The next planned release is `0.6.2`, so unreleased product changes should be added under `0.6.2` until that version ships.
+The latest released version is `0.6.2`. The next planned release is `0.7.0`, so unreleased product changes should be added under `0.7.0` until that version ships.
 
-## 0.6.2 (Unreleased)
+## 0.7.0 (Unreleased)
 
-Changes since `0.6.1`:
+Changes since `0.6.2`:
 
 ### Added
 
-- Classification and Profile generation now share one fixed eight-model catalog, including Flash and Pro-tier options. Each role keeps its own default selector and connection tests in Settings → Model and onboarding (`POST /api/settings/profile-models/test`); API keys remain shared by provider, and legacy DeepSeek-only profile settings still work as a migration fallback.
+- Classification and Profile generation share one fixed eight-model catalog, including Flash and Pro-tier options; legacy DeepSeek-only profile settings still work as a migration fallback.
 - The Web UI now checks for application updates automatically when it opens or reloads, and announces an available version in the shared message bar.
 - Added a cancellable Database cleanup job for all unclassified papers. It removes only exact URL/DOI duplicate copies, repairs explicit DOI mismatches while retaining the article, creates a SQLite backup before mutation, and places title-only or uncertain cases in a persistent manual-review queue.
 - Added a canonical journal identity across reader surfaces, generated from verified sci-rss-list entries while preserving original bibliographic fields. A single-journal feed uses the canonical name mapped from its exact URL; only cross-journal aggregate feeds prefer article-level journal metadata. Volume/issue cleanup is a fallback when no applicable URL mapping exists. Release builds refresh the source-derived catalog, and runtime report reads remain offline. bioRxiv and medRxiv subject-collection labels use canonical platform-and-discipline names while keeping categories distinct. Custom reclassification can target selected journals and inclusive local first-seen dates; it previews matching/classification counts and rechecks a paper-ID fingerprint before launch.
 - Added downloadable work-data backup ZIPs with the SQLite database, profile, subscriptions, checksums, manifest, and restore instructions. Backup runs as a pipeline job and excludes credentials and application settings.
+- Simplified model setup by removing duplicate per-model credential lists. Settings and onboarding show separate classifier and Profile default selectors above one API key and connection-test row per provider; one provider key enables that provider's models for both roles.
 
 ### Changed
 
 - Replaced MiMo-V2.5 with MiMo-V2.6-Flash and MiMo-V2.6-Pro in the shared model catalog; both are selectable for classification and Profile generation. Saved V2.5 IDs migrate to their V2.6 equivalents. Added current MiMo V2.6 rate snapshots: Flash at cache hit/input/output ¥0.02/¥1/¥2 and Pro at ¥0.025/¥3/¥6 per 1M tokens.
 - Clarified the Local app actions: `Save app settings` now sits beside the host/port fields, while work-data backup creation and ZIP download are presented as a separate section.
-- Switched the DeepSeek classifier entry to DeepSeek V4.1 Flash and to DeepSeek's current call name `deepseek-flash`. DeepSeek retired the `deepseek-v4-flash` call name on 2026-09-10 and now serves the V4.1 Flash model behind the new one, so saved selections, `.env` files, and structured settings updates that still name `deepseek-v4-flash`, `deepseek-v4.1-flash`, or the `deepseek-v4.1-flash-expires-on-0910` beta keep resolving to the same model instead of being dropped. Classifier requests, connection tests, and thinking controls keep the same request shape and behavior; verified against the live API in both thinking-disabled and thinking-enabled modes.
-- Updated the default token pricing to the providers' current CNY rate cards. DeepSeek cut Flash prices at 12:00 Beijing on 2026-09-10 (off-peak cache hit `0.02`, cache miss `1`, output `4` CNY per 1M tokens, with peak at double), and Zhipu's GLM-5.3-Flash limited-time 50% promotion ended at 24:00 Beijing on 2026-09-09 (now cache hit `0.23`, input `0.8`, output `2.8`). Added rate cards for the new profile models: GLM-5.3 at cache hit `2`, input `8`, output `28`, and qwen3.8-max-0902 at cache hit `1.2`, input `12`, output `36` CNY per 1M tokens. Profile-model responses now also normalize OpenAI-style `prompt_tokens_details.cached_tokens` so cache-hit pricing applies to Zhipu and DashScope usage. DeepSeek's earlier plan to route `deepseek-v4-pro` requests to V4.1 Flash at Flash pricing from 12:00 Beijing on 2026-09-14 was withdrawn in a revised announcement — V4 Pro keeps serving with unchanged billing, and Profile-model estimates stay on Pro rates.
+- Updated built-in pricing for the newer Profile models: added GLM-5.3 and qwen3.8-max-0902 rate cards and normalized OpenAI-style cached-token usage for Zhipu and DashScope. DeepSeek V4 Pro keeps Pro pricing after the provider withdrew its planned Flash-price routing.
 - Profile generation requests now adapt to each provider's thinking contract instead of sending DeepSeek's shape everywhere: DeepSeek and Qwen pin `reasoning_effort=low`, GLM-5.3 (which always thinks) pins the same low level and never receives a disabled toggle, and MiMo's thinking budget rises to 16384 tokens because its default-depth reasoning alone exceeds the old budget — with thinking enabled, every provider now completes its real reasoning instead of silently falling back to thinking-off. Thinking-enabled profile calls wait up to 300 seconds instead of 60. Provider responses log `finish_reason` and reasoning-token counts, and topic labels that models illegally attach to unrelated or scope changes are stripped instead of failing the whole proposal.
-- Made provider token pricing a built-in, immutable rate card. Prices are no longer stored in Settings or environment variables, the pricing editor was removed, and legacy local price keys are cleaned up on startup; usage ledger rows continue to preserve their historical rate snapshots.
 - Replaced the Dashboard's unclassified-paper reclassification button with the database cleanup workflow. The existing reclassification API scope remains available for compatibility; cleanup now pauses bulk classification while manual reviews remain, lets title-duplicate reviews choose either Item A or Item B to delete, gives DOI conflicts a DOI-only review with no article-delete action, keeps retained decisions unclassified for the next batch, removes the defer action, and presents the cleanup section at the bottom of Dashboard with clickable DOI links.
 
 ### Fixed
@@ -34,11 +33,24 @@ Changes since `0.6.1`:
 - The Dashboard's cleanup section now disables its actions while a sync or reclassification job is running, matching the backend pipeline lock instead of surfacing a conflict error after clicking.
 - Fixed cleanup review classification for title variants such as `Inside Back Cover`: normalized-title matches remain duplicate reviews instead of being mislabeled as DOI conflicts. DOI-conflict reviews are reserved for exact duplicate relations whose titles do not match, and the two review items now render side by side on wider screens.
 - Fixed Windows installer updates failing when FeedMeDaily was running: the installer now prompts before closing the app, uses a temporary shutdown helper, and waits for both processes before replacing packaged files.
-- Repriced usage-ledger rows that were recorded with a price snapshot a later official price change replaced: DeepSeek Flash rows completed at or after the 2026-09-10 cutover and GLM-5.3-Flash rows completed after the 2026-09-09 promotion ended now carry the current default rates instead of the superseded ones. The repair runs idempotently at startup alongside the existing legacy-snapshot repairs, and rows recorded while their snapshot was still current keep their historical estimate.
 - Fixed syncs failing with `repairing the paper DOI would collide with another paper key` and reporting all-zero results. Publisher RSS titles render subscripts with a space (`CO 2`, `CsPbBr 3`) while Crossref and OpenAlex omit it (`CO2`, `CsPbBr3`), so the DOI was judged mismatched, discarded, and its publisher-URL key repair collided with an earlier URL-keyed copy of the same article. Title validation now ignores whitespace, and a repair that still cannot take the URL key is reported as a job warning instead of aborting the whole sync, so the remaining papers are still classified.
 - Duplicate removal during database cleanup now leaves a usable identity behind: when the deleted copy's DOI came in with its feed item (`doi:`-keyed row), the retained article takes that DOI over and adopts the `doi:`-based `paper_key` when the key is free, so the next fetch resolves to the surviving row instead of inserting a fresh duplicate and repeating the cleanup-and-resync cycle. A DOI that enrichment guessed later by title search is not handed over, because the feed entry for that article carries no DOI and the next fetch reaches the retained row by its URL key anyway.
 - Failed jobs now keep the partial result and warnings they produced before the error instead of reporting zeros. A sync that fetched 47 feeds and enriched most of its batch before failing shows its real counters and its warning list on the Dashboard's failed activity card, which previously displayed 0 for everything and hid both the completed work and the warnings.
 - Fixed protected feeds failing a sync even though verification had just captured their XML. A warm host profile resolves the Cloudflare challenge without human input, so the verifier window finishes in roughly half a second and exits; the launcher read that fast exit as "failed to open the verification browser" and reported the window's own WebView2 log line as the error, and the fetch then discarded the XML the callback had already delivered. A quick exit now counts as success whenever the callback delivered XML, captured XML is kept even when a warning rides along, and a window that really exits without XML reports a readable reason instead of raw stderr. Targeting a single protected feed no longer turns into a `0`-fetched failed sync, and full syncs no longer drop those feeds' papers silently.
+
+## 0.6.2 (2026-09-10)
+
+Changes since `0.6.1`:
+
+### Changed
+
+- Replaced the DeepSeek classifier call name with `deepseek-flash`, which serves V4.1 Flash; saved `deepseek-v4-flash` and V4.1 beta aliases continue to resolve to the supported model.
+- Updated DeepSeek Flash pricing effective 2026-09-10 and GLM-5.3-Flash pricing after its promotion ended. The release also scheduled DeepSeek V4 Pro to move to Flash pricing on 2026-09-14 based on the provider's initial announcement; the provider withdrew that plan, and the 0.7.0 entry below records the correction.
+- Removed editable model pricing from Settings and environment configuration. Built-in provider rates now apply, and startup removes legacy local price overrides while preserving historical usage snapshots.
+
+### Fixed
+
+- Repaired usage-ledger rows whose saved price snapshots had been superseded by the official DeepSeek or GLM price changes.
 
 ## 0.6.1 (2026-09-08)
 
