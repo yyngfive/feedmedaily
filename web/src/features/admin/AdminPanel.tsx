@@ -212,7 +212,7 @@ export function AdminPanel(props: AdminPanelProps) {
             />
             </div>
             <div hidden={props.activeTab !== "feeds"}>
-              <FeedsTab feeds={props.feeds} feedsSaving={props.feedsSaving} onSaveFeeds={props.onSaveFeeds} />
+              <FeedsTab feeds={props.feeds} feedsSaving={props.feedsSaving} onSaveFeeds={props.onSaveFeeds} configFields={props.configFields} configSaving={props.configSaving} onSaveConfig={props.onSaveConfig} />
             </div>
             <div hidden={props.activeTab !== "profile"}>
             <ProfileTab feedback={props.feedback} onApplyProposal={props.onApplyProposal} onDeleteFeedback={props.onDeleteFeedback} onGenerateProposal={props.onGenerateProposal} onRejectProposal={props.onRejectProposal} onSaveProfile={props.onSaveProfile} profile={props.profile} profileSaving={props.profileSaving} proposalGenerating={props.proposalGenerating} proposals={props.proposals} />

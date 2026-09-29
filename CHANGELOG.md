@@ -11,6 +11,7 @@ Changes since `0.7.0`:
 ### Added
 
 - RSC issue-alert emails delivered through kill-the-news RSS now expand into individual DOI-linked papers with per-email journal names; account and confirmation messages are ignored.
+- Email alert feeds are now built-in subscription options in the Feeds UI. The private feed address is configured once in settings, stored like a password, and never shown in the UI, API responses, logs, or backups; targeted sync uses a stable email-source identity instead of the URL.
 
 ### Fixed
 

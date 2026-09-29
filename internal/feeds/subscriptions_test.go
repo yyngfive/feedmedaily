@@ -67,3 +67,46 @@ func TestNormalizeSubscriptionUpgradesLegacyCellURLToHTTPS(t *testing.T) {
 		t.Fatalf("unexpected url: %#v", feed.URL)
 	}
 }
+
+func TestWriteSubscriptionsNormalizesPrivateEmailSource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data", "rss_feeds.json")
+	feeds, err := WriteSubscriptions(path, []Subscription{
+		{Journal: "RSC journals (email alerts)", EmailSource: " rsc-email-alerts "},
+		{Journal: "RSC duplicate", EmailSource: "rsc-email-alerts"},
+		{Journal: "Nature", URL: "https://www.nature.com/nature.rss"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(feeds) != 2 {
+		t.Fatalf("feeds = %#v", feeds)
+	}
+	email := feeds[0]
+	if email.URL != "" || !email.Private || email.EmailSource != "rsc-email-alerts" {
+		t.Fatalf("email subscription = %#v", email)
+	}
+	if email.SubscriptionIdentity() != "email:rsc-email-alerts" {
+		t.Fatalf("identity = %q", email.SubscriptionIdentity())
+	}
+
+	roundTrip, err := ReadSubscriptions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roundTrip) != 2 || roundTrip[0].EmailSource != "rsc-email-alerts" || roundTrip[0].Private != true {
+		t.Fatalf("roundTrip = %#v", roundTrip)
+	}
+}
+
+func TestNormalizeSubscriptionStillRequiresURLOrEmailSource(t *testing.T) {
+	if _, err := NormalizeSubscription(Subscription{Journal: "Empty"}); err == nil {
+		t.Fatal("expected error for subscription without URL and email source")
+	}
+	normalized, err := NormalizeSubscription(Subscription{Journal: "Email", URL: "https://example.com/rss", EmailSource: "rsc-email-alerts"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.URL != "" || !normalized.Private {
+		t.Fatalf("email source must drop the stored URL: %#v", normalized)
+	}
+}

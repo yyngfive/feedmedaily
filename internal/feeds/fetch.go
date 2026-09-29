@@ -28,6 +28,10 @@ type FetchOptions struct {
 	SkippedFeeds     map[string]string
 	Progress         FetchProgressFunc
 	VerifyHost       VerifyHostFunc
+	// EmailFeedURL resolves the private feed URL for subscriptions carrying an
+	// email_source. The jobs layer injects it from the email feed config; it is
+	// never persisted with the subscription or echoed back to the frontend.
+	EmailFeedURL string
 }
 
 type FetchResult struct {
@@ -321,7 +325,7 @@ func filterSubscriptionsByURLs(subscriptions []Subscription, selectedURLs []stri
 	}
 	filtered := make([]Subscription, 0, len(subscriptions))
 	for _, subscription := range subscriptions {
-		if _, ok := selected[strings.TrimSpace(subscription.URL)]; ok {
+		if _, ok := selected[subscription.SubscriptionIdentity()]; ok {
 			filtered = append(filtered, subscription)
 		}
 	}
@@ -366,19 +370,36 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 			return FetchResult{}, err
 		}
 		subscription := subscriptions[index]
-		result.FeedURLs = append(result.FeedURLs, subscription.URL)
-		label := fetchProgressLabel(subscription.Journal, subscription.URL)
+		identity := subscription.SubscriptionIdentity()
+		feedURL := subscription.URL
+		if subscription.EmailSource != "" {
+			feedURL = strings.TrimSpace(opts.EmailFeedURL)
+		}
+		if feedURL == "" {
+			result.FeedURLs = append(result.FeedURLs, identity)
+			if opts.Progress != nil {
+				opts.Progress(index+1, totalFeeds, fetchProgressLabel(subscription.Journal, identity))
+			}
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: the email feed URL is not configured yet", identity))
+			continue
+		}
+		result.FeedURLs = append(result.FeedURLs, identity)
+		label := fetchProgressLabel(subscription.Journal, identity)
 		if opts.Progress != nil {
 			opts.Progress(index+1, totalFeeds, label)
 		}
-		if reason, ok := skippedFeedReason(subscription.URL, opts.SkippedFeeds); ok {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", safeFeedURL(subscription.URL), reason))
+		if reason, ok := skippedFeedReason(identity, opts.SkippedFeeds); ok {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", identity, reason))
 			continue
 		}
-		fetched, err := fetchFeed(subscription.URL, opts)
+		fetched, err := fetchFeed(feedURL, opts)
 		if err != nil {
 			var verificationErr *FeedVerificationRequiredError
 			if errors.As(err, &verificationErr) {
+				if subscription.EmailSource != "" {
+					result.Errors = append(result.Errors, fmt.Sprintf("%s: the email feed host requested browser verification; open the configured email feed URL once in a browser, then sync again", identity))
+					continue
+				}
 				requests, nextIndex := hostVerificationRequests(subscriptions, index, verificationErr, opts)
 				if opts.VerifyHost != nil {
 					result.FeedURLs = appendResultFeedURLs(result.FeedURLs, subscriptions[index+1:nextIndex])
@@ -403,13 +424,13 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 				continue
 			}
 			if isTransientFetchError(err) {
-				transientFailures = append(transientFailures, transientFetchFailure{subscription: subscription, err: err})
+				transientFailures = append(transientFailures, transientFetchFailure{subscription: subscription, err: err, feedURL: feedURL})
 				continue
 			}
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", safeFeedURL(subscription.URL), strings.ReplaceAll(err.Error(), subscription.URL, safeFeedURL(subscription.URL))))
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", feedErrorLabel(subscription, feedURL), strings.ReplaceAll(err.Error(), feedURL, feedErrorLabel(subscription, feedURL))))
 			continue
 		}
-		rememberFeedBody(subscription.URL, opts.BodyCache, fetched.Body)
+		rememberFeedBody(feedURL, opts.BodyCache, fetched.Body)
 		result.Papers = append(result.Papers, fetched.Papers...)
 	}
 	if err := ctx.Err(); err != nil {
@@ -420,7 +441,7 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 		return FetchResult{}, err
 	}
 	for _, failure := range transientFailures {
-		result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", failure.subscription.URL, failure.err))
+		result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", feedErrorLabel(failure.subscription, failure.feedURL), strings.ReplaceAll(failure.err.Error(), failure.feedURL, feedErrorLabel(failure.subscription, failure.feedURL))))
 	}
 	if opts.MaxPapers > 0 && len(result.Papers) > opts.MaxPapers {
 		_, _ = logging.WriteDefault(logging.Event{
@@ -452,9 +473,21 @@ func appendResultFeedURLs(existing []string, subscriptions []Subscription) []str
 	return existing
 }
 
+// feedErrorLabel is the redacted prefix used for per-feed error strings:
+// private email rows show their stable identity, normal rows keep the
+// SafeFeedURL redaction of long opaque path ids.
+func feedErrorLabel(subscription Subscription, feedURL string) string {
+	if subscription.EmailSource != "" {
+		return subscription.SubscriptionIdentity()
+	}
+	return safeFeedURL(feedURL)
+}
+
 type transientFetchFailure struct {
 	subscription Subscription
 	err          error
+	// feedURL is the resolved fetch target (real URL for private email rows).
+	feedURL string
 }
 
 // retryTransientFetchFailures re-fetches feeds that failed on transient
@@ -491,7 +524,7 @@ func retryTransientFetchFailures(ctx context.Context, failures []transientFetchF
 			if opts.Progress != nil {
 				opts.Progress(totalFeeds, totalFeeds, retryFetchProgressLabel(failure.subscription))
 			}
-			fetched, err := fetchFeed(failure.subscription.URL, opts)
+			fetched, err := fetchFeed(failure.feedURL, opts)
 			if err == nil {
 				rememberFeedBody(failure.subscription.URL, opts.BodyCache, fetched.Body)
 				result.Papers = append(result.Papers, fetched.Papers...)

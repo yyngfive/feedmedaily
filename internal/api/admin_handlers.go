@@ -94,7 +94,9 @@ func validateSelectedFeedURLs(feedsPath string, requested []string) ([]string, e
 	}
 	saved := map[string]struct{}{}
 	for _, subscription := range subscriptions {
-		saved[strings.TrimSpace(subscription.URL)] = struct{}{}
+		// Private email feeds are selected by their stable identity because
+		// their real URL never reaches the frontend.
+		saved[subscription.SubscriptionIdentity()] = struct{}{}
 	}
 	for _, feedURL := range selected {
 		if _, ok := saved[feedURL]; !ok {

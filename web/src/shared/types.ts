@@ -6,6 +6,9 @@ export type FeedSubscription = {
   client_id?: string;
   journal: string;
   url: string;
+  /** Private rows never expose their feed URL; it resolves from app settings. */
+  private?: boolean;
+  email_source?: string;
 };
 
 export type SettingsConfigSource =

@@ -286,3 +286,64 @@ func TestFetchAllDoesNotRetryNonTransientFailures(t *testing.T) {
 		t.Fatalf("errors = %#v", result.Errors)
 	}
 }
+
+func TestFetchAllResolvesEmailFeedURLFromOptions(t *testing.T) {
+	oldClient := fetchHTTPClient
+	fetchHTTPClient = &http.Client{Timeout: 30 * time.Second}
+	defer func() { fetchHTTPClient = oldClient }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write(rssBodyFor("Email alert sample"))
+	}))
+	defer server.Close()
+
+	feedsPath := writeFetchTestFeeds(t, `[{"journal":"RSC journals (email alerts)","url":"","private":true,"email_source":"rsc-email-alerts"}]`)
+
+	result, err := FetchAll(feedsPath, FetchOptions{EmailFeedURL: server.URL, SelectedFeedURLs: []string{"email:rsc-email-alerts"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Errors) != 0 {
+		t.Fatalf("errors = %#v", result.Errors)
+	}
+	if len(result.Papers) != 1 || result.Papers[0].Title != "Email alert sample" {
+		t.Fatalf("papers = %#v", result.Papers)
+	}
+	if len(result.FeedURLs) != 1 || result.FeedURLs[0] != "email:rsc-email-alerts" {
+		t.Fatalf("feedURLs = %#v", result.FeedURLs)
+	}
+}
+
+func TestFetchAllReportsUnconfiguredEmailFeed(t *testing.T) {
+	oldClient := fetchHTTPClient
+	fetchHTTPClient = &http.Client{Timeout: 30 * time.Second}
+	defer func() { fetchHTTPClient = oldClient }()
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write(rssBodyFor("Steady feed sample"))
+	}))
+	defer server.Close()
+
+	feedsPath := writeFetchTestFeeds(t, `[
+  {"journal":"RSC journals (email alerts)","url":"","private":true,"email_source":"rsc-email-alerts"},
+  {"journal":"Nature","url":"`+server.URL+`/rss"}
+]`)
+
+	result, err := FetchAll(feedsPath, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Fatalf("unexpected HTTP requests: %d, want 1 (only the healthy feed)", requests)
+	}
+	if len(result.Papers) != 1 || result.Papers[0].Title != "Steady feed sample" {
+		t.Fatalf("papers = %#v", result.Papers)
+	}
+	if len(result.Errors) != 1 || !strings.HasPrefix(result.Errors[0], "email:rsc-email-alerts: ") || strings.Contains(result.Errors[0], "http") {
+		t.Fatalf("errors = %#v", result.Errors)
+	}
+}

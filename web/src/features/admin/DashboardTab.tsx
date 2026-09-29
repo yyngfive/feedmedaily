@@ -18,6 +18,11 @@ function formatJobTime(value?: string | null) {
   return new Date(value).toLocaleString();
 }
 
+// 定向同步用稳定标识选择 feed：私有邮件源用 email:<source>，真实 URL 不进前端。
+function syncFeedIdentity(feed: FeedSubscription) {
+  return feed.email_source ? `email:${feed.email_source}` : feed.url.trim();
+}
+
 function jobResultNumber(job: JobInfo, key: string) {
   const value = job.result?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -281,10 +286,10 @@ export function DashboardTab({
     .map((job) => `${job.id}:${job.status}:${job.finished_at ?? ""}:${job.progress_current ?? ""}:${job.progress_percent ?? ""}`)
     .join("|")}`;
   const verificationJob = jobs.find((job) => job.status === "waiting_for_user" && job.verification_required) ?? null;
-  const savedSyncFeedURLs = React.useMemo(() => feeds.map((feed) => feed.url.trim()).filter(Boolean), [feeds]);
+  const savedSyncFeedURLs = React.useMemo(() => feeds.map((feed) => syncFeedIdentity(feed)).filter(Boolean), [feeds]);
   const syncFeedMatches = React.useMemo(() => {
     const query = syncFeedQuery.trim().toLowerCase();
-    return feeds.filter((feed) => feed.url.trim() && (!query || `${feed.journal} ${feed.url}`.toLowerCase().includes(query)));
+    return feeds.filter((feed) => syncFeedIdentity(feed) && (!query || `${feed.journal} ${feed.url}`.toLowerCase().includes(query)));
   }, [feeds, syncFeedQuery]);
 
   React.useEffect(() => setVerificationXML(""), [verificationJob?.id]);
@@ -418,14 +423,14 @@ export function DashboardTab({
               {/* 已选期刊以可移除 chip 常驻显示，与 Custom range 的已选标签同形态；未选择时提示当前同步范围为全部 feed。 */}
               <div className="mt-2 flex flex-wrap items-center gap-2" aria-label="Selected feeds">
                 {selectedSyncFeedURLs.length ? selectedSyncFeedURLs.map((url) => {
-                  const label = feeds.find((feed) => feed.url.trim() === url)?.journal.trim() || url;
+                  const label = feeds.find((feed) => syncFeedIdentity(feed) === url)?.journal.trim() || url;
                   return <Button key={url} size="sm" variant="secondary" className="h-auto max-w-full whitespace-normal break-words text-left" aria-label={`Remove ${label}`} onPress={() => setSelectedSyncFeedURLs((current) => current.filter((item) => item !== url))}>{label} ×</Button>;
                 }) : <p className="text-sm text-muted">All feeds</p>}
                 {selectedSyncFeedURLs.length ? <Button size="sm" variant="ghost" onPress={() => setSelectedSyncFeedURLs([])}>Clear selection</Button> : null}
               </div>
               <div className="mt-2 max-h-52 space-y-0.5 overflow-y-auto pr-1">
                 {syncFeedMatches.length === 0 ? <p className="rounded-md border border-(--line) px-3 py-3 text-sm text-muted">No feed matches.</p> : syncFeedMatches.map((feed) => {
-                  const url = feed.url.trim();
+                  const url = syncFeedIdentity(feed);
                   return <CheckboxRow key={feed.client_id ?? url} checked={selectedSyncFeedURLs.includes(url)} className="rounded-md px-2 py-1 text-sm" onChange={() => setSelectedSyncFeedURLs((current) => current.includes(url) ? current.filter((item) => item !== url) : [...current, url])}><span className="font-medium text-(--ink)">{feed.journal}</span></CheckboxRow>;
                 })}
               </div>
