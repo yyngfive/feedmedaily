@@ -411,9 +411,17 @@ export function DashboardTab({
         {hasFeeds ? (
           <div className="mt-4"><AdminDisclosure title="Target specific feeds">
               <div className="flex flex-wrap items-end gap-2">
-                <TextInputField hideLabel className="min-w-60 flex-1" label="Search feeds for targeted sync" placeholder="Search feeds" value={syncFeedQuery} onChange={setSyncFeedQuery} />
+                <TextInputField hideLabel className="min-w-60 flex-1" clearable label="Search feeds for targeted sync" placeholder="Search feeds" value={syncFeedQuery} onChange={setSyncFeedQuery} />
                 <Button size="sm" variant="outline" onPress={() => setSelectedSyncFeedURLs(savedSyncFeedURLs)}>Select all</Button>
                 <Button isDisabled={selectedSyncFeedURLs.length === 0} size="sm" variant="ghost" onPress={() => setSelectedSyncFeedURLs([])}>Clear</Button>
+              </div>
+              {/* 已选期刊以可移除 chip 常驻显示，与 Custom range 的已选标签同形态；未选择时提示当前同步范围为全部 feed。 */}
+              <div className="mt-2 flex flex-wrap items-center gap-2" aria-label="Selected feeds">
+                {selectedSyncFeedURLs.length ? selectedSyncFeedURLs.map((url) => {
+                  const label = feeds.find((feed) => feed.url.trim() === url)?.journal.trim() || url;
+                  return <Button key={url} size="sm" variant="secondary" className="h-auto max-w-full whitespace-normal break-words text-left" aria-label={`Remove ${label}`} onPress={() => setSelectedSyncFeedURLs((current) => current.filter((item) => item !== url))}>{label} ×</Button>;
+                }) : <p className="text-sm text-muted">All feeds</p>}
+                {selectedSyncFeedURLs.length ? <Button size="sm" variant="ghost" onPress={() => setSelectedSyncFeedURLs([])}>Clear selection</Button> : null}
               </div>
               <div className="mt-2 max-h-52 space-y-0.5 overflow-y-auto pr-1">
                 {syncFeedMatches.length === 0 ? <p className="rounded-md border border-(--line) px-3 py-3 text-sm text-muted">No feed matches.</p> : syncFeedMatches.map((feed) => {
@@ -482,14 +490,12 @@ export function DashboardTab({
         onCleanup={onCleanup}
         onCleanupReview={onCleanupReview}
         refreshKey={cleanupRefreshKey}
-      />
-      {activeCleanupJob ? (
-        <div className="-mt-3 flex justify-end">
+        stopButton={activeCleanupJob ? (
           <Button isDisabled={stoppingCleanup || Boolean(activeCleanupJob.cancel_requested)} size="sm" variant="danger" onPress={stopCleanup}>
             {stoppingCleanup || activeCleanupJob.cancel_requested ? "Stopping…" : "Stop cleanup"}
           </Button>
-        </div>
-      ) : null}
+        ) : null}
+      />
     </div>
   );
 }

@@ -64,6 +64,7 @@ export function UnclassifiedCleanupPanel({
   onCleanup,
   onCleanupReview,
   refreshKey,
+  stopButton,
 }: {
   activeJob: JobInfo | null;
   /** True while any pipeline job (sync, reclassify, cleanup) holds the lock. */
@@ -71,6 +72,8 @@ export function UnclassifiedCleanupPanel({
   onCleanup: () => Promise<void> | void;
   onCleanupReview: (reviewID: number, decision: CleanupReviewDecision) => Promise<void> | void;
   refreshKey: string;
+  /** Danger stop control rendered beside Run cleanup while a cleanup job is active. */
+  stopButton?: React.ReactNode;
 }) {
   const [status, setStatus] = React.useState<CleanupStatus | null>(null);
   const [reviews, setReviews] = React.useState<CleanupReview[]>([]);
@@ -165,6 +168,7 @@ export function UnclassifiedCleanupPanel({
               {activeJob ? "Cleanup running" : starting ? "Starting cleanup…" : "Run cleanup"}
             </span>
           </Button>
+          {stopButton}
           <span className="text-sm text-muted">
             {status ? `${status.unclassified_paper_count.toLocaleString()} unclassified papers` : "Unclassified papers: —"}
           </span>

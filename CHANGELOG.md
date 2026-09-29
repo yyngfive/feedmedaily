@@ -12,6 +12,12 @@ Changes since `0.7.0`:
 
 - Feed sync now retries feeds that failed on transient transport errors (DNS lookup failures such as "no such host", timeouts, dropped connections) in up to two end-of-run passes about 10s and 30s later, so a brief resolver outage no longer drops a journal's papers for the whole day. HTTP status failures, challenge verification, and parse errors keep their existing behavior.
 
+### Changed
+
+- The targeted-sync feed picker lists selected journals as removable chips with a "Clear selection" action, and its search box gained a clear button.
+- The database cleanup Stop button now sits beside Run cleanup instead of below the panel.
+- The reader's journal filter list shows roughly twice as many journals before scrolling.
+
 ## 0.7.0 (2026-09-26)
 
 Changes since `0.6.2`:
