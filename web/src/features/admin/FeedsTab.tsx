@@ -1,11 +1,10 @@
 import {Button} from "@heroui/react";
 import React from "react";
 
-import {emailFeedCatalog} from "../../data/emailFeedCatalog";
 import {feedCatalog} from "../../data/feedCatalog";
 import {CheckboxRow, TextInputField} from "../../shared/components/FormFields";
 import {SelectField} from "../../shared/components/SelectField";
-import type {FeedSubscription, SettingsConfigField, SettingsConfigUpdate} from "../../shared/types";
+import type {FeedSubscription} from "../../shared/types";
 
 function cloneFeeds(feeds: FeedSubscription[]): FeedSubscription[] {
   return feeds.map((feed) => ({...feed}));
@@ -23,13 +22,10 @@ function feedIdentity(feed: FeedSubscription) {
 }
 
 // Feed 设置使用独立草稿，只有保存后才更新阅读工作区的数据。
-export function FeedsTab({feeds, feedsSaving, onSaveFeeds, configFields, configSaving, onSaveConfig}: {
+export function FeedsTab({feeds, feedsSaving, onSaveFeeds}: {
   feeds: FeedSubscription[];
   feedsSaving: boolean;
   onSaveFeeds: (feeds: FeedSubscription[]) => Promise<boolean | void> | boolean | void;
-  configFields: SettingsConfigField[];
-  configSaving: boolean;
-  onSaveConfig: (fields: Record<string, SettingsConfigUpdate>) => Promise<void> | void;
 }) {
   const [draftFeeds, setDraftFeeds] = React.useState<FeedSubscription[]>(() => cloneFeeds(feeds));
   const [editing, setEditing] = React.useState(false);
@@ -39,8 +35,6 @@ export function FeedsTab({feeds, feedsSaving, onSaveFeeds, configFields, configS
   const [catalogPublisher, setCatalogPublisher] = React.useState("All");
   const [catalogQuery, setCatalogQuery] = React.useState("");
   const [selectedCatalogURLs, setSelectedCatalogURLs] = React.useState<string[]>([]);
-  const [selectedEmailSourceIDs, setSelectedEmailSourceIDs] = React.useState<string[]>([]);
-  const [emailFeedURLDraft, setEmailFeedURLDraft] = React.useState("");
 
   React.useEffect(() => {
     if (!editing) setDraftFeeds(cloneFeeds(feeds));
@@ -55,12 +49,6 @@ export function FeedsTab({feeds, feedsSaving, onSaveFeeds, configFields, configS
       (!query || `${item.journal} ${item.publisher} ${item.subjects.join(" ")}`.toLowerCase().includes(query)),
     );
   }, [catalogPublisher, catalogQuery]);
-  const emailConfigKeys = React.useMemo(() => Array.from(new Set(emailFeedCatalog.map((entry) => entry.configKey))), []);
-  const emailConfigFields = React.useMemo(
-    () => emailConfigKeys.map((key) => configFields.find((field) => field.key === key)).filter((field): field is SettingsConfigField => Boolean(field)),
-    [configFields, emailConfigKeys],
-  );
-  const emailFeedConfigured = emailConfigFields.length === emailConfigKeys.length && emailConfigFields.every((field) => field.configured);
 
   const addFeeds = (items: FeedSubscription[]) => {
     setDraftFeeds((current) => {
@@ -70,7 +58,6 @@ export function FeedsTab({feeds, feedsSaving, onSaveFeeds, configFields, configS
     setEditing(true);
     setAdding(false);
     setSelectedCatalogURLs([]);
-    setSelectedEmailSourceIDs([]);
   };
 
   const addCustomFeed = () => {
@@ -87,16 +74,6 @@ export function FeedsTab({feeds, feedsSaving, onSaveFeeds, configFields, configS
     setEditing(false);
     setAdding(false);
     setSelectedCatalogURLs([]);
-    setSelectedEmailSourceIDs([]);
-  };
-
-  const saveEmailFeedURL = async () => {
-    const value = emailFeedURLDraft.trim();
-    if (!value) return;
-    const fields: Record<string, SettingsConfigUpdate> = {};
-    for (const key of emailConfigKeys) fields[key] = {value};
-    await onSaveConfig(fields);
-    setEmailFeedURLDraft("");
   };
 
   const saveFeeds = async () => {
@@ -119,34 +96,9 @@ export function FeedsTab({feeds, feedsSaving, onSaveFeeds, configFields, configS
             <Button isDisabled={!newFeedJournal.trim() || !newFeedURL.trim() || existingIdentities.has(newFeedURL.trim())} size="sm" onPress={addCustomFeed}>Add feed</Button>
           </div>
         </section>
-        <section className="border-b border-(--line) pb-5">
-          <h3 className="text-sm font-semibold text-(--ink)">Email alert feeds</h3>
-          <p className="mt-1 text-sm text-muted">Journal emails aggregated through a private feed. FMD never shows this feed address; it is stored in settings like a password.</p>
-          {!emailFeedConfigured ? (
-            <div className="mt-3 grid gap-3 md:grid-cols-[minmax(240px,1fr)_auto]">
-              <TextInputField hideLabel label="Email feed URL" placeholder="Private Atom/RSS URL of your kill-the-news feed" type="password" value={emailFeedURLDraft} onChange={setEmailFeedURLDraft} />
-              <Button isDisabled={!emailFeedURLDraft.trim() || configSaving} size="sm" onPress={() => void saveEmailFeedURL()}>{configSaving ? "Saving..." : "Save access URL"}</Button>
-            </div>
-          ) : null}
-          <div className="mt-3 divide-y divide-(--line)">
-            {emailFeedCatalog.map((entry) => {
-              const exists = draftFeeds.some((feed) => feed.email_source === entry.id);
-              return (
-                <CheckboxRow key={entry.id} checked={selectedEmailSourceIDs.includes(entry.id)} className="px-2 py-3 text-sm" disabled={!emailFeedConfigured || exists} onChange={() => setSelectedEmailSourceIDs((current) => current.includes(entry.id) ? current.filter((id) => id !== entry.id) : [...current, entry.id])}>
-                  <span className="min-w-0"><span className="flex flex-wrap items-center gap-2"><span className="font-medium text-(--ink)">{entry.journal}</span><span className="text-xs text-muted">{entry.publisher}</span>{exists ? <span className="text-xs text-warning">Added</span> : !emailFeedConfigured ? <span className="text-xs text-warning">Configure access first</span> : null}</span><span className="mt-1 block text-xs text-muted">{entry.description}</span></span>
-                </CheckboxRow>
-              );
-            })}
-          </div>
-          {selectedEmailSourceIDs.length > 0 ? (
-            <div className="mt-3 flex justify-end">
-              <Button size="sm" onPress={() => addFeeds(emailFeedCatalog.filter((entry) => selectedEmailSourceIDs.includes(entry.id)).map((entry) => ({journal: entry.journal, url: "", email_source: entry.id, private: true})))}>Add selected ({selectedEmailSourceIDs.length})</Button>
-            </div>
-          ) : null}
-        </section>
         <section>
           <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
-            <TextInputField hideLabel label="Search feed catalog" placeholder="Search journal, publisher, or subject" value={catalogQuery} onChange={setCatalogQuery} />
+            <TextInputField clearable hideLabel label="Search feed catalog" placeholder="Search journal, publisher, or subject" value={catalogQuery} onChange={setCatalogQuery} />
             <SelectField hideLabel label="Publisher" options={catalogPublishers.map((publisher) => ({label: publisher, value: publisher}))} value={catalogPublisher} onChange={setCatalogPublisher} />
           </div>
           <div className="mt-3 max-h-[54vh] divide-y divide-(--line) overflow-y-auto border-y border-(--line)">

@@ -19,8 +19,6 @@ import {classifierModelsDraftHasRequiredKeys, classifierModelsUpdateFromDraft, c
 const aiAdvancedKeys = [
   "SCIRSS_CLASSIFIER_BATCH_SIZE",
   "SCIRSS_CLASSIFIER_THINKING",
-  "SCIRSS_PROFILE_BASE_URL",
-  "SCIRSS_PROFILE_MODEL",
   "SCIRSS_PROFILE_THINKING",
 ];
 
@@ -495,6 +493,10 @@ export function Onboarding({
   React.useEffect(() => {
     setAdvancedValues(createInitialFieldValues(configFields));
   }, [configFields]);
+
+  React.useEffect(() => {
+    setClassifierDraft(createClassifierModelsDraft(classifierModels));
+  }, [classifierModels]);
 
   React.useEffect(() => {
     setProfileModelsDraft(createProfileModelsDraft(profileModels));
