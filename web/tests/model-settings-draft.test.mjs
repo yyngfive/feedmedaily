@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import React from "react";
+import {renderToStaticMarkup} from "react-dom/server";
 import {createServer} from "vite";
 
 const server = await createServer({server: {middlewareMode: true}, appType: "custom"});
-const {createClassifierModelsDraft, classifierModelsUpdateFromDraft, createProfileModelsDraft, enabledClassifierModelIdsAfterKeyChange} = await server.ssrLoadModule("/src/features/admin/ModelSettingsEditor.tsx");
+const {ModelSettingsEditor, createClassifierModelsDraft, classifierModelsUpdateFromDraft, createProfileModelsDraft, enabledClassifierModelIdsAfterKeyChange} = await server.ssrLoadModule("/src/features/admin/ModelSettingsEditor.tsx");
 await server.close();
 
 test("a saved provider key does not re-enable a disabled classifier model", () => {
@@ -56,7 +58,7 @@ test("editing another provider key preserves saved classifier selection", () => 
     ["deepseek-flash"]);
 });
 
-test("a saved profile default remains selected while its provider key is missing", () => {
+test("profile draft uses an available model when the saved default has no key", () => {
   const profileModels = {
     default_model_id: "deepseek-v4-pro",
     models: [
@@ -64,5 +66,24 @@ test("a saved profile default remains selected while its provider key is missing
       {id: "deepseek-v4-pro", configured: false},
     ],
   };
-  assert.equal(createProfileModelsDraft(profileModels).defaultModelId, "deepseek-v4-pro");
+  assert.equal(createProfileModelsDraft(profileModels).defaultModelId, "deepseek-flash");
+  assert.equal(createProfileModelsDraft({
+    ...profileModels,
+    models: profileModels.models.map((model) => ({...model, configured: false})),
+  }).defaultModelId, "deepseek-v4-pro");
+});
+
+test("profile selector warns when no provider key is available", () => {
+  const profileModels = {
+    default_model_id: "deepseek-v4-pro",
+    models: [{id: "deepseek-v4-pro", provider: "deepseek", label: "DeepSeek V4 Pro", configured: false}],
+  };
+  const html = renderToStaticMarkup(React.createElement(ModelSettingsEditor, {
+    classifierDraft: {enabledModelIds: [], defaultModelId: "", credentials: {}, reuseDeepSeekKeyForProfile: false},
+    jobs: [], models: {models: [], enabled_model_ids: [], default_model_id: ""},
+    onClassifierChange: () => {}, onProfileChange: () => {}, onTest: async () => ({}),
+    profileDraft: createProfileModelsDraft(profileModels), profileModels,
+  }));
+  assert.match(html, /Add a provider API key to choose a default profile model\./);
+  assert.match(html, /id="profile-default-model"[^>]*disabled=""/);
 });

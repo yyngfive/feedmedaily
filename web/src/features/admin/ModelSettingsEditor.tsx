@@ -43,10 +43,12 @@ export function enabledClassifierModelIdsAfterKeyChange(
 }
 
 export function createProfileModelsDraft(response: ProfileModelsResponse): ProfileModelsDraft {
+  const configured = response.models.filter((model) => model.configured).map((model) => model.id);
+  const savedDefault = response.models.some((model) => model.id === response.default_model_id)
+    ? response.default_model_id
+    : "";
   return {
-    defaultModelId: response.models.some((model) => model.id === response.default_model_id)
-      ? response.default_model_id
-      : "",
+    defaultModelId: configured.includes(savedDefault) ? savedDefault : configured[0] ?? savedDefault,
   };
 }
 
@@ -122,7 +124,7 @@ export function ModelSettingsEditor({
   const enabledSet = new Set(classifierDraft.enabledModelIds);
   const selectedModels = models.models.filter((model) => enabledSet.has(model.id));
   const configuredProfileIDs = new Set(profileModels.models.filter((model) => model.configured).map((model) => model.id));
-  const profileOptions = profileModels.models.filter((model) => configuredProfileIDs.has(model.id) || enabledSet.has(model.id) || model.id === profileDraft.defaultModelId);
+  const profileOptions = profileModels.models.filter((model) => configuredProfileIDs.has(model.id) || enabledSet.has(model.id));
   const providerGroups = Array.from(models.models.reduce((groups, model) => {
     const group = groups.get(model.provider) ?? [];
     group.push(model);
@@ -151,7 +153,7 @@ export function ModelSettingsEditor({
     onClassifierChange({...classifierDraft, credentials, enabledModelIds, defaultModelId});
 
     const nextProfileOptions = profileModels.models.filter((model) =>
-      model.configured || enabledModelIds.includes(model.id) || model.id === profileDraft.defaultModelId,
+      model.configured || enabledModelIds.includes(model.id),
     );
     const profileDefaultModelId = nextProfileOptions.some((model) => model.id === profileDraft.defaultModelId)
       ? profileDraft.defaultModelId
@@ -198,6 +200,7 @@ export function ModelSettingsEditor({
             : profileOptions[0]?.id ?? ""}
           onChange={(defaultModelId) => onProfileChange({...profileDraft, defaultModelId})}
         />
+        {profileOptions.length === 0 ? <p className="text-sm text-danger">Add a provider API key to choose a default profile model.</p> : null}
       </div>
 
       <section>
