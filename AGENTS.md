@@ -83,6 +83,10 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 - Follow the established release-draft format: `# FeedMeDaily vX.Y.Z`, `## 更新`, and, when a current issue is confirmed, `## 已知问题`. Write short Chinese bullets for user-visible changes since the previous release; combine related changes, avoid implementation details and prices, and do not carry forward issues fixed in this version.
 - Treat `CHANGELOG.md` as the detailed canonical source and remove a temporary release draft after publishing that release.
 
+## Release Process
+
+- For every formal release, follow `docs/release-process.zh-CN.md` in order and append its release record. A release is complete only after the public GitHub assets, DNS TXT record, and client update check all match the new version.
+
 ## Current Architecture
 
 - Classification is profile-driven. The active rules live in `data/classification_profile.json`, which is user-local and Git-ignored.

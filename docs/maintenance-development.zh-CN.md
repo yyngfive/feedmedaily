@@ -226,22 +226,7 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 
 ### 改打包或发布
 
-按以下顺序发布；**DNS 更新和解析验证完成后，发布才算结束**：
-
-1. 确认 `web/package.json` 的版本、`CHANGELOG.md` 的本版内容，以及 `tools/build_release.ps1`、`installer/feedmedaily.iss` 和品牌资产。需要更新期刊目录时，先运行 `tools/update_feed_catalog.ps1`，将结果与本版代码一起提交。
-2. 运行 `corepack pnpm --dir web test`、`corepack pnpm --dir web build` 和 `go test ./cmd/... ./internal/...`；检查工作树与变更，提交并推送发布代码，创建并推送 `vX.Y.Z` tag。
-3. 从该 tag 构建：`./tools/build_release.ps1 -SkipFeedCatalogUpdate`。核对安装包版本、`dist/update.json` 的版本及下载地址，并记录安装包和 manifest 的 SHA256。构建若提示跳过 Inno Setup，须先补齐安装包。
-4. 用 `docs/release-notes-vX.Y.Z.md` 的短中文要点创建并发布 GitHub Release，上传 `FeedMeDaily-vX.Y.Z.exe` 和 `dist/update.json`。确认 Release 不是 draft、不是 prerelease，两项资产均存在且校验值与本地一致；旧版客户端仍依赖该 `update.json`。
-5. **Release 可访问后**，运行 `./tools/update_release_dns.ps1 -Version X.Y.Z -DryRun` 核对目标，再运行 `./tools/update_release_dns.ps1 -Version X.Y.Z`。脚本使用本机环境变量或 `.env` 中的阿里云凭据；不要记录或提交凭据。
-6. 查询权威 DNS `dns31.hichina.com`、`dns32.hichina.com` 和公共解析器，确认 `feedmedaily-update.stassenger.top` 的 TXT 为 `version=X.Y.Z;url=<本版 Release 地址>`，TTL 为 600 秒。再请求运行中客户端的 `GET /api/app/update?force=1`，确认 `latest_version` 与本版一致。缓存解析器可能需要等待原记录的 600 秒 TTL；在解析与 API 结果一致前不要宣告发布完成。
-7. 发布完成后删除临时 release draft，在 `CHANGELOG.md` 开始下一版 unreleased section；提交并推送清理结果。
-
-#### 0.7.1 发布补记（2026-09-29）
-
-- `v0.7.1` 的 GitHub Release 已发布，安装包和 `update.json` 均已上传；安装包 SHA256 为 `70aa590612f66c5af5bd79fc7948ca674a8ecca18eb4f5ced6b3161927c29d8f`，manifest SHA256 为 `d86ec8321ee6cd9a93022ef99ee47a057ad7725e3a125888987a293fa6e8354a`。
-- 发布后遗漏了 DNS 步骤，查询时 TXT 仍为 `0.7.0`。当日 22:46（北京时间）补运行 `./tools/update_release_dns.ps1 -Version 0.7.1`，更新记录 ID `2094020894707601408`。
-- 两台权威 DNS、Google DNS 和阿里公共 DNS 均返回 `version=0.7.1;url=https://github.com/yyngfive/feedmedaily/releases/tag/v0.7.1`，TTL 为 600 秒。
-- 本机运行中的 `GET /api/app/update?force=1` 返回 `current_version=0.7.1`、`latest_version=0.7.1`、`status=up_to_date`。
+正式发布统一执行 [固定发布流程](release-process.zh-CN.md)，包括发布前验证、从 tag 打包、GitHub Release、DNS 切换、客户端检查及发布记录；0.7.1 的补记也在该文档中。
 
 ## 7. 排障手册
 
