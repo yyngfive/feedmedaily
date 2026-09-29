@@ -91,7 +91,7 @@ export function FiltersSidebar({
               All
             </Button>
           </div>
-          <div className="max-h-44 space-y-1 overflow-auto rounded-md border border-(--line) bg-(--paper) p-2">
+          <div className="max-h-80 space-y-1 overflow-auto rounded-md border border-(--line) bg-(--paper) p-2">
             {journalOptions.length === 0 ? (
               <p className="px-1 py-2 text-sm text-muted">No journals yet.</p>
             ) : (

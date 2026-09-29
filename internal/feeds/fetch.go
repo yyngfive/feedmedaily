@@ -360,6 +360,7 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 		FeedURLs:             make([]string, 0, len(subscriptions)),
 		VerificationRequests: []VerificationRequest{},
 	}
+	var transientFailures []transientFetchFailure
 	for index := 0; index < len(subscriptions); index++ {
 		if err := ctx.Err(); err != nil {
 			return FetchResult{}, err
@@ -401,6 +402,10 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 				})
 				continue
 			}
+			if isTransientFetchError(err) {
+				transientFailures = append(transientFailures, transientFetchFailure{subscription: subscription, err: err})
+				continue
+			}
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", safeFeedURL(subscription.URL), strings.ReplaceAll(err.Error(), subscription.URL, safeFeedURL(subscription.URL))))
 			continue
 		}
@@ -409,6 +414,13 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 	}
 	if err := ctx.Err(); err != nil {
 		return FetchResult{}, err
+	}
+	transientFailures = retryTransientFetchFailures(ctx, transientFailures, opts, &result, totalFeeds)
+	if err := ctx.Err(); err != nil {
+		return FetchResult{}, err
+	}
+	for _, failure := range transientFailures {
+		result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", failure.subscription.URL, failure.err))
 	}
 	if opts.MaxPapers > 0 && len(result.Papers) > opts.MaxPapers {
 		_, _ = logging.WriteDefault(logging.Event{
@@ -438,6 +450,73 @@ func appendResultFeedURLs(existing []string, subscriptions []Subscription) []str
 		existing = append(existing, subscription.URL)
 	}
 	return existing
+}
+
+type transientFetchFailure struct {
+	subscription Subscription
+	err          error
+}
+
+// retryTransientFetchFailures re-fetches feeds that failed on transient
+// transport errors after short waits, so a brief DNS or connectivity outage
+// during the first pass does not drop those journals for the whole day.
+// Failures that survive every pass are returned for final error reporting.
+func retryTransientFetchFailures(ctx context.Context, failures []transientFetchFailure, opts FetchOptions, result *FetchResult, totalFeeds int) []transientFetchFailure {
+	for passIndex, delay := range fetchRetryPassDelays {
+		if len(failures) == 0 {
+			break
+		}
+		if opts.Progress != nil {
+			opts.Progress(totalFeeds, totalFeeds, "")
+		}
+		_, _ = logging.WriteDefault(logging.Event{
+			Level:     "info",
+			Component: "feeds",
+			Action:    "fetch_retry_pass_scheduled",
+			Message:   fmt.Sprintf("Retrying %d failed feed(s) in %s (pass %d/%d)", len(failures), delay, passIndex+1, len(fetchRetryPassDelays)),
+		})
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return failures
+		case <-timer.C:
+		}
+		still := make([]transientFetchFailure, 0, len(failures))
+		for index, failure := range failures {
+			if err := ctx.Err(); err != nil {
+				still = append(still, failures[index:]...)
+				break
+			}
+			if opts.Progress != nil {
+				opts.Progress(totalFeeds, totalFeeds, retryFetchProgressLabel(failure.subscription))
+			}
+			fetched, err := fetchFeed(failure.subscription.URL, opts)
+			if err == nil {
+				rememberFeedBody(failure.subscription.URL, opts.BodyCache, fetched.Body)
+				result.Papers = append(result.Papers, fetched.Papers...)
+				continue
+			}
+			var verificationErr *FeedVerificationRequiredError
+			if errors.As(err, &verificationErr) {
+				result.VerificationRequests = append(result.VerificationRequests, VerificationRequest{
+					URL:     failure.subscription.URL,
+					Target:  verificationErr.Target,
+					Reason:  verificationErr.Reason,
+					Journal: failure.subscription.Journal,
+				})
+				continue
+			}
+			failure.err = err
+			still = append(still, failure)
+		}
+		failures = still
+	}
+	return failures
+}
+
+func retryFetchProgressLabel(subscription Subscription) string {
+	return fetchProgressLabel(subscription.Journal, subscription.URL) + " (retry)"
 }
 
 func hostVerificationRequests(subscriptions []Subscription, start int, verificationErr *FeedVerificationRequiredError, opts FetchOptions) ([]VerificationRequest, int) {
