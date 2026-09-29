@@ -1,6 +1,6 @@
 {
-  "source": "https://raw.githubusercontent.com/yyngfive/sci-rss-list/main/data/feeds.json",
-  "source_revision": "",
+  "source": "https://raw.githubusercontent.com/yyngfive/sci-rss-list/5f71345cc27e433babcf465fdd329cb386c50009/data/feeds.json",
+  "source_revision": "5f71345cc27e433babcf465fdd329cb386c50009",
   "source_sha256": "8e4e86564135661c43136e2a59035a5725c653d787beb79e0f3f9bd737172b60",
   "feeds": [
     {
