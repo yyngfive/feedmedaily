@@ -84,6 +84,29 @@ func TestClassifierModelsStructuredSourceConfigKeepsDisabledKeys(t *testing.T) {
 	}
 }
 
+func TestClassifierModelsProviderKeyEnablesBothDeepSeekModels(t *testing.T) {
+	root := t.TempDir()
+	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")
+	key := "deepseek-test-key"
+	_, err := UpdateLocalSettingsWithClassifierModels(root, nil, ClassifierModelsUpdate{
+		EnabledModelIDs: []string{ClassifierModelDeepSeekFlash, ProfileModelDeepSeekV4Pro},
+		DefaultModelID:  ClassifierModelDeepSeekFlash,
+		Credentials: map[string]SettingsConfigFieldUpdate{
+			ClassifierModelDeepSeekFlash: {Value: &key},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.ClassifierModels.Models[ProfileModelDeepSeekV4Pro].APIKey != key {
+		t.Fatal("provider key must configure both DeepSeek models")
+	}
+}
+
 func TestClassifierModelsResolveQwenAndMiMoEnvironmentKeys(t *testing.T) {
 	root := t.TempDir()
 	writeConfigTestFile(t, filepath.Join(root, "go.mod"), "module example.com/test\n\ngo 1.25.0\n")

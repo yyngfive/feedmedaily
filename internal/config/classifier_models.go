@@ -632,7 +632,20 @@ func classifierCredentialKey(modelID string) (string, bool) {
 
 func classifierCredentialValue(current Settings, modelID string, updates map[string]SettingsConfigFieldUpdate) string {
 	resolved := current.ClassifierModels.Models[modelID]
-	if update, ok := updates[modelID]; ok {
+	update, ok := updates[modelID]
+	if !ok {
+		key, _ := classifierCredentialKey(modelID)
+		for _, spec := range classifierModelCatalog {
+			candidateKey, _ := classifierCredentialKey(spec.ID)
+			if candidateKey == key {
+				update, ok = updates[spec.ID]
+				if ok {
+					break
+				}
+			}
+		}
+	}
+	if ok {
 		if update.Value != nil && strings.TrimSpace(*update.Value) != "" {
 			return strings.TrimSpace(*update.Value)
 		}
