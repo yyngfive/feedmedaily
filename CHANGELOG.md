@@ -8,6 +8,10 @@ The latest released version is `0.7.0`. The next planned release is `0.7.1`, so 
 
 Changes since `0.7.0`:
 
+### Fixed
+
+- Feed sync now retries feeds that failed on transient transport errors (DNS lookup failures such as "no such host", timeouts, dropped connections) in up to two end-of-run passes about 10s and 30s later, so a brief resolver outage no longer drops a journal's papers for the whole day. HTTP status failures, challenge verification, and parse errors keep their existing behavior.
+
 ## 0.7.0 (2026-09-26)
 
 Changes since `0.6.2`:

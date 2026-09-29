@@ -26,7 +26,7 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 ## Production Flow
 
 1. Feed subscriptions are stored in `data/rss_feeds.json`.
-2. `feedmedailyd` fetches feed content through a layered Go pipeline: HTTP client, generic RSS/Atom/RDF parser, and publisher-specific extractors.
+2. `feedmedailyd` fetches feed content through a layered Go pipeline: HTTP client, generic RSS/Atom/RDF parser, and publisher-specific extractors. After the first pass, feeds that failed on transient transport errors (DNS lookup failures, timeouts, dropped connections) are re-fetched in up to two end-of-run retry passes about 10s and 30s later, so a brief resolver outage no longer drops those journals for the day; HTTP status failures, challenge verification, and parse errors are not retried.
 3. Papers are deduplicated and upserted into `data/literature.sqlite`.
 4. Metadata enrichment runs only when core fields such as DOI, authors, journal, or usable abstract content are missing. Externally resolved records are validated against both the paper title and the publication date, and a DOI whose record fails either check is dropped so linking falls back to the publisher URL; the title comparison ignores whitespace so RSS subscript rendering (`CO 2` against `CO2`) is not read as a mismatch, and a dropped DOI whose publisher-URL key is already held by a duplicate row is reported as a job warning instead of failing the whole batch. Enrichment writes back under the row's stored `paper_key` so a newly found DOI never splits a paper into duplicate rows.
 5. The classifier evaluates papers against the active `data/classification_profile.json`.

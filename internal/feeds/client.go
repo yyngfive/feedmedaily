@@ -1,7 +1,10 @@
 package feeds
 
 import (
+	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	neturl "net/url"
 	"regexp"
@@ -10,8 +13,9 @@ import (
 )
 
 var (
-	fetchHTTPClient       = &http.Client{Timeout: 30 * time.Second}
-	fetchRetryBackoffs    = []time.Duration{200 * time.Millisecond, 600 * time.Millisecond}
+	fetchHTTPClient      = &http.Client{Timeout: 30 * time.Second}
+	fetchRetryBackoffs   = []time.Duration{200 * time.Millisecond, 600 * time.Millisecond}
+	fetchRetryPassDelays = []time.Duration{10 * time.Second, 30 * time.Second}
 	feedXMLPrefixRE       = regexp.MustCompile(`(?is)^\s*(?:<\?xml\b[^>]*>\s*)?<(?:rss|rdf:RDF|feed)\b`)
 	feedHTMLPrefixRE      = regexp.MustCompile(`(?is)^\s*(?:<!doctype\s+html\b\s*>)?\s*<html\b`)
 	feedChallengeMarkerRE = regexp.MustCompile(`(?is)(just a moment|enable javascript and cookies|attention required|__cf_chl_|cf-browser-verification|challenge-platform)`)
@@ -39,6 +43,19 @@ func requestReferer(target *neturl.URL) string {
 
 func isRetryableFeedStatus(statusCode int) bool {
 	return statusCode == http.StatusForbidden || statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError
+}
+
+// isTransientFetchError reports whether a feed fetch failed for a reason a
+// short wait can plausibly fix: DNS lookup failures, timeouts, and dropped
+// connections all surface through net.Error. HTTP status failures and parse
+// errors are deliberately excluded so verification and format problems stay
+// deterministic instead of stalling the run.
+func isTransientFetchError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 func looksLikeChallengeResponse(body []byte) bool {
