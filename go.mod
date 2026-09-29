@@ -4,7 +4,8 @@ go 1.25.0
 
 require (
 	github.com/wailsapp/go-webview2 v1.0.22
-	golang.org/x/sys v0.42.0
+	golang.org/x/net v0.58.0
+	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.50.1
 )
 

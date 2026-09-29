@@ -16,6 +16,11 @@ function draftID() {
     : `${Date.now()}-${Math.random()}`;
 }
 
+// 私有邮件源以稳定标识参与去重与定向同步，真实 URL 不进前端。
+function feedIdentity(feed: FeedSubscription) {
+  return feed.email_source ? `email:${feed.email_source}` : feed.url.trim();
+}
+
 // Feed 设置使用独立草稿，只有保存后才更新阅读工作区的数据。
 export function FeedsTab({feeds, feedsSaving, onSaveFeeds}: {
   feeds: FeedSubscription[];
@@ -36,7 +41,7 @@ export function FeedsTab({feeds, feedsSaving, onSaveFeeds}: {
   }, [editing, feeds]);
 
   const catalogPublishers = React.useMemo(() => ["All", ...Array.from(new Set(feedCatalog.map((item) => item.publisher))).sort()], []);
-  const existingFeedURLs = React.useMemo(() => new Set(draftFeeds.map((feed) => feed.url.trim()).filter(Boolean)), [draftFeeds]);
+  const existingIdentities = React.useMemo(() => new Set(draftFeeds.map((feed) => feedIdentity(feed)).filter(Boolean)), [draftFeeds]);
   const catalogMatches = React.useMemo(() => {
     const query = catalogQuery.trim().toLowerCase();
     return feedCatalog.filter((item) =>
@@ -47,8 +52,8 @@ export function FeedsTab({feeds, feedsSaving, onSaveFeeds}: {
 
   const addFeeds = (items: FeedSubscription[]) => {
     setDraftFeeds((current) => {
-      const urls = new Set(current.map((item) => item.url.trim()).filter(Boolean));
-      return [...current, ...items.filter((item) => item.url.trim() && !urls.has(item.url.trim())).map((item) => ({...item, client_id: item.client_id ?? draftID()}))];
+      const identities = new Set(current.map((item) => feedIdentity(item)).filter(Boolean));
+      return [...current, ...items.filter((item) => feedIdentity(item) && !identities.has(feedIdentity(item))).map((item) => ({...item, client_id: item.client_id ?? draftID()}))];
     });
     setEditing(true);
     setAdding(false);
@@ -58,7 +63,7 @@ export function FeedsTab({feeds, feedsSaving, onSaveFeeds}: {
   const addCustomFeed = () => {
     const journal = newFeedJournal.trim();
     const url = newFeedURL.trim();
-    if (!journal || !url || existingFeedURLs.has(url)) return;
+    if (!journal || !url || existingIdentities.has(url)) return;
     addFeeds([{journal, url}]);
     setNewFeedJournal("");
     setNewFeedURL("");
@@ -88,17 +93,17 @@ export function FeedsTab({feeds, feedsSaving, onSaveFeeds}: {
           <div className="mt-3 grid gap-3 md:grid-cols-[minmax(160px,0.7fr)_minmax(240px,1fr)_auto]">
             <TextInputField hideLabel label="Journal name" placeholder="Journal name" value={newFeedJournal} onChange={setNewFeedJournal} />
             <TextInputField hideLabel label="RSS URL" placeholder="https://example.com/feed.xml" type="url" value={newFeedURL} onChange={setNewFeedURL} />
-            <Button isDisabled={!newFeedJournal.trim() || !newFeedURL.trim() || existingFeedURLs.has(newFeedURL.trim())} size="sm" onPress={addCustomFeed}>Add feed</Button>
+            <Button isDisabled={!newFeedJournal.trim() || !newFeedURL.trim() || existingIdentities.has(newFeedURL.trim())} size="sm" onPress={addCustomFeed}>Add feed</Button>
           </div>
         </section>
         <section>
           <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
-            <TextInputField hideLabel label="Search feed catalog" placeholder="Search journal, publisher, or subject" value={catalogQuery} onChange={setCatalogQuery} />
+            <TextInputField clearable hideLabel label="Search feed catalog" placeholder="Search journal, publisher, or subject" value={catalogQuery} onChange={setCatalogQuery} />
             <SelectField hideLabel label="Publisher" options={catalogPublishers.map((publisher) => ({label: publisher, value: publisher}))} value={catalogPublisher} onChange={setCatalogPublisher} />
           </div>
           <div className="mt-3 max-h-[54vh] divide-y divide-(--line) overflow-y-auto border-y border-(--line)">
             {catalogMatches.length === 0 ? <p className="py-4 text-sm text-muted">No catalog matches.</p> : catalogMatches.map((item) => {
-              const exists = existingFeedURLs.has(item.url.trim());
+              const exists = existingIdentities.has(item.url.trim());
               return (
                 <CheckboxRow key={item.url} checked={selectedCatalogURLs.includes(item.url)} className="px-2 py-3 text-sm" disabled={exists} onChange={() => setSelectedCatalogURLs((current) => current.includes(item.url) ? current.filter((url) => url !== item.url) : [...current, item.url])}>
                   <span className="min-w-0"><span className="flex flex-wrap items-center gap-2"><span className="font-medium text-(--ink)">{item.journal}</span><span className="text-xs text-muted">{item.publisher}</span>{exists ? <span className="text-xs text-warning">Added</span> : null}</span><span className="mt-1 block truncate text-xs text-muted">{item.url}</span></span>
@@ -130,14 +135,14 @@ export function FeedsTab({feeds, feedsSaving, onSaveFeeds}: {
         <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-(--ink)">Subscriptions</h3><span className="text-sm text-muted">{draftFeeds.length}</span></div>
         {draftFeeds.length === 0 ? <p className="mt-3 border-y border-(--line) py-5 text-sm text-muted">No RSS feeds configured yet.</p> : !editing ? (
           <div className="mt-3 max-h-[68vh] divide-y divide-(--line) overflow-y-auto border-y border-(--line)">
-            {draftFeeds.map((item, index) => <div key={item.client_id ?? String(index)} className="grid gap-1 py-3 md:grid-cols-[minmax(160px,0.65fr)_minmax(0,1fr)] md:gap-4"><p className="font-medium text-(--ink)">{item.journal || "Untitled feed"}</p><p className="truncate text-sm text-muted" title={item.url}>{item.url}</p></div>)}
+            {draftFeeds.map((item, index) => <div key={item.client_id ?? String(index)} className="grid gap-1 py-3 md:grid-cols-[minmax(160px,0.65fr)_minmax(0,1fr)] md:gap-4"><p className="font-medium text-(--ink)">{item.journal || "Untitled feed"}</p>{item.email_source ? <p className="text-sm text-muted">Email feed · URL stored in settings</p> : <p className="truncate text-sm text-muted" title={item.url}>{item.url}</p>}</div>)}
           </div>
         ) : (
           <div className="mt-3 max-h-[68vh] divide-y divide-(--line) overflow-y-auto border-y border-(--line)">
             {draftFeeds.map((item, index) => (
               <div key={item.client_id ?? String(index)} className="grid gap-3 py-3 md:grid-cols-[minmax(160px,0.65fr)_minmax(240px,1fr)_auto]">
                 <TextInputField hideLabel label={`Feed name ${index + 1}`} value={item.journal} onChange={(journal) => setDraftFeeds((current) => current.map((feed, feedIndex) => feedIndex === index ? {...feed, journal} : feed))} />
-                <TextInputField hideLabel label={`Feed URL ${index + 1}`} type="url" value={item.url} onChange={(url) => setDraftFeeds((current) => current.map((feed, feedIndex) => feedIndex === index ? {...feed, url} : feed))} />
+                {item.email_source ? <p className="self-center text-sm text-muted">Private email feed · the URL is managed in settings and never shown.</p> : <TextInputField hideLabel label={`Feed URL ${index + 1}`} type="url" value={item.url} onChange={(url) => setDraftFeeds((current) => current.map((feed, feedIndex) => feedIndex === index ? {...feed, url} : feed))} />}
                 <Button size="sm" variant="danger" onPress={() => setDraftFeeds((current) => current.filter((_feed, feedIndex) => feedIndex !== index))}>Remove</Button>
               </div>
             ))}

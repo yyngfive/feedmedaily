@@ -203,6 +203,34 @@ func TestNotifySettingsChangedPostsReloadMessageToTrayWindow(t *testing.T) {
 	}
 }
 
+func TestOpenRunningAppReusesTrayWindow(t *testing.T) {
+	configDir := t.TempDir()
+	hwnd := uintptr(0)
+	restoreFind := replaceFindTrayWindowCall(func(foundConfigDir string) uintptr {
+		if foundConfigDir != configDir {
+			t.Fatalf("find configDir = %q, want %q", foundConfigDir, configDir)
+		}
+		return hwnd
+	})
+	defer restoreFind()
+	var posted []postedTrayMessage
+	restorePost := replacePostMessageCall(func(window uintptr, message uint32, wParam uintptr, lParam uintptr) bool {
+		posted = append(posted, postedTrayMessage{window, message, wParam, lParam})
+		return true
+	})
+	defer restorePost()
+
+	opened, err := OpenRunningApp(configDir)
+	if err != nil || opened || len(posted) != 0 {
+		t.Fatalf("no tray: opened=%t err=%v posted=%#v", opened, err, posted)
+	}
+	hwnd = 606
+	opened, err = OpenRunningApp(configDir)
+	if err != nil || !opened || !reflect.DeepEqual(posted, []postedTrayMessage{{606, trayMsgOpenApp, 0, 0}}) {
+		t.Fatalf("existing tray: opened=%t err=%v posted=%#v", opened, err, posted)
+	}
+}
+
 func TestShutdownRunningAppStopsServiceBeforeClosingTray(t *testing.T) {
 	root := t.TempDir()
 	layout := testLayout(root, runtimeModeRelease)

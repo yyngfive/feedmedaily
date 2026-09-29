@@ -2,6 +2,10 @@
 
 > 状态：方案草稿
 >
+> 2026-09-28 实施进展：RSC 期刊目录邮件已通过 kill-the-news RSS 接入现有论文解析入口；下文 IMAP 方案保留为早期备选方案，不代表当前实现。KTN 的私有 RSS 地址由用户本地订阅配置保存，不纳入公开的 sci-rss-list 目录。
+>
+> 2026-09-29 新增：第 13 节给出"内置邮件订阅源"的 UI 与后端接入设计——FMD 内置可选的邮件聚合源，但不在界面与接口中暴露私有 RSS 地址。
+>
 > 更新时间：2026-09-11
 >
 > 目标期刊：Chemical Science、ChemComm
@@ -568,3 +572,63 @@ RSC → inbox.example.com → Forward Email → Worker /api/inbound
 ```
 
 它保留 AliDNS、不需要 ECS，也避免多个 FMD 用户共享邮箱密码。代价是需要手工维护一个 `workers.dev` Worker 和一组阿里云 MX/TXT 记录，而且这条 `workers.dev` 生产组合没有被 `kill-the-news` 官方安装文档明确保证，必须先做端到端测试；如果以后需要 `feed.example.com` 这样的自定义 feed 域名，再单独评估把该子域名接入 Cloudflare，而不是迁移整个主域名。
+
+## 13. 内置邮件源接入设计（2026-09-29）
+
+### 13.1 目标与产品形态
+
+把邮件聚合源做成 FMD 的**内置可选订阅源**：Add feeds 页面列出可用的邮件源（当前只有 RSC 一个），用户勾选订阅；私有 RSS 地址（KTN 的 opaque Atom URL，本质是 bearer token）不出现在界面、API 响应、日志或备份 ZIP 中。
+
+核心事实：**一个 KTN feed 覆盖多个期刊**（每封 RSC 目录邮件对应一个期刊，解析器已按邮件主题拆分期刊）。因此内置选项以"聚合源"为粒度注册一条订阅，论文级期刊名由现有解析与报告逻辑处理，不能按期刊拆成多条订阅（订阅文件按 URL 去重，同一私有 URL 只能有一条订阅）。
+
+### 13.2 数据模型
+
+订阅行增加两个字段（`internal/feeds/subscriptions.go`，**已实现**）：
+
+```json
+{"journal": "RSC journals (email alerts)", "url": "", "private": true, "email_source": "rsc-email-alerts"}
+```
+
+- 私有 URL **不落盘到 `rss_feeds.json`**，只存于配置层（见 13.3），订阅文件里只保留来源引用。这样备份 ZIP（含订阅文件）天然不含密钥，符合第 7 节"凭据与备份分开保护"。
+- `NormalizeSubscription` 放行"URL 为空但 `email_source` 非空"的行（且强制清空 URL、派生 `private`）；`WriteSubscriptions` 去重键改为：普通行用 URL，私有行用 `email:<email_source>`。
+- 实现说明：设计原为 `FetchOptions.EmailFeedURLs map[string]string`，实现时简化为单个 `FetchOptions.EmailFeedURL`——当前只有一个私有 KTN feed，任何 `email_source` 行都解析到它，避免在 Go 里硬编码前端目录的来源 id；将来出现第二个平台时再升级为按 source 的映射与独立配置键。
+- `FetchAll` 在抓取时解析真实地址；未配置时产生 `email:<source>: the email feed URL is not configured yet` 的警告条目，不中断整轮同步。解析在 jobs 层完成（`RunSync` 直接读取 `settings.EmailFeedURL`），`FetchAll` 保持纯函数。私有邮件源不进入交互式 Cloudflare 验证流程（workers.dev 无质询场景），若真遇到会给出明确报错。
+
+### 13.3 私有地址的存储与配置
+
+新增配置项 `SCIRSS_EMAIL_FEED_URL`（`internal/config/config.go` 的 `Options`，`Section: "Email feeds"`、`InputType: "password"`、`Secret: true`）：
+
+- 自动继承现有"环境变量 > dotenv/settings.json > Windows secret store"三级解析与掩码 UI，与 `SCIRSS_ZOTERO_API_KEY` 同等待遇。
+- 配置入口放在 Feeds → Add feeds 的邮件源区块内（内联一个掩码输入框，走既有 settings-config 保存 API），未配置时区块内的源置灰并引导配置。
+- 后续每新增一个邮件平台（如 NAR）追加独立 key（`SCIRSS_EMAIL_FEED_URL_NAR`）与独立目录条目。
+
+### 13.4 后端改动清单
+
+1. `internal/feeds/subscriptions.go`：`Subscription` 增加 `Private`、`EmailSource`；normalize/dedup 规则如 13.2。
+2. `internal/feeds/fetch.go`：`FetchOptions` 增加 `EmailFeedURLs`；`filterSubscriptionsByURLs` 与跳过/警告路径同时匹配 `url` 与 `email:<source>` 两种标识。
+3. `internal/jobs/run_once.go`：构造 `FetchOptions` 前用 config 解析 `SCIRSS_EMAIL_FEED_URL` 注入映射。
+4. `internal/api/admin_handlers.go`：定向同步 `feed_urls` 校验接受 `email:<source>` 标识。
+5. `internal/api/sync_runner.go`：`verification_feed_url`（会回显到验证面板 UI）对私有 feed 改用 `feeds.SafeFeedURL` 脱敏——这是目前唯一还会把完整私有地址送往前端的地方。
+6. 日志与诊断：分支已有的 `SafeFeedURL` 脱敏继续覆盖；私有 feed 的 GET/PUT `settings/feeds` 响应中 `url` 本就为空，无额外脱敏面。
+
+### 13.5 前端改动清单
+
+1. 新增 `web/src/data/emailFeedCatalog.ts`（**手写静态文件**，不要并进会随 sci-rss-list 目录刷新被覆盖的 `feedCatalog.ts`）：条目含 `id`、显示名、publisher、说明文案、依赖的配置 key，不含任何 URL 字段。
+2. `FeedsTab` Add feeds 页新增"Email alert feeds"区块：复用目录选择器的勾选 + Add selected 模式，但行内不渲染 URL；未配置访问密钥时禁用并内联掩码输入框。
+3. 订阅列表（只读态）：私有行显示"Email feed · stored in settings"之类的占位，不渲染 URL；编辑态：期刊名可改、URL 输入框替换为锁定说明、可移除。
+4. Dashboard 定向同步：已选 chip 与同步请求改用 `email:<source>` 标识，期刊名展示逻辑不变（上一轮已完成的 chip 列表直接兼容）。
+5. 目录条目的"已添加"判定按 `email_source` 而非 URL 匹配。
+
+### 13.6 安全边界复核
+
+- 界面、API、日志、备份 ZIP 四条泄露面全部闭环：文件不含 URL、GET 不含 URL、日志有 SafeFeedURL、备份只含引用。
+- `workers.dev` Atom URL 仍是 bearer token：配置项按密码存储，泄露时只需在 KTN 后台更换 feed id 并更新该配置。
+- 报告侧期刊身份：分支已实现"文章级期刊元数据优先于聚合 feed 标题"，目录里 RSC 各刊名走现有 canonical 映射，无需额外工作。
+
+### 13.7 分期与实施状态（2026-09-29 实现第 1、2 期）
+
+- **第 1 期（后端，已实现）**：13.2/13.3/13.4 —— 数据模型、`SCIRSS_EMAIL_FEED_URL` 配置项、抓取解析、定向同步 `email:<source>` 标识、验证面板 `verification_feed_url` 脱敏（`feeds.SafeFeedURL`）。
+- **第 2 期（前端，已实现）**：13.5 —— `emailFeedCatalog.ts`、Add feeds 的 Email alert feeds 区块（未配置时内联密码输入框）、订阅列表/编辑态私有行、Dashboard 定向同步标识。
+- **第 3 期（待做）**：从数据库聚合展示该源实际覆盖的期刊清单；多平台条目扩展（每平台独立配置键与内联输入框）。
+
+存量迁移：现有把 KTN URL 当普通订阅保存的用户，升级后旧行继续按普通 feed 工作（日志已脱敏）；要切换到内置邮件源形态，在设置里配置一次 `SCIRSS_EMAIL_FEED_URL`，再删除旧 URL 行、通过 Email alert feeds 区块重新订阅即可。

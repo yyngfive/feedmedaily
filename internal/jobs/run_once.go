@@ -72,6 +72,7 @@ func RunSync(settings config.Settings, opts RunOptions, progress ProgressFunc) (
 		BodyCache:        opts.FeedBodyOverrides,
 		SkippedFeeds:     opts.SkippedFeeds,
 		VerifyHost:       opts.VerifyFeedHost,
+		EmailFeedURL:     settings.EmailFeedURL,
 		Progress: func(current int, total int, label string) {
 			message := fmt.Sprintf("Fetching feeds %d/%d.", current, total)
 			if current > 0 && label != "" {
@@ -186,7 +187,7 @@ func filterNonSkippedErrors(errors []string, skippedFeeds map[string]string) []s
 	for _, item := range errors {
 		skipped := false
 		for feedURL := range skippedFeeds {
-			if strings.HasPrefix(item, feedURL+": ") {
+			if strings.HasPrefix(item, feeds.SafeFeedURL(feedURL)+": ") {
 				skipped = true
 				break
 			}

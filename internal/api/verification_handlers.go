@@ -55,7 +55,7 @@ func (s *Server) handleFeedVerificationStart(w http.ResponseWriter, r *http.Requ
 		current.Message = "A protected feed needs Cloudflare verification. Finish it in the verification window or use browser fallback and paste the final RSS XML."
 		current.VerificationRequired = true
 		current.VerificationTarget = pending.Target
-		current.VerificationFeedURL = pending.FeedURL
+		current.VerificationFeedURL = feeds.SafeFeedURL(pending.FeedURL)
 		current.VerificationJournal = pending.Journal
 		current.VerificationHost = pending.Host
 		current.VerificationMethod = verificationMethodNativeWebview
@@ -110,7 +110,7 @@ func (s *Server) handleFeedVerificationBrowser(w http.ResponseWriter, r *http.Re
 		current.Message = "Finish the Cloudflare check in your browser, wait until the final RSS XML is visible, then paste it here."
 		current.VerificationRequired = true
 		current.VerificationTarget = pending.Target
-		current.VerificationFeedURL = pending.FeedURL
+		current.VerificationFeedURL = feeds.SafeFeedURL(pending.FeedURL)
 		current.VerificationJournal = pending.Journal
 		current.VerificationHost = pending.Host
 		current.VerificationMethod = verificationMethodBrowserManual

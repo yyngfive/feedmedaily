@@ -1,6 +1,7 @@
 package trayapp
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -47,17 +48,26 @@ func NewApp(cfg AppConfig) (*App, error) {
 	}, nil
 }
 
-func (a *App) Run() error {
+func (a *App) Run(openOnStart bool, openExisting bool) error {
 	// 启动 Windows 托盘消息循环，并同时打开本地调度轮询。
 	tray, err := newWindowsTray(a)
 	if err != nil {
+		if openExisting && errors.Is(err, errTrayAlreadyRunning) {
+			for range 20 {
+				opened, openErr := OpenRunningApp(a.layout.ConfigDir)
+				if openErr != nil || opened {
+					return openErr
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
 		return err
 	}
 	a.tray = tray
 	a.startSettingsRefreshLoop()
 	a.startSchedulerLoop()
 	defer close(a.stopScheduler)
-	return tray.Run()
+	return tray.Run(openOnStart)
 }
 
 func (a *App) MenuState() trayMenuState {

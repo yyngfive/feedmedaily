@@ -183,7 +183,7 @@ func processVerificationCallback(settings config.Settings, payload verificationC
 			current.Message = "This protected feed host still needs a manual Cloudflare approval in the verification window."
 			current.VerificationRequired = true
 			current.VerificationTarget = pending.Target
-			current.VerificationFeedURL = pending.FeedURL
+			current.VerificationFeedURL = feeds.SafeFeedURL(pending.FeedURL)
 			current.VerificationJournal = pending.Journal
 			current.VerificationHost = pending.Host
 			current.VerificationMethod = pending.Method
@@ -253,7 +253,7 @@ func processVerificationCallback(settings config.Settings, payload verificationC
 			current.Message = "The verification window did not reach feed XML. Reopen it or use browser fallback and paste the final RSS XML."
 			current.VerificationRequired = true
 			current.VerificationTarget = pending.Target
-			current.VerificationFeedURL = pending.FeedURL
+			current.VerificationFeedURL = feeds.SafeFeedURL(pending.FeedURL)
 			current.VerificationJournal = pending.Journal
 			current.VerificationHost = pending.Host
 			current.VerificationMethod = pending.Method

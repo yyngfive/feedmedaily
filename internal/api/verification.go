@@ -153,7 +153,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(context.C
 					}
 					current.VerificationRequired = true
 					current.VerificationTarget = pending.Target
-					current.VerificationFeedURL = pending.FeedURL
+					current.VerificationFeedURL = feeds.SafeFeedURL(pending.FeedURL)
 					current.VerificationJournal = pending.Journal
 					current.VerificationHost = pending.Host
 					current.VerificationMethod = pending.Method
@@ -194,7 +194,7 @@ func launchVerificationAwareSyncJob(settings config.Settings, run func(context.C
 						current.Message = "Reusing the previous protected-feed verification session and retrying this host."
 						current.VerificationRequired = false
 						current.VerificationTarget = pending.Target
-						current.VerificationFeedURL = pending.FeedURL
+						current.VerificationFeedURL = feeds.SafeFeedURL(pending.FeedURL)
 						current.VerificationJournal = pending.Journal
 						current.VerificationHost = pending.Host
 						current.VerificationMethod = pending.Method

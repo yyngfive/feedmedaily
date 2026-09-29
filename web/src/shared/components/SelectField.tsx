@@ -29,13 +29,13 @@ export function SelectField({
   value: string;
 }) {
   return (
-    <div className={`space-y-2 ${className}`}>
+    <div className={hideLabel ? className : `space-y-2 ${className}`}>
       <Label className={hideLabel ? "sr-only" : undefined}>{label}</Label>
       <Select
         aria-label={label}
         id={id}
         isDisabled={disabled}
-        className="mt-2"
+        className={hideLabel ? undefined : "mt-2"}
         selectedKey={value}
         onSelectionChange={(key: Key | null) => onChange(String(key ?? ""))}
       >

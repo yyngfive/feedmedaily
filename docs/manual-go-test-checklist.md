@@ -304,9 +304,9 @@ pwsh -File .\tools\build_release.ps1 -SkipFeedCatalogUpdate
 ### 13.1 新安装
 
 1. 双击当前 `FeedMeDaily-v*.exe`。
-2. 完成安装并选择启动托盘。
-3. 检查开始菜单和可选桌面快捷方式。
-4. 从托盘打开 UI。
+2. 完成页默认勾选“启动托盘并打开 Web UI”；保持勾选，确认托盘和 UI 都打开。
+3. 检查开始菜单和可选桌面快捷方式；双击快捷方式，确认已有托盘不重复启动且 UI 再次打开。
+4. 退出托盘后再次双击快捷方式，确认只启动托盘；再双击一次，确认打开 UI。
 5. 调用 `/api/app/health` 和 `/api/app/meta`。
 6. 确认 install dir 指向安装目录，data/logs 指向 `%LOCALAPPDATA%\FeedMeDaily`。
 7. 保存一条 feed 和 scheduler 设置，重启后仍存在。

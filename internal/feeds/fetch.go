@@ -28,6 +28,10 @@ type FetchOptions struct {
 	SkippedFeeds     map[string]string
 	Progress         FetchProgressFunc
 	VerifyHost       VerifyHostFunc
+	// EmailFeedURL resolves the private feed URL for subscriptions carrying an
+	// email_source. The jobs layer injects it from the email feed config; it is
+	// never persisted with the subscription or echoed back to the frontend.
+	EmailFeedURL string
 }
 
 type FetchResult struct {
@@ -71,8 +75,9 @@ type rssDoc struct {
 }
 
 type rssChannel struct {
-	Title string    `xml:"title"`
-	Items []rssItem `xml:"item"`
+	Title     string    `xml:"title"`
+	Generator string    `xml:"generator"`
+	Items     []rssItem `xml:"item"`
 }
 
 type rssItem struct {
@@ -131,13 +136,21 @@ func parseFeedBody(sourceURL string, attempt int, body []byte) ([]store.Paper, e
 		if err := xml.Unmarshal(body, &doc); err != nil {
 			return nil, err
 		}
-		papers := parseRSS(doc, sourceURL)
+		var papers []store.Paper
+		if strings.EqualFold(strings.TrimSpace(doc.Channel.Generator), "kill-the-news") {
+			papers, err = parseKTNRSC(doc, sourceURL)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			papers = parseRSS(doc, sourceURL)
+		}
 		_, _ = logging.WriteDefault(logging.Event{
 			Level:     "info",
 			Component: "feeds",
 			Action:    "feed_parsed",
-			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), sourceURL),
-			Data:      map[string]any{"url": sourceURL, "attempt": attempt, "format": "rss", "root": rootName},
+			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), safeFeedURL(sourceURL)),
+			Data:      map[string]any{"url": safeFeedURL(sourceURL), "attempt": attempt, "format": "rss", "root": rootName},
 		})
 		return papers, nil
 	case "atom":
@@ -150,8 +163,8 @@ func parseFeedBody(sourceURL string, attempt int, body []byte) ([]store.Paper, e
 			Level:     "info",
 			Component: "feeds",
 			Action:    "feed_parsed",
-			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), sourceURL),
-			Data:      map[string]any{"url": sourceURL, "attempt": attempt, "format": "atom", "root": rootName},
+			Message:   fmt.Sprintf("Parsed %d paper(s) from %s", len(papers), safeFeedURL(sourceURL)),
+			Data:      map[string]any{"url": safeFeedURL(sourceURL), "attempt": attempt, "format": "atom", "root": rootName},
 		})
 		return papers, nil
 	default:
@@ -160,7 +173,7 @@ func parseFeedBody(sourceURL string, attempt int, body []byte) ([]store.Paper, e
 			Component: "feeds",
 			Action:    "feed_unknown_root",
 			Message:   fmt.Sprintf("Feed returned unsupported XML root %q", rootName),
-			Data:      map[string]any{"url": sourceURL, "attempt": attempt, "root": rootName},
+			Data:      map[string]any{"url": safeFeedURL(sourceURL), "attempt": attempt, "root": rootName},
 		})
 		return []store.Paper{}, nil
 	}
@@ -272,6 +285,30 @@ func feedHostKey(rawURL string) string {
 	return strings.ToLower(strings.TrimSpace(parsed.Hostname()))
 }
 
+func safeFeedURL(rawURL string) string {
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) != 2 || len(parts[1]) < 16 {
+		return rawURL
+	}
+	switch strings.ToLower(parts[0]) {
+	case "rss", "atom", "json":
+		parsed.Path = "/" + parts[0] + "/private"
+		parsed.RawPath = ""
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		return parsed.String()
+	}
+	return rawURL
+}
+
+// SafeFeedURL removes long opaque RSS ids from diagnostics while keeping the
+// configured URL unchanged for fetching and paper source identity.
+func SafeFeedURL(rawURL string) string { return safeFeedURL(rawURL) }
+
 func filterSubscriptionsByURLs(subscriptions []Subscription, selectedURLs []string) []Subscription {
 	if len(selectedURLs) == 0 {
 		return subscriptions
@@ -288,7 +325,7 @@ func filterSubscriptionsByURLs(subscriptions []Subscription, selectedURLs []stri
 	}
 	filtered := make([]Subscription, 0, len(subscriptions))
 	for _, subscription := range subscriptions {
-		if _, ok := selected[strings.TrimSpace(subscription.URL)]; ok {
+		if _, ok := selected[subscription.SubscriptionIdentity()]; ok {
 			filtered = append(filtered, subscription)
 		}
 	}
@@ -333,19 +370,36 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 			return FetchResult{}, err
 		}
 		subscription := subscriptions[index]
-		result.FeedURLs = append(result.FeedURLs, subscription.URL)
-		label := fetchProgressLabel(subscription.Journal, subscription.URL)
+		identity := subscription.SubscriptionIdentity()
+		feedURL := subscription.URL
+		if subscription.EmailSource != "" {
+			feedURL = strings.TrimSpace(opts.EmailFeedURL)
+		}
+		if feedURL == "" {
+			result.FeedURLs = append(result.FeedURLs, identity)
+			if opts.Progress != nil {
+				opts.Progress(index+1, totalFeeds, fetchProgressLabel(subscription.Journal, identity))
+			}
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: the email feed URL is not configured yet", identity))
+			continue
+		}
+		result.FeedURLs = append(result.FeedURLs, identity)
+		label := fetchProgressLabel(subscription.Journal, identity)
 		if opts.Progress != nil {
 			opts.Progress(index+1, totalFeeds, label)
 		}
-		if reason, ok := skippedFeedReason(subscription.URL, opts.SkippedFeeds); ok {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", subscription.URL, reason))
+		if reason, ok := skippedFeedReason(identity, opts.SkippedFeeds); ok {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", identity, reason))
 			continue
 		}
-		fetched, err := fetchFeed(subscription.URL, opts)
+		fetched, err := fetchFeed(feedURL, opts)
 		if err != nil {
 			var verificationErr *FeedVerificationRequiredError
 			if errors.As(err, &verificationErr) {
+				if subscription.EmailSource != "" {
+					result.Errors = append(result.Errors, fmt.Sprintf("%s: the email feed host requested browser verification; open the configured email feed URL once in a browser, then sync again", identity))
+					continue
+				}
 				requests, nextIndex := hostVerificationRequests(subscriptions, index, verificationErr, opts)
 				if opts.VerifyHost != nil {
 					result.FeedURLs = appendResultFeedURLs(result.FeedURLs, subscriptions[index+1:nextIndex])
@@ -370,13 +424,13 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 				continue
 			}
 			if isTransientFetchError(err) {
-				transientFailures = append(transientFailures, transientFetchFailure{subscription: subscription, err: err})
+				transientFailures = append(transientFailures, transientFetchFailure{subscription: subscription, err: err, feedURL: feedURL})
 				continue
 			}
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", subscription.URL, err))
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", feedErrorLabel(subscription, feedURL), strings.ReplaceAll(err.Error(), feedURL, feedErrorLabel(subscription, feedURL))))
 			continue
 		}
-		rememberFeedBody(subscription.URL, opts.BodyCache, fetched.Body)
+		rememberFeedBody(feedURL, opts.BodyCache, fetched.Body)
 		result.Papers = append(result.Papers, fetched.Papers...)
 	}
 	if err := ctx.Err(); err != nil {
@@ -387,7 +441,7 @@ func FetchAll(feedsPath string, opts FetchOptions) (FetchResult, error) {
 		return FetchResult{}, err
 	}
 	for _, failure := range transientFailures {
-		result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", failure.subscription.URL, failure.err))
+		result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", feedErrorLabel(failure.subscription, failure.feedURL), strings.ReplaceAll(failure.err.Error(), failure.feedURL, feedErrorLabel(failure.subscription, failure.feedURL))))
 	}
 	if opts.MaxPapers > 0 && len(result.Papers) > opts.MaxPapers {
 		_, _ = logging.WriteDefault(logging.Event{
@@ -419,9 +473,21 @@ func appendResultFeedURLs(existing []string, subscriptions []Subscription) []str
 	return existing
 }
 
+// feedErrorLabel is the redacted prefix used for per-feed error strings:
+// private email rows show their stable identity, normal rows keep the
+// SafeFeedURL redaction of long opaque path ids.
+func feedErrorLabel(subscription Subscription, feedURL string) string {
+	if subscription.EmailSource != "" {
+		return subscription.SubscriptionIdentity()
+	}
+	return safeFeedURL(feedURL)
+}
+
 type transientFetchFailure struct {
 	subscription Subscription
 	err          error
+	// feedURL is the resolved fetch target (real URL for private email rows).
+	feedURL string
 }
 
 // retryTransientFetchFailures re-fetches feeds that failed on transient
@@ -458,7 +524,7 @@ func retryTransientFetchFailures(ctx context.Context, failures []transientFetchF
 			if opts.Progress != nil {
 				opts.Progress(totalFeeds, totalFeeds, retryFetchProgressLabel(failure.subscription))
 			}
-			fetched, err := fetchFeed(failure.subscription.URL, opts)
+			fetched, err := fetchFeed(failure.feedURL, opts)
 			if err == nil {
 				rememberFeedBody(failure.subscription.URL, opts.BodyCache, fetched.Body)
 				result.Papers = append(result.Papers, fetched.Papers...)
@@ -617,10 +683,10 @@ func fetchFeed(url string, opts FetchOptions) (fetchedFeed, error) {
 		Level:     "warning",
 		Component: "feeds",
 		Action:    "feed_fetch_failed",
-		Message:   fmt.Sprintf("Failed to fetch feed after %d attempt(s): %s", attempted, url),
-		Error:     lastErr.Error(),
+		Message:   fmt.Sprintf("Failed to fetch feed after %d attempt(s): %s", attempted, safeFeedURL(url)),
+		Error:     strings.ReplaceAll(lastErr.Error(), url, safeFeedURL(url)),
 		Data: map[string]any{
-			"url":                 url,
+			"url":                 safeFeedURL(url),
 			"attempts":            attempted,
 			"last_status_code":    lastStatusCode,
 			"challenge_suspected": lastChallenge,
@@ -649,10 +715,10 @@ func fetchFeedAttemptWithContext(ctx context.Context, url string, attempt int) (
 			Level:     "error",
 			Component: "feeds",
 			Action:    "http_request_failed",
-			Message:   fmt.Sprintf("HTTP Request: GET %s failed", url),
-			Error:     err.Error(),
+			Message:   fmt.Sprintf("HTTP Request: GET %s failed", safeFeedURL(url)),
+			Error:     strings.ReplaceAll(err.Error(), url, safeFeedURL(url)),
 			Data: map[string]any{
-				"url":            url,
+				"url":            safeFeedURL(url),
 				"attempt":        attempt,
 				"duration_ms":    time.Since(started).Milliseconds(),
 				"request_method": http.MethodGet,
@@ -664,9 +730,9 @@ func fetchFeedAttemptWithContext(ctx context.Context, url string, attempt int) (
 		Level:     "info",
 		Component: "feeds",
 		Action:    "http_request",
-		Message:   fmt.Sprintf("HTTP Request: GET %s %q", url, response.Proto+" "+response.Status),
+		Message:   fmt.Sprintf("HTTP Request: GET %s %q", safeFeedURL(url), response.Proto+" "+response.Status),
 		Data: map[string]any{
-			"url":            url,
+			"url":            safeFeedURL(url),
 			"attempt":        attempt,
 			"status_code":    response.StatusCode,
 			"duration_ms":    time.Since(started).Milliseconds(),
@@ -693,9 +759,9 @@ func fetchFeedAttemptWithContext(ctx context.Context, url string, attempt int) (
 			Level:     "warning",
 			Component: "feeds",
 			Action:    "feed_challenge_suspected",
-			Message:   fmt.Sprintf("Feed returned challenge-like HTML instead of XML: %s", url),
+			Message:   fmt.Sprintf("Feed returned challenge-like HTML instead of XML: %s", safeFeedURL(url)),
 			Data: map[string]any{
-				"url":                 url,
+				"url":                 safeFeedURL(url),
 				"attempt":             attempt,
 				"status_code":         response.StatusCode,
 				"challenge_suspected": true,

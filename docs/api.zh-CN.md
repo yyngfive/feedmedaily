@@ -464,7 +464,7 @@ secret 字段和 `classifier_models` 中的 key 均不以明文返回。`source=
 
 Linux source mode 只保存设置，不由 Web UI 自动执行；响应会给出 helper 命令。
 
-没有本地 scheduler 设置时，`scheduled_time` 默认返回本地时间 `12:30`；该时间在中国标准时间下位于 DeepSeek 午间空闲窗口。已经保存的时间不会因默认值升级而改变。
+没有本地 scheduler 设置时，`installed` 默认返回 `true`，`scheduled_time` 默认返回本地时间 `09:00`。已经保存的启用状态和时间不会因默认值升级而改变。
 
 前端入口：`fetchSchedulerSettings()`。
 

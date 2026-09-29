@@ -43,12 +43,12 @@ export function AppTab({ jobs, onJob, appControlBusy, onExitApp, onOpenAppTarget
   const [collectionKey, setCollectionKey] = React.useState(collectionField?.value ?? "");
   const [collectionsLoading, setCollectionsLoading] = React.useState(false);
   const [zoteroError, setZoteroError] = React.useState<string | null>(null);
-  const [schedulerTime, setSchedulerTime] = React.useState("12:30");
+  const [schedulerTime, setSchedulerTime] = React.useState("09:00");
   const schedulerAdvisory = scheduler?.advisory?.trim() ?? "";
   const lastCheckedLabel = appUpdate?.checked_at && !Number.isNaN(Date.parse(appUpdate.checked_at)) ? new Date(appUpdate.checked_at).toLocaleString() : null;
 
   React.useEffect(() => setCollectionKey(collectionField?.value ?? ""), [collectionField?.value]);
-  React.useEffect(() => setSchedulerTime(scheduler?.scheduled_time ?? "12:30"), [scheduler?.scheduled_time]);
+  React.useEffect(() => setSchedulerTime(scheduler?.scheduled_time ?? "09:00"), [scheduler?.scheduled_time]);
 
   const loadCollections = React.useCallback(async () => {
     if (!zoteroConfigured) return;

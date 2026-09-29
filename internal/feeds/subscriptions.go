@@ -13,6 +13,21 @@ import (
 type Subscription struct {
 	Journal string `json:"journal"`
 	URL     string `json:"url"`
+	// Private marks rows whose feed URL never appears in files, APIs, or logs.
+	// Email sources are the only private rows today; their real URL resolves
+	// from the email feed config at fetch time, so url stays empty on disk.
+	Private     bool   `json:"private,omitempty"`
+	EmailSource string `json:"email_source,omitempty"`
+}
+
+// SubscriptionIdentity is the stable selector used in targeted-sync requests,
+// skip maps, and error strings. Private rows use an "email:<source>" identity
+// so their real URL never round-trips through the frontend.
+func (s Subscription) SubscriptionIdentity() string {
+	if s.EmailSource != "" {
+		return "email:" + s.EmailSource
+	}
+	return s.URL
 }
 
 type SettingsUpdateRequest struct {
@@ -43,7 +58,7 @@ func ReadSubscriptions(path string) ([]Subscription, error) {
 }
 
 func WriteSubscriptions(path string, feeds []Subscription) ([]Subscription, error) {
-	// 校验、标准化并去重后，把订阅列表写回磁盘。
+	// 校验、标准化并去重后，把订阅列表写回磁盘。私有邮件源按来源标识去重。
 	normalized := make([]Subscription, 0, len(feeds))
 	seen := map[string]struct{}{}
 	for _, feed := range feeds {
@@ -51,10 +66,11 @@ func WriteSubscriptions(path string, feeds []Subscription) ([]Subscription, erro
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := seen[item.URL]; ok {
+		identity := item.SubscriptionIdentity()
+		if _, ok := seen[identity]; ok {
 			continue
 		}
-		seen[item.URL] = struct{}{}
+		seen[identity] = struct{}{}
 		normalized = append(normalized, item)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -71,10 +87,14 @@ func WriteSubscriptions(path string, feeds []Subscription) ([]Subscription, erro
 }
 
 func NormalizeSubscription(feed Subscription) (Subscription, error) {
-	// 对单条订阅做最小清洗：journal 不能为空，URL 必须是 http/https。
+	// 对单条订阅做最小清洗：journal 不能为空；普通订阅 URL 必须是 http/https，
+	// 私有邮件源只保留来源标识，URL 一律清空（真实地址在抓取时从配置解析）。
 	journal := strings.TrimSpace(feed.Journal)
 	if journal == "" {
 		return Subscription{}, errors.New("journal cannot be blank")
+	}
+	if strings.TrimSpace(feed.EmailSource) != "" {
+		return Subscription{Journal: journal, Private: true, EmailSource: strings.TrimSpace(feed.EmailSource)}, nil
 	}
 	feedURL := strings.TrimSpace(feed.URL)
 	parsed, err := url.ParseRequestURI(feedURL)

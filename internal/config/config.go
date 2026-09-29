@@ -75,6 +75,7 @@ type Settings struct {
 	ZoteroLibraryType   string
 	ZoteroLibraryID     string
 	ZoteroCollectionKey string
+	EmailFeedURL        string
 	ServerHost          string
 	ServerPort          int
 }
@@ -310,6 +311,14 @@ var Options = []Option{
 		InputType:   "text",
 	},
 	{
+		Key:         "SCIRSS_EMAIL_FEED_URL",
+		Label:       "Email feed URL",
+		Description: "Private Atom/RSS URL of the kill-the-news feed that aggregates journal email alerts. Treated like a password and never shown in the UI.",
+		Section:     "Email feeds",
+		InputType:   "password",
+		Secret:      true,
+	},
+	{
 		Key:         "SCIRSS_SERVER_HOST",
 		Label:       "Server host",
 		Description: "Host interface for the local backend service.",
@@ -398,6 +407,7 @@ func Load(root string) (Settings, error) {
 	settings.ZoteroLibraryType = valueOrDefault(strings.ToLower(strings.TrimSpace(valueMap["SCIRSS_ZOTERO_LIBRARY_TYPE"])), "user")
 	settings.ZoteroLibraryID = optionalValue(valueMap["SCIRSS_ZOTERO_LIBRARY_ID"])
 	settings.ZoteroCollectionKey = optionalValue(valueMap["SCIRSS_ZOTERO_COLLECTION_KEY"])
+	settings.EmailFeedURL = strings.TrimSpace(optionalValue(valueMap["SCIRSS_EMAIL_FEED_URL"]))
 	settings.ServerHost = valueOrDefault(valueMap["SCIRSS_SERVER_HOST"], defaultHost)
 	settings.ServerPort = positiveInt(valueMap["SCIRSS_SERVER_PORT"], defaultPort)
 	return settings, nil

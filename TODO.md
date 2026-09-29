@@ -7,7 +7,7 @@
 - [X] 补充 PNAS 官方学科订阅。
 - [X] 补充 APS 订阅源（通过 sci-rss-list 项目）。
 - [X] 订阅源增加 Current Issue 和 ASAP 标注（通过 sci-rss-list 项目）。
-- [ ] 核实并修正 sci-rss-list 中 ChemRxiv 最新预印本 feed 的范围（当前标为 `single_journal`，应使用 `platform_collection`）。
+- [X] 核实并修正 sci-rss-list 中 ChemRxiv 最新预印本 feed 的范围（当前标为 `single_journal`，应使用 `platform_collection`）。
 
 ## Models
 
@@ -17,10 +17,11 @@
 
 - [X] 在真实大库上测量报告载荷；只有现有批量查询仍不足时，再评估列表/详情拆分或服务端分页与筛选。
 
-## Paper Filter
+## Paper
 
 - [X] 期刊筛选界面高度增加
 - [X] 期刊筛选界面显示真正的期刊名，而不是带有期号或其他标注的RSS标题
+- [ ] Zotero保存界面对层次化保存位置改成下拉菜单式UI
 
 ## 分类
 
