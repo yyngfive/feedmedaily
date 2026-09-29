@@ -11,14 +11,19 @@ Changes since `0.7.0`:
 ### Added
 
 - RSC issue-alert emails delivered through kill-the-news RSS now expand into individual DOI-linked papers with per-email journal names; account and confirmation messages are ignored.
-- Email alert feeds are now built-in subscription options in the Feeds UI. The private feed address is configured once in settings, stored like a password, and never shown in the UI, API responses, logs, or backups; targeted sync uses a stable email-source identity instead of the URL.
+- Added backend support for email alert feeds. Private feed addresses stay in secret settings and are never shown in API responses, logs, or backups; targeted sync uses a stable email-source identity instead of the URL.
 
 ### Fixed
 
+- Onboarding now recognizes configured classifier API keys after settings load, so the default classifier and save actions become available without re-entering the key.
 - Feed sync now retries feeds that failed on transient transport errors (DNS lookup failures such as "no such host", timeouts, dropped connections) in up to two end-of-run passes about 10s and 30s later, so a brief resolver outage no longer drops a journal's papers for the whole day. HTTP status failures, challenge verification, and parse errors keep their existing behavior.
 
 ### Changed
 
+- Installer completion now offers a checked launch of the tray and Web UI; desktop and Start Menu shortcuts start the tray when needed or open the Web UI through an existing tray.
+- Fresh installs now enable daily sync at 09:00 local time by default; existing saved schedules remain unchanged.
+- Hid new email subscriptions from the Feeds UI while the feature is being stabilized; existing email subscriptions remain visible and removable. Added a clear button to the journal catalog search and aligned it with the publisher filter.
+- Removed the obsolete Profile base URL and Profile model inputs from onboarding Advanced Settings; the model selector remains the place to choose the Profile model.
 - The targeted-sync feed picker lists selected journals as removable chips with a "Clear selection" action, and its search box gained a clear button.
 - The database cleanup Stop button now sits beside Run cleanup instead of below the panel.
 - The reader's journal filter list shows roughly twice as many journals before scrolling.

@@ -27,7 +27,7 @@ FeedMeDaily is a local-first literature triage app for journal RSS feeds. The cu
 
 1. Feed subscriptions are stored in `data/rss_feeds.json`.
 2. `feedmedailyd` fetches feed content through a layered Go pipeline: HTTP client, generic RSS/Atom/RDF parser, and publisher-specific extractors. After the first pass, feeds that failed on transient transport errors (DNS lookup failures, timeouts, dropped connections) are re-fetched in up to two end-of-run retry passes about 10s and 30s later, so a brief resolver outage no longer drops those journals for the day; HTTP status failures, challenge verification, and parse errors are not retried.
-   Kill-the-news RSS feeds use their `generator` marker to route RSC issue-alert emails through a dedicated extractor. One email becomes DOI-keyed papers with the journal taken from that email's subject and checked against its HTML; account and confirmation emails produce no papers. Email alert feeds are built-in options in the Feeds UI: subscription rows carry an `email_source` reference and never store the private URL, which resolves per run from the `SCIRSS_EMAIL_FEED_URL` secret setting; targeted sync, warnings, and dedup use the stable `email:<source>` identity, and verification payloads redact the URL with SafeFeedURL. At report time, article-level journal metadata takes precedence over the aggregate feed title.
+   Kill-the-news RSS feeds use their `generator` marker to route RSC issue-alert emails through a dedicated extractor. One email becomes DOI-keyed papers with the journal taken from that email's subject and checked against its HTML; account and confirmation emails produce no papers. The Feeds UI temporarily omits new email subscriptions while keeping existing ones visible and removable: subscription rows carry an `email_source` reference and never store the private URL, which resolves per run from the `SCIRSS_EMAIL_FEED_URL` secret setting; targeted sync, warnings, and dedup use the stable `email:<source>` identity, and verification payloads redact the URL with SafeFeedURL. At report time, article-level journal metadata takes precedence over the aggregate feed title.
 3. Papers are deduplicated and upserted into `data/literature.sqlite`.
 4. Metadata enrichment runs only when core fields such as DOI, authors, journal, or usable abstract content are missing. Externally resolved records are validated against both the paper title and the publication date, and a DOI whose record fails either check is dropped so linking falls back to the publisher URL; the title comparison ignores whitespace so RSS subscript rendering (`CO 2` against `CO2`) is not read as a mismatch, and a dropped DOI whose publisher-URL key is already held by a duplicate row is reported as a job warning instead of failing the whole batch. Enrichment writes back under the row's stored `paper_key` so a newly found DOI never splits a paper into duplicate rows.
 5. The classifier evaluates papers against the active `data/classification_profile.json`.
@@ -96,11 +96,11 @@ Current limitation: even with a persistent verifier profile, some publisher chal
 - launch-at-login
 - tray-owned local daily scheduling
 
-Packaged builds ship the tray executable as the primary desktop entrypoint. In source mode, the tray builds or launches the local Go backend as needed.
+Packaged builds ship the tray executable as the primary desktop entrypoint. Installer completion launches it with `--open` by default, starting the tray and Web UI together. Desktop/Start Menu shortcuts use `--open-if-running`: a first invocation starts the tray, while a later invocation posts an open message to the config-scoped existing tray. Login autostart launches the tray without either flag. In source mode, the tray builds or launches the local Go backend as needed.
 
 Before an installer update replaces packaged files, Inno Setup extracts the new tray binary as a temporary shutdown helper. The helper checks whether the installed instance is running, asks for confirmation in interactive installs, then stops the backend through `/api/app/exit`, waits for it to exit, and closes the hidden tray window; Restart Manager remains enabled as a final file-in-use fallback.
 
-New scheduler settings default to local time `12:30`, which falls in DeepSeek's current midday off-peak window when the machine uses China Standard Time; users in other time zones can override it. Existing saved scheduler settings remain authoritative. The Web scheduler form uses the same fallback so the tray, API, and UI do not present different first-run times.
+New scheduler settings default to enabled at local time `09:00`. Existing saved scheduler settings remain authoritative. The Web scheduler form uses the same time fallback so the tray, API, and UI do not present different first-run times. Automatic runs require the Windows tray to be running.
 
 ## Data Model And State
 
@@ -154,7 +154,7 @@ Editable local configuration is exposed through the UI:
 - secret values are written only to local config storage
 - secrets are never echoed back to the frontend in plain text
 - each field reports whether its value comes from local config, the system environment, or a built-in default
-- first-run onboarding and Settings → Model share one model-settings editor with stacked classifier and Profile default selectors, plus one masked API key and connection-test row per provider
+- first-run onboarding and Settings → Model share one model-settings editor with stacked classifier and Profile default selectors, plus one masked API key and connection-test row per provider; onboarding Advanced Settings does not expose the legacy Profile base URL or model-name inputs
 - onboarding and Settings use the same model catalog for both roles; each role keeps its own default, while one provider key enables that provider's supported models for both roles
 - connection tests run as `model-test` jobs, record token usage without saving unsaved keys, and warn that a small amount of provider quota is consumed
 - saving local configuration reloads the running backend settings immediately, so follow-up jobs in the same session use the new API keys and model settings
