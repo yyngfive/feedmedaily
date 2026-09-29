@@ -8,6 +8,10 @@ The latest released version is `0.7.0`. The next planned release is `0.7.1`, so 
 
 Changes since `0.7.0`:
 
+### Added
+
+- RSC issue-alert emails delivered through kill-the-news RSS now expand into individual DOI-linked papers with per-email journal names; account and confirmation messages are ignored.
+
 ## 0.7.0 (2026-09-26)
 
 Changes since `0.6.2`:

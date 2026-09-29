@@ -2,6 +2,8 @@
 
 > 状态：方案草稿
 >
+> 2026-09-28 实施进展：RSC 期刊目录邮件已通过 kill-the-news RSS 接入现有论文解析入口；下文 IMAP 方案保留为早期备选方案，不代表当前实现。KTN 的私有 RSS 地址由用户本地订阅配置保存，不纳入公开的 sci-rss-list 目录。
+>
 > 更新时间：2026-09-11
 >
 > 目标期刊：Chemical Science、ChemComm

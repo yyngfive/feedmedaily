@@ -186,7 +186,7 @@ func filterNonSkippedErrors(errors []string, skippedFeeds map[string]string) []s
 	for _, item := range errors {
 		skipped := false
 		for feedURL := range skippedFeeds {
-			if strings.HasPrefix(item, feedURL+": ") {
+			if strings.HasPrefix(item, feeds.SafeFeedURL(feedURL)+": ") {
 				skipped = true
 				break
 			}

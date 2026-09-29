@@ -366,6 +366,15 @@ func TestRunSyncTreatsSkippedVerificationWarningsAsNonFatal(t *testing.T) {
 	}
 }
 
+func TestFilterNonSkippedErrorsMatchesRedactedPrivateFeed(t *testing.T) {
+	const private = "https://news.example/rss/abcdefghijklmnopqrstu"
+	errors := []string{feeds.SafeFeedURL(private) + ": skipped", "https://other.example/rss: broken"}
+	got := filterNonSkippedErrors(errors, map[string]string{private: "skipped"})
+	if len(got) != 1 || got[0] != errors[1] {
+		t.Fatalf("non-skipped errors = %#v", got)
+	}
+}
+
 func TestRunSyncDegradesFailedBatchToSinglePaperClassification(t *testing.T) {
 	root := t.TempDir()
 	settings := testJobSettings(root)
