@@ -16,7 +16,7 @@ FeedMeDaily 当前优先提供 Windows 安装版。请从 GitHub Releases 下载
 
 - [FeedMeDaily Releases](https://github.com/yyngfive/feedmedaily/releases/latest)
 
-安装完成后启动托盘程序，再从托盘打开 FeedMeDaily。首次使用需要填写兴趣描述、选择分类模型并录入对应 API key，然后生成初始 Profile；也可以先点击 `Save Settings` 单独保存模型和其他设置，再生成 Profile。正式界面的 `Settings → Model` 可以随时修改同一组模型配置。
+安装完成页默认勾选“启动托盘并打开 Web UI”。之后双击桌面或开始菜单的 FeedMeDaily 快捷方式：托盘未运行时启动托盘，托盘已运行时打开 Web UI。首次使用需要填写兴趣描述、选择分类模型并录入对应 API key，然后生成初始 Profile；也可以先点击 `Save Settings` 单独保存模型和其他设置，再生成 Profile。正式界面的 `Settings → Model` 可以随时修改同一组模型配置。
 
 在设置的Feed界面可以添加期刊的RSS订阅地址：参见[部分出版社期刊RSS订阅地址汇总](https://github.com/yyngfive/sci-rss-list)
 
@@ -98,7 +98,7 @@ go run ./cmd/feedmedailyd --root . --host 127.0.0.1 --port 8000
 
 当前应用内定时更新功能依赖托盘程序，目前只支持Windows。Linux 上推荐使用 `cron` 调用辅助脚本：
 
-Windows 托盘首次启用定时同步时默认使用本地时间 `12:30`；在中国标准时间下，它位于 DeepSeek 当前的午间空闲计费窗口。已保存的用户自定义时间不会被覆盖，其他时区用户应按北京时间峰谷窗口自行调整。
+Windows 全新安装默认启用每天本地时间 `09:00` 的定时同步；可在 Settings → App → Scheduled sync 修改时间或关闭。已有设置中的启用状态和时间不会被覆盖。自动执行需要托盘程序正在运行。
 
 ```cron
 0 8 * * * cd /path/to/feedmedaily && bash /path/to/feedmedaily/tools/feedmedaily.sh sync >> /path/to/feedmedaily/logs/cron.log 2>&1

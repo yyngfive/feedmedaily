@@ -128,8 +128,8 @@ Source: "{#MyBuildDir}\FeedMeDailyTray.exe"; DestDir: "{tmp}"; DestName: "{#MySh
 Source: "{#MyBuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyTrayExeName}"; Parameters: "--root ""{app}"""
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyTrayExeName}"; Parameters: "--root ""{app}"""; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyTrayExeName}"; Parameters: "--root ""{app}"" --open-if-running"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyTrayExeName}"; Parameters: "--root ""{app}"" --open-if-running"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyTrayExeName}"; Parameters: "--root ""{app}"""; Description: "Launch {#MyAppName} tray"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyTrayExeName}"; Parameters: "--root ""{app}"" --open"; Description: "Launch {#MyAppName} tray and open Web UI"; Flags: nowait postinstall skipifsilent

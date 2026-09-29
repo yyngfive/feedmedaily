@@ -3,6 +3,7 @@
 package trayapp
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -79,7 +80,10 @@ const (
 	trayMsgShowInfo      = wmApp + 3
 	trayMsgShowError     = wmApp + 4
 	trayMsgReloadSetting = wmApp + 5
+	trayMsgOpenApp       = wmApp + 6
 )
+
+var errTrayAlreadyRunning = errors.New("FeedMeDaily tray is already running")
 
 const refreshRetryDelay = time.Second
 
@@ -217,7 +221,8 @@ func newWindowsTray(app *App) (*windowsTray, error) {
 		return nil, createErr
 	}
 	if errno, ok := createErr.(syscall.Errno); ok && errno == syscall.Errno(183) {
-		return nil, fmt.Errorf("FeedMeDaily tray is already running")
+		procCloseHandle.Call(mutexHandle)
+		return nil, errTrayAlreadyRunning
 	}
 
 	return &windowsTray{
@@ -226,7 +231,7 @@ func newWindowsTray(app *App) (*windowsTray, error) {
 	}, nil
 }
 
-func (t *windowsTray) Run() error {
+func (t *windowsTray) Run(openOnStart bool) error {
 	// 注册隐藏窗口、托盘图标和消息循环，进入真正的 Windows 托盘生命周期。
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -287,6 +292,9 @@ func (t *windowsTray) Run() error {
 	}
 
 	procUpdateWindow.Call(hwnd)
+	if openOnStart {
+		t.runAction(func() error { return t.app.OpenApp() }, "", "Open FeedMeDaily failed")
+	}
 
 	var message msg
 	for {
@@ -525,6 +533,9 @@ func windowProc(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) ui
 		return 0
 	case trayMsgReloadSetting:
 		globalTray.app.refreshSettingsFromDisk("settings_message_refresh_failed")
+		return 0
+	case trayMsgOpenApp:
+		globalTray.handleCommand(menuOpenApp)
 		return 0
 	case trayMsgShowInfo, trayMsgShowError:
 		globalTray.handleQueuedBalloon()

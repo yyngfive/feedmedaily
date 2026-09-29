@@ -24,7 +24,7 @@ const (
 	AppPublicName     = "FeedMeDaily"
 	AppInternalName   = "scirssagent"
 	SchedulerTaskName = AppPublicName + " Daily Sync"
-	DefaultDailyTime  = "12:30"
+	DefaultDailyTime  = "09:00"
 
 	ModeSource  = "source"
 	ModeRelease = "release"
@@ -445,7 +445,7 @@ func LoadTraySchedulerSettings(path string) (TraySchedulerSettings, error) {
 func DefaultTraySchedulerSettings() TraySchedulerSettings {
 	// 返回托盘调度设置的默认值。
 	return TraySchedulerSettings{
-		ScheduleEnabled: false,
+		ScheduleEnabled: true,
 		DailyTime:       DefaultDailyTime,
 		LaunchAtLogin:   false,
 	}

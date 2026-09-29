@@ -275,7 +275,7 @@ func TestAppUpdateOpenAndSchedulerAPIs(t *testing.T) {
 
 	schedulerGet := httptest.NewRecorder()
 	handler.ServeHTTP(schedulerGet, httptest.NewRequest(http.MethodGet, "/api/settings/scheduler", nil))
-	if schedulerGet.Code != http.StatusOK || !contains(schedulerGet.Body.String(), `"installed":false`) {
+	if schedulerGet.Code != http.StatusOK || !contains(schedulerGet.Body.String(), `"installed":true`) || !contains(schedulerGet.Body.String(), `"scheduled_time":"09:00"`) {
 		t.Fatalf("scheduler get = %d %s", schedulerGet.Code, schedulerGet.Body.String())
 	}
 

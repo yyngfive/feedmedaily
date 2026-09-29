@@ -24,6 +24,8 @@ func main() {
 	root := flag.String("root", defaultRoot, "Project root or installed app directory.")
 	check := flag.Bool("check", false, "Check whether a FeedMeDaily instance is running.")
 	shutdown := flag.Bool("shutdown", false, "Stop an existing FeedMeDaily instance before an update.")
+	open := flag.Bool("open", false, "Open the Web UI, reusing the running tray if present.")
+	openIfRunning := flag.Bool("open-if-running", false, "Open the Web UI only when the tray is already running.")
 	dataRoot := flag.String("data-root", "", "User data directory used by the running instance.")
 	flag.Parse()
 
@@ -64,6 +66,21 @@ func main() {
 		}
 		return
 	}
+	if *open || *openIfRunning {
+		layout, err := trayapp.ResolveLayout(absRoot)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "failed to resolve FeedMeDaily layout:", err)
+			os.Exit(1)
+		}
+		opened, err := trayapp.OpenRunningApp(layout.ConfigDir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "failed to open FeedMeDaily:", err)
+			os.Exit(1)
+		}
+		if opened {
+			return
+		}
+	}
 
 	// 托盘应用负责菜单、调度、自启动和后台服务控制。
 	app, err := trayapp.NewApp(trayapp.AppConfig{RootDir: absRoot})
@@ -72,7 +89,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := app.Run(); err != nil {
+	if err := app.Run(*open, *open || *openIfRunning); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

@@ -153,7 +153,7 @@ Linux 当前不提供托盘程序。定时同步推荐用 cron 调用 helper：
 - Zotero：`SCIRSS_ZOTERO_API_KEY`、`SCIRSS_ZOTERO_LIBRARY_TYPE`、`SCIRSS_ZOTERO_LIBRARY_ID`、`SCIRSS_ZOTERO_COLLECTION_KEY`
 - 本地服务：`SCIRSS_SERVER_HOST`、`SCIRSS_SERVER_PORT`
 
-分类器模型只返回 relevance、confidence、简短 reason 和中文标题。`recommended_action` 由 Go 运行时按 relevance 映射，`decision_trace` 不进入模型输出契约。Windows 托盘的新调度设置默认使用本地时间 `12:30`，该时间在中国标准时间下属于 DeepSeek 午间空闲窗口；已有 `tray-settings.json` 中的时间保持不变。
+分类器模型只返回 relevance、confidence、简短 reason 和中文标题。`recommended_action` 由 Go 运行时按 relevance 映射，`decision_trace` 不进入模型输出契约。Windows 托盘的新调度设置默认启用每天本地时间 `09:00` 的同步；已有 `tray-settings.json` 中的启用状态和时间保持不变。
 
 不要提交这些用户本地状态：
 

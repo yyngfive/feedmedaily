@@ -6,10 +6,24 @@ import (
 	"testing"
 )
 
-func TestDefaultTraySchedulerSettingsUsesOffPeakDailyTime(t *testing.T) {
+func TestDefaultTraySchedulerSettingsRunsAtNine(t *testing.T) {
 	settings := DefaultTraySchedulerSettings()
-	if settings.DailyTime != "12:30" {
-		t.Fatalf("daily time = %q, want 12:30", settings.DailyTime)
+	if !settings.ScheduleEnabled || settings.DailyTime != "09:00" {
+		t.Fatalf("default scheduler settings = %#v, want enabled at 09:00", settings)
+	}
+}
+
+func TestLoadTraySchedulerSettingsKeepsSavedDisabledSchedule(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tray-settings.json")
+	if err := (TraySchedulerSettings{ScheduleEnabled: false, DailyTime: "12:30"}).Save(path); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := LoadTraySchedulerSettings(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.ScheduleEnabled || settings.DailyTime != "12:30" {
+		t.Fatalf("saved scheduler settings changed: %#v", settings)
 	}
 }
 
