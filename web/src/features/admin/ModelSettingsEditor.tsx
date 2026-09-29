@@ -18,7 +18,8 @@ export type ProfileModelsDraft = {
 };
 
 export function createClassifierModelsDraft(response: ClassifierModelsResponse): ClassifierModelsDraft {
-  const selected = response.enabled_model_ids;
+  const available = new Set(response.models.filter((model) => model.configured || model.key_optional).map((model) => model.id));
+  const selected = response.enabled_model_ids.filter((id) => available.has(id));
   return {
     enabledModelIds: selected,
     defaultModelId: selected.includes(response.default_model_id) ? response.default_model_id : selected[0] ?? "",
