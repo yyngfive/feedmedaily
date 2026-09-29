@@ -17,6 +17,7 @@ Changes since `0.7.0`:
 
 - Onboarding now recognizes configured classifier API keys after settings load, so the default classifier and save actions become available without re-entering the key.
 - Onboarding now accepts one newly entered provider API key for both models from that provider; saving DeepSeek Flash with Pro selected for Profile no longer reports that Pro lacks a key.
+- Onboarding and Model settings now preserve saved classifier enablement and the saved Profile default when loading provider keys; saving another provider no longer silently re-enables disabled models or switches the Profile model.
 - Feed sync now retries feeds that failed on transient transport errors (DNS lookup failures such as "no such host", timeouts, dropped connections) in up to two end-of-run passes about 10s and 30s later, so a brief resolver outage no longer drops a journal's papers for the whole day. HTTP status failures, challenge verification, and parse errors keep their existing behavior.
 
 ### Changed

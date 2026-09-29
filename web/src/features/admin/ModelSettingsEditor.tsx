@@ -18,7 +18,7 @@ export type ProfileModelsDraft = {
 };
 
 export function createClassifierModelsDraft(response: ClassifierModelsResponse): ClassifierModelsDraft {
-  const selected = response.models.filter((model) => model.configured).map((model) => model.id);
+  const selected = response.enabled_model_ids;
   return {
     enabledModelIds: selected,
     defaultModelId: selected.includes(response.default_model_id) ? response.default_model_id : selected[0] ?? "",
@@ -27,10 +27,25 @@ export function createClassifierModelsDraft(response: ClassifierModelsResponse):
   };
 }
 
+export function enabledClassifierModelIdsAfterKeyChange(
+  draft: ClassifierModelsDraft,
+  models: ClassifierModelsResponse,
+  provider: string,
+  hasPendingKey: boolean,
+): string[] {
+  const providerWasConfigured = models.models.some((model) => model.provider === provider && model.configured);
+  return models.models
+    .filter((model) => model.provider === provider
+      ? (!providerWasConfigured && hasPendingKey) || (draft.enabledModelIds.includes(model.id) && (model.configured || hasPendingKey))
+      : draft.enabledModelIds.includes(model.id))
+    .map((model) => model.id);
+}
+
 export function createProfileModelsDraft(response: ProfileModelsResponse): ProfileModelsDraft {
-  const configured = response.models.filter((model) => model.configured).map((model) => model.id);
   return {
-    defaultModelId: configured.includes(response.default_model_id) ? response.default_model_id : configured[0] ?? "",
+    defaultModelId: response.models.some((model) => model.id === response.default_model_id)
+      ? response.default_model_id
+      : "",
   };
 }
 
@@ -106,7 +121,7 @@ export function ModelSettingsEditor({
   const enabledSet = new Set(classifierDraft.enabledModelIds);
   const selectedModels = models.models.filter((model) => enabledSet.has(model.id));
   const configuredProfileIDs = new Set(profileModels.models.filter((model) => model.configured).map((model) => model.id));
-  const profileOptions = profileModels.models.filter((model) => configuredProfileIDs.has(model.id) || enabledSet.has(model.id));
+  const profileOptions = profileModels.models.filter((model) => configuredProfileIDs.has(model.id) || enabledSet.has(model.id) || model.id === profileDraft.defaultModelId);
   const providerGroups = Array.from(models.models.reduce((groups, model) => {
     const group = groups.get(model.provider) ?? [];
     group.push(model);
@@ -126,16 +141,16 @@ export function ModelSettingsEditor({
     if (nextValue.trim()) credentials[provider] = {value: nextValue};
     else delete credentials[provider];
 
-    const enabledModelIds = models.models
-      .filter((model) => model.key_optional || model.configured || Boolean(credentials[model.provider]?.value?.trim()))
-      .map((model) => model.id);
+    const enabledModelIds = enabledClassifierModelIdsAfterKeyChange(
+      classifierDraft, models, provider, Boolean(credentials[provider]?.value?.trim()),
+    );
     const defaultModelId = enabledModelIds.includes(classifierDraft.defaultModelId)
       ? classifierDraft.defaultModelId
       : enabledModelIds[0] ?? "";
     onClassifierChange({...classifierDraft, credentials, enabledModelIds, defaultModelId});
 
     const nextProfileOptions = profileModels.models.filter((model) =>
-      model.configured || enabledModelIds.includes(model.id),
+      model.configured || enabledModelIds.includes(model.id) || model.id === profileDraft.defaultModelId,
     );
     const profileDefaultModelId = nextProfileOptions.some((model) => model.id === profileDraft.defaultModelId)
       ? profileDraft.defaultModelId
