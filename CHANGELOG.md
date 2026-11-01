@@ -4,9 +4,16 @@ This changelog is grouped by version number and records each version relative to
 
 The latest released version is `0.7.1`. The next planned release is `0.7.2`, so unreleased product changes should be added under `0.7.2` until that version ships.
 
-## 0.7.2 (Unreleased)
+## 0.7.2 (2026-11-01)
 
 Changes since `0.7.1`:
+
+### Fixed
+
+- Applying a Profile proposal now keeps feedback open until reclassification confirms its relevance and optional topic corrections. Unfulfilled corrections remain in the Open feedback queue for subsequent proposals.
+
+- Profile proposal generation, repair, and validation now retry correctable model-output schema errors once with the validation details, including unsupported sections or operations, missing required text, empty changes, and unknown topic references. Corrected proposals still pass the existing boundary and safety checks before they can be saved.
+- Safety-rejected profile proposals now appear as warnings with blocking issues and required fixes instead of a success message without details.
 
 ## 0.7.1 (2026-09-29)
 
