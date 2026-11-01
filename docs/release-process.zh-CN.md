@@ -46,7 +46,7 @@ if ($manifest.version -ne $releaseVersion) { throw 'update.json version mismatch
 Get-FileHash -Algorithm SHA256 $installer,dist/update.json
 ```
 
-核对 `update.json` 的 `download_url` 指向本版安装包，`release_notes_url` 指向本版 Release；核对安装包版本，并在测试环境用安装包做一次安装或升级冒烟检查。记录两项文件的 SHA256。打包脚本若跳过 Inno Setup，安装包缺失，此步不得通过。
+核对 `update.json` 的 `download_url` 指向本版安装包，`release_notes_url` 指向本版 Release；核对安装包版本。按用户要求，不执行冒烟测试（包括安装或升级冒烟测试），除非用户明确要求。记录两项文件的 SHA256。打包脚本若跳过 Inno Setup，安装包缺失，此步不得通过。
 
 ## 4. 创建草稿并正式发布 GitHub Release
 

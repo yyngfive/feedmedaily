@@ -66,6 +66,8 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 
 ## Verification Economy
 
+- Do not run smoke tests, including installation or upgrade smoke tests, unless the user explicitly asks for them.
+
 - Do not run `pytest`, `go test`, Playwright, or other broad test suites as a ritual closing step when the change is limited to experiments, reports, documentation, data summaries, or another scope those tests do not exercise.
 - Prefer direct inspection, model judgment, existing runtime evidence, and the errors produced by the actual command or workflow being changed. Treat a successful real execution and its recorded output as the primary verification for experiment/report work.
 - Run a targeted test only when the edited behavior has a concrete regression risk that the test can detect, or when the user explicitly requests it. Do not use unrelated repository-wide tests to create a false sense of confidence.
@@ -75,7 +77,7 @@ go run .\cmd\feedmedailyd --root . --host 127.0.0.1 --port 8000
 - `CHANGELOG.md` is the canonical versioned changelog for user-facing product changes.
 - Maintain changelog entries grouped by version number, starting from `0.2.0`.
 - Each version section should describe changes relative to the previous released version, not as an all-time cumulative list.
-- The latest released version is `0.7.1`; the current rolling unreleased section is `0.7.2` until `0.7.2` ships.
+- The latest released version is `0.7.2`; the current rolling unreleased section is `0.7.3` until `0.7.3` ships.
 - When a version is released, convert that section from unreleased to dated release notes and open a new unreleased section for the next planned version.
 - Add behavior changes, bug fixes, runtime changes, packaging changes, and notable UX changes that matter to users or release notes readers.
 - Avoid filling the changelog with pure planning-only edits, internal note reshuffles, or agent-policy-only changes unless they have a user-visible release impact.
