@@ -24,11 +24,11 @@ FeedMeDaily 当前只提供 Windows 安装版。请从 GitHub Releases 下载最
 
 ### Profile
 
-可以使用中文或英文描述自己感兴趣的研究内容以及明确不感兴趣的研究内容。这些内容最终会被AI解析为三种规则（与你的兴趣直接相关：direct，间接相关：indirect和不相关：unrelated）
+可以使用中文或英文描述自己感兴趣的研究内容以及明确不感兴趣的研究内容，支持简单的关键词以及复杂的描述。这些内容最终会被AI解析为三种规则（与你的兴趣直接相关：direct，间接相关：indirect和不相关：unrelated）
 
 ### 模型设置
 
-分类和 Profile 模型均使用各供应商官方的 OpenAI 兼容 API。录入对应 API Key 即可启用该供应商的模型
+分类和 Profile 模型均使用各供应商官方的 OpenAI 兼容 API。录入对应 API Key 即可启用该供应商的模型，可以根据喜好自行选择某一家或多家
 
 支持的供应商的 API Key 获取方式：
 
@@ -52,7 +52,7 @@ FeedMeDaily 当前只提供 Windows 安装版。请从 GitHub Releases 下载最
 1. 在 [小米 MiMo API 开放平台](https://mimo.mi.com/) 注册并登录
 2. 在控制台的 API Keys 页面申请按量付费 API Key
 
-### Zotero 设置
+### Zotero 设置（可选）
 
 - 可以在初始界面的高级设置或者主界面的App设置界面设置Zotero。设置后可以直接在FMD应用内将感兴趣的文章保存到Zotero
 - 个人库：`ZOTERO_LIBRARY_TYPE=user`，`ZOTERO_LIBRARY_ID` 填写 Zotero的 `userID`
@@ -84,11 +84,11 @@ FMD通过各出版社提供了官方RSS来追踪最新的文献。FMD内置了10
 
 ### 开启同步
 
-在Settings的Dashboard页面点击Sync即可从订阅的RSS地址中获取最新一期文章并分类。Sync过程中可能会弹出“人类验证”的提示窗口，等待自行关闭或者手动点击“我是人类”后关闭。FMD默认开启每天上午九点定时Sync，可以在App设置页修改时间或关闭。如果使用DeepSeek模型，建议设置在谷价时段。
+在Settings的Dashboard页面点击Sync即可从订阅的RSS地址中获取最新一期文章并分类。Sync过程中可能会弹出“人类验证”的提示窗口，等待自行关闭或者手动点击“我是人类”后关闭。FMD默认开启每天上午九点定时Sync，可以在App设置页修改时间或关闭。如果使用DeepSeek模型，建议设置在谷价时段，例如中午十二点半。
 
 ![1790689819409](image/README/1790689819409.png)
 
-建议同步周期不超过出版社的期刊在线发表或纸质版出版周期。出版社的RSS地址仅提供最新一期或最新的提前预览文章。Sync间隔时间过长可能导致部分文章无法被FMD记录。
+建议同步周期不超过出版社的期刊在线发表或纸质版出版周期。出版社的RSS地址仅提供最新一期或最新的提前预览文章。Sync间隔时间过长可能导致部分文章无法被FMD记录。默认每天同步，在设置的同步时间后运行软件会自动触发同步。
 
 FMD只能记录RSS订阅来源的文章，追踪特定期刊的新文章，检索范围仅限Sync功能记录的文章。
 
