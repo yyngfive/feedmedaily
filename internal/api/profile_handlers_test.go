@@ -403,8 +403,8 @@ func TestProfileProposalApplyRejectAndReclassifyAPI(t *testing.T) {
 	if feedbackRecorder.Code != http.StatusOK || !contains(feedbackRecorder.Body.String(), `"used_in_profile":true`) {
 		t.Fatalf("feedback after apply = %d %s", feedbackRecorder.Code, feedbackRecorder.Body.String())
 	}
-	if used := feedbackStateCount(t, settings.DatabasePath, "used"); used != 2 {
-		t.Fatalf("legacy proposal should mark all source feedback used, got %d", used)
+	if open := feedbackStateCount(t, settings.DatabasePath, "open"); open != 2 {
+		t.Fatalf("unfulfilled source feedback should stay open, got %d", open)
 	}
 
 	rejectRecorder := httptest.NewRecorder()
@@ -479,11 +479,11 @@ func TestCompactProfileProposalApplyUsesAcceptedChanges(t *testing.T) {
 	if len(reclassifiedPaperIDs) != 1 || reclassifiedPaperIDs[0] != 1 {
 		t.Fatalf("expected only accepted feedback paper reclassified, got %#v", reclassifiedPaperIDs)
 	}
-	if used := feedbackStateCount(t, settings.DatabasePath, "used"); used != 1 {
-		t.Fatalf("expected only accepted feedback to be used, got %d", used)
+	if used := feedbackStateCount(t, settings.DatabasePath, "used"); used != 0 {
+		t.Fatalf("unfulfilled accepted feedback must not close, got %d", used)
 	}
-	if open := feedbackStateCount(t, settings.DatabasePath, "open"); open != 1 {
-		t.Fatalf("expected rejected feedback to remain open, got %d", open)
+	if open := feedbackStateCount(t, settings.DatabasePath, "open"); open != 2 {
+		t.Fatalf("expected rejected and unfulfilled feedback to remain open, got %d", open)
 	}
 }
 
@@ -532,6 +532,45 @@ func TestProfileProposalApplyReclassifyJobCanBeCancelled(t *testing.T) {
 	job := waitForJobTerminalStatus(t, payload.Job.ID)
 	if job.Status != "cancelled" {
 		t.Fatalf("apply reclassify job status = %s", job.Status)
+	}
+	if open := feedbackStateCount(t, settings.DatabasePath, "open"); open != 2 {
+		t.Fatalf("cancelled reclassification must leave feedback open, got %d", open)
+	}
+}
+
+func TestReclassifyClosesOnlyFulfilledFeedback(t *testing.T) {
+	settings := testSettings(t.TempDir())
+	restore := stubAPIGlobals(t)
+	defer restore()
+	seedReadOnlyFixture(t, settings.DatabasePath)
+	writeFile(t, settings.ProfilePath, `{"meta":{"name":"Current","version":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-12T00:00:00Z","source_description":"current"},"scope":"RNA biology","relevance_rules":{"direct":["RNA"],"indirect":[],"unrelated":[]},"topic_taxonomy":[],"few_shots":[]}`)
+	db, err := sql.Open("sqlite", settings.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	// Simulate a legacy apply that prematurely closed both corrections.
+	execSQLite(t, db, `UPDATE feedback SET state='used', used_in_prompt=1; UPDATE classifications SET relevance='direct';`)
+	reclassifyPaperIDsContextFunc = func(_ config.Settings, ids []int64, _ context.Context, _ jobruntime.ProgressFunc, _ ...*llmusage.Collector) (int, error) {
+		return len(ids), nil
+	}
+	rebuildLatestReportFunc = func(_ config.Settings, _ jobruntime.ProgressFunc) (int, error) {
+		if open := feedbackStateCount(t, settings.DatabasePath, "open"); open != 1 {
+			t.Fatalf("feedback must be reconciled before rebuilding report, open=%d", open)
+		}
+		return 1, nil
+	}
+	run := reclassifyJobRunFunc(settings, "feedback", func() ([]int64, error) { return []int64{1}, nil }, []int64{1, 2})
+	result, err := run(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconciliation := result["reconciliation"].(jobruntime.ReconcileResult)
+	if reconciliation.Checked != 2 || reconciliation.Fulfilled != 1 || len(reconciliation.Unfulfilled) != 1 || reconciliation.Unfulfilled[0].FeedbackID != 2 {
+		t.Fatalf("reconciliation = %#v", reconciliation)
+	}
+	if used := feedbackStateCount(t, settings.DatabasePath, "used"); used != 1 {
+		t.Fatalf("only matching feedback should close, got %d", used)
 	}
 }
 

@@ -193,8 +193,7 @@ func (s *Store) DeleteFeedback(id int64) error {
 	return nil
 }
 
-// FeedbackByIDs 按 id 批量读取 feedback 记录（含已消费的）。apply-proposal 的
-// 重分类在作业开始前就把关联 feedback 关闭，对账只能按显式 id 列表取回它们。
+// FeedbackByIDs 按 id 批量读取 feedback 记录，供 proposal 关联反馈对账。
 func (s *Store) FeedbackByIDs(ids []int64) ([]FeedbackRecord, error) {
 	if len(ids) == 0 || len(s.feedbackColumns) == 0 || len(s.paperColumns) == 0 {
 		return []FeedbackRecord{}, nil
@@ -289,13 +288,32 @@ func (s *Store) MarkFeedbackUsed(ids []int64) error {
 	for _, id := range ids {
 		if _, err := s.db.Exec(`
 			UPDATE feedback
-			SET used_in_prompt = 1, state = ?
+			SET used_in_prompt = 1
 			WHERE id = ?
-		`, feedbackStateUsed, id); err != nil {
+		`, id); err != nil {
 			return fmt.Errorf("mark feedback %d used: %w", id, err)
 		}
 	}
 	return nil
+}
+
+// SetFeedbackFulfilled closes only matching corrections; unmatched legacy rows reopen.
+func (s *Store) SetFeedbackFulfilled(fulfilled map[int64]bool) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for id, matched := range fulfilled {
+		state := feedbackStateOpen
+		if matched {
+			state = feedbackStateUsed
+		}
+		if _, err := tx.Exec(`UPDATE feedback SET state = ? WHERE id = ?`, state, id); err != nil {
+			return fmt.Errorf("update feedback %d fulfillment: %w", id, err)
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) PaperIDsForFeedbackIDs(ids []int64) ([]int64, error) {

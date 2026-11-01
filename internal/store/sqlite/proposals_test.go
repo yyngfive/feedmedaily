@@ -75,8 +75,22 @@ INSERT INTO profile_proposals (
 	if err != nil {
 		t.Fatal(err)
 	}
-	if feedback == nil || !feedback.UsedInProfile || feedback.State != "used" {
+	if feedback == nil || !feedback.UsedInProfile || feedback.State != "open" {
 		t.Fatalf("unexpected feedback after apply: %#v", feedback)
+	}
+	if err := store.SetFeedbackFulfilled(map[int64]bool{10: true}); err != nil {
+		t.Fatal(err)
+	}
+	feedback, err = store.FeedbackByID(10)
+	if err != nil || feedback.State != "used" || !feedback.UsedInProfile {
+		t.Fatalf("fulfilled feedback = %#v, err = %v", feedback, err)
+	}
+	if err := store.SetFeedbackFulfilled(map[int64]bool{10: false}); err != nil {
+		t.Fatal(err)
+	}
+	feedback, err = store.FeedbackByID(10)
+	if err != nil || feedback.State != "open" || !feedback.UsedInProfile {
+		t.Fatalf("unfulfilled legacy feedback = %#v, err = %v", feedback, err)
 	}
 
 	if err := store.RejectProfileProposalState(11, time.Date(2026, 5, 16, 8, 0, 0, 0, time.UTC)); err != nil {

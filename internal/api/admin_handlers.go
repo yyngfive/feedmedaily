@@ -256,7 +256,7 @@ func topicBackfillJobRunFunc(serverSettings config.Settings) localJobFunc {
 // reclassifyJobRunFunc 把一段固定的 paper ids 或 scope 选择逻辑包装成可取消的 reclassify job。
 // pipeline 锁由启动方获取（手动路径同步 TryLock，排队路径由 wait 门获取），
 // 释放统一交给 launchLocalJob 在作业结束时执行。feedbackIDs 非空时（apply-proposal
-// 路径传入该 proposal 关联、apply 时刚关闭的那批 feedback）对账把它们算进来，
+// 路径传入该 proposal 关联的 feedback）对账把它们算进来，
 // 手动路径传 nil、只对账重分类论文上仍 open 的 feedback。
 func reclassifyJobRunFunc(serverSettings config.Settings, scope string, selectIDs func() ([]int64, error), feedbackIDs []int64) localJobFunc {
 	return func(ctx context.Context, progress jobruntime.ProgressFunc, usage *llmusage.Collector) (map[string]any, error) {
@@ -273,11 +273,6 @@ func reclassifyJobRunFunc(serverSettings config.Settings, scope string, selectID
 		if err != nil {
 			return result, err
 		}
-		reportCount, err := rebuildLatestReportFunc(serverSettings, progress)
-		if err != nil {
-			return result, err
-		}
-		result["report_papers"] = reportCount
 		reconciliation, recErr := jobruntime.ReconcileFeedback(serverSettings, paperIDs, feedbackIDs)
 		if recErr != nil {
 			// 对账失败不推翻重分类结果，只在日志留痕。
@@ -291,6 +286,11 @@ func reclassifyJobRunFunc(serverSettings config.Settings, scope string, selectID
 		} else if reconciliation.Checked > 0 {
 			result["reconciliation"] = reconciliation
 		}
+		reportCount, err := rebuildLatestReportFunc(serverSettings, progress)
+		if err != nil {
+			return result, err
+		}
+		result["report_papers"] = reportCount
 		return result, nil
 	}
 }

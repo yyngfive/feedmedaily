@@ -31,9 +31,9 @@ type ReconcileResult struct {
 }
 
 // ReconcileFeedback 对一次重分类涉及论文上的 feedback 纠正与各自最新分类做对账。
-// feedbackIDs 是显式指定的记录（apply-proposal 路径在重分类前刚关闭的那批）；
-// 其余取这些论文上仍 open 的记录，按 id 去重。"已消费"（feedback 关闭）与
-// "已生效"（分类等于纠正值）是两个谓词，这里回答的是后者。
+// feedbackIDs 是显式指定的记录（apply-proposal 路径关联的那批）；
+// 其余取这些论文上仍 open 的记录，按 id 去重。仅关闭已满足纠正的记录，
+// 未满足的记录保持或恢复 open，供后续提案继续处理。
 func ReconcileFeedback(settings config.Settings, paperIDs []int64, feedbackIDs []int64) (ReconcileResult, error) {
 	result := ReconcileResult{Unfulfilled: []CorrectionStatus{}}
 	sqliteStore, err := store.Open(settings.DatabasePath)
@@ -93,22 +93,26 @@ func ReconcileFeedback(settings config.Settings, paperIDs []int64, feedbackIDs [
 		}
 	}
 
+	fulfilledRecords := map[int64]bool{}
 	for _, record := range records {
 		classification, err := sqliteStore.LatestClassification(record.PaperID)
 		if err != nil {
 			return result, err
 		}
 		if classification == nil {
+			fulfilledRecords[record.ID] = false
 			continue
 		}
 		result.Checked++
-		if status, fulfilled := evaluateCorrection(record, *classification, topicLabels); !fulfilled {
+		status, fulfilled := evaluateCorrection(record, *classification, topicLabels)
+		fulfilledRecords[record.ID] = fulfilled
+		if !fulfilled {
 			result.Unfulfilled = append(result.Unfulfilled, status)
 		} else {
 			result.Fulfilled++
 		}
 	}
-	return result, nil
+	return result, sqliteStore.SetFeedbackFulfilled(fulfilledRecords)
 }
 
 // evaluateCorrection 比较一条 feedback 与论文最新分类：相关性必须相等；记录了
