@@ -89,3 +89,12 @@ Resolve-DnsName feedmedaily-update.stassenger.top -Type TXT -Server 223.5.5.5
 - 安装包 SHA256：`70aa590612f66c5af5bd79fc7948ca674a8ecca18eb4f5ced6b3161927c29d8f`；`update.json` SHA256：`d86ec8321ee6cd9a93022ef99ee47a057ad7725e3a125888987a293fa6e8354a`。
 - 首次发布遗漏 DNS，TXT 仍为 0.7.0；当天 22:46（北京时间）补更新至 `version=0.7.1;url=https://github.com/yyngfive/feedmedaily/releases/tag/v0.7.1`，记录 ID `2094020894707601408`。
 - `dns31.hichina.com`、`dns32.hichina.com`、Google DNS 和阿里公共 DNS 均返回 0.7.1，TTL 为 600 秒；本版客户端的 `GET /api/app/update?force=1` 返回 `latest_version=0.7.1`、`status=up_to_date`。收尾提交：`333555d`；DNS 补记提交：`7b245e7`。
+
+### v0.7.2 · 2026-11-01
+
+- Tag 提交：`b5244faa23177733533d306dbd02a8f4ede0e075`；Release：<https://github.com/yyngfive/feedmedaily/releases/tag/v0.7.2>。
+- 安装包 SHA256：`82ca9e145504882a452086f5bd187e65a4993d34c0cc36765946f0fa75aa92db`；`update.json` SHA256：`0a9eb7c4cc7c27d7a9160182c9bbd0328d29d94271e9207dbb4f1ef78fc925d4`。GitHub 两项公开下载的文件名、大小及哈希均与本地一致。
+- DNS 切换成功，记录 ID `2094020894707601408`；`dns31.hichina.com`、`dns32.hichina.com` 与阿里公共 DNS `223.5.5.5` 均返回 `version=0.7.2;url=https://github.com/yyngfive/feedmedaily/releases/tag/v0.7.2`，TTL 为 600 秒。
+- 本机默认 DNS 的旧缓存过期后，客户端 `GET /api/app/update?force=1` 返回 `current_version=0.7.2`、`latest_version=0.7.2`、`has_update=false`、`status=up_to_date`。旧版客户端更新提示未另外运行验证。
+- 前端 17 项测试、前端生产构建、Go 全量测试及差异检查通过。用户提出停止冒烟测试前安装流程已启动并完成（退出码 0）；本机安装版本为 0.7.2。此后未追加冒烟测试，后续默认不执行。
+- 收尾提交：`eb7f48db30d917eacd62daf5bae07c1257df74e3`；已回到 `main`，移除临时 release draft 并开启 0.7.3 unreleased section。
