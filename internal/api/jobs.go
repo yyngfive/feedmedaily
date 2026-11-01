@@ -294,7 +294,7 @@ func launchLocalJob(settings config.Settings, jobType string, queuedMessageKey s
 				// Dashboard renders the same counters and warning list for it,
 				// and zeros would hide real work and real warnings.
 				current.Result = result
-				current.WarningCount = countWarnings(result)
+				current.WarningCount = countJobWarnings(jobType, result)
 				current.LLMUsage = &summary
 				clearJobProgress(current)
 				current.FinishedAt = &finished
@@ -302,7 +302,7 @@ func launchLocalJob(settings config.Settings, jobType string, queuedMessageKey s
 			return
 		}
 
-		warningCount := countWarnings(result)
+		warningCount := countJobWarnings(jobType, result)
 		summary := finalizeLLMUsage(settings, job.ID, jobType, "completed", usage, finished)
 		logJobEvent(settings.LogsDir, &job, "info", "completed", jobType+".completed", "Completed.", "", result)
 		updateJob(job.ID, func(current *jobInfo) {
@@ -336,7 +336,7 @@ func finishCancelledLocalJob(settings config.Settings, job *jobInfo, jobType str
 		current.Error = ""
 		current.Result = result
 		current.LLMUsage = &summary
-		current.WarningCount = countWarnings(result)
+		current.WarningCount = countJobWarnings(jobType, result)
 		clearJobProgress(current)
 		current.FinishedAt = &finished
 		current.CancelRequested = true
@@ -484,10 +484,37 @@ func countWarnings(result map[string]any) int {
 	return len(rawItems)
 }
 
+func countJobWarnings(jobType string, result map[string]any) int {
+	warnings := countWarnings(result)
+	if jobType == "profile-proposal" && warnings == 0 {
+		if accepted, ok := result["accepted"].(bool); ok && !accepted {
+			return 1
+		}
+	}
+	return warnings
+}
+
+func resultStrings(value any) []string {
+	switch items := value.(type) {
+	case []string:
+		return items
+	case []any:
+		result := make([]string, 0, len(items))
+		for _, item := range items {
+			if text := strings.TrimSpace(fmt.Sprint(item)); text != "" && text != "<nil>" {
+				result = append(result, text)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
 func summarizeResult(jobType string, result map[string]any) string {
 	switch jobType {
 	case "sync":
-		warnings := countWarnings(result)
+		warnings := countJobWarnings(jobType, result)
 		message := "Sync completed."
 		if warnings > 0 {
 			message = fmt.Sprintf("Sync completed with %d fetch warning(s).", warnings)
@@ -542,7 +569,14 @@ func summarizeResult(jobType string, result map[string]any) string {
 			if summary == "" || summary == "<nil>" {
 				summary = "See validator details for required fixes."
 			}
-			return fmt.Sprintf("Profile proposal rejected by safety review. %s", summary)
+			message := fmt.Sprintf("Profile proposal rejected by safety review. %s", summary)
+			if issues := resultStrings(result["blocking_issues"]); len(issues) > 0 {
+				message += fmt.Sprintf(" Blocking issues: %s.", strings.Join(issues, "; "))
+			}
+			if fixes := resultStrings(result["required_fixes"]); len(fixes) > 0 {
+				message += fmt.Sprintf(" Required fixes: %s.", strings.Join(fixes, "; "))
+			}
+			return message
 		}
 		return fmt.Sprintf("Profile proposal completed. proposal_id=%v.", result["proposal_id"])
 	default:

@@ -55,15 +55,29 @@ func TestBackendRunCommandUnsupportedPlatforms(t *testing.T) {
 }
 
 func TestSummarizeProfileProposalRejectedResult(t *testing.T) {
-	message := summarizeResult("profile-proposal", map[string]any{
+	result := map[string]any{
 		"accepted":        false,
 		"hard_rejected":   true,
 		"summary":         "Removed key negative boundary.",
 		"blocking_issues": []string{"Surface adjacency boundary was removed."},
-		"required_fixes":  []string{"Preserve the boundary."},
-	})
-	if !strings.Contains(message, "Profile proposal rejected by safety review.") || !strings.Contains(message, "Removed key negative boundary.") {
-		t.Fatalf("unexpected summary: %s", message)
+		"required_fixes":  []any{"Preserve the boundary."},
+	}
+	message := summarizeResult("profile-proposal", result)
+	for _, fragment := range []string{
+		"Profile proposal rejected by safety review.",
+		"Removed key negative boundary.",
+		"Surface adjacency boundary was removed.",
+		"Preserve the boundary.",
+	} {
+		if !strings.Contains(message, fragment) {
+			t.Fatalf("summary missing %q: %s", fragment, message)
+		}
+	}
+	if warnings := countJobWarnings("profile-proposal", result); warnings != 1 {
+		t.Fatalf("rejected proposal warning count = %d, want 1", warnings)
+	}
+	if warnings := countJobWarnings("profile-proposal", map[string]any{"accepted": true}); warnings != 0 {
+		t.Fatalf("accepted proposal warning count = %d, want 0", warnings)
 	}
 }
 
@@ -76,12 +90,12 @@ func TestFailedJobKeepsPartialResultAndWarnings(t *testing.T) {
 	job := launchLocalJob(settings, "sync", "job.queued", "Queued.", "job.started", "Sync started.",
 		func(context.Context, jobruntime.ProgressFunc, *llmusage.Collector) (map[string]any, error) {
 			return map[string]any{
-					"fetched":    47,
-					"inserted":   0,
-					"updated":    0,
-					"classified": 0,
-					"errors":     []string{"paper 23625: could not clear the rejected DOI: paper key is taken"},
-				}, errors.New("repairing the paper DOI would collide with another paper key")
+				"fetched":    47,
+				"inserted":   0,
+				"updated":    0,
+				"classified": 0,
+				"errors":     []string{"paper 23625: could not clear the rejected DOI: paper key is taken"},
+			}, errors.New("repairing the paper DOI would collide with another paper key")
 		}, nil)
 
 	finished := waitForJobTerminalStatus(t, job.ID)
