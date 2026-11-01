@@ -145,7 +145,9 @@ func compactProfileContract() string {
 }
 
 func compactProposalContract() string {
-	return `{
+	return `Allowed section values: "scope", "direct_rule", "indirect_rule", "unrelated_rule", "topic".
+For relevance rules, select the matching direct_rule, indirect_rule, or unrelated_rule section. Never use "rule" or "relevance_rules" as a section.
+{
   "summary": "short summary of what changed",
   "changes": [
     {

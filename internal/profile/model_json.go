@@ -3,6 +3,7 @@ package profile
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/yyngfive/scirssagent/internal/config"
 	"github.com/yyngfive/scirssagent/internal/llmusage"
@@ -234,28 +235,28 @@ func requestProfileModelJSONBody(settings config.Settings, endpoint string, body
 			"reasoning_tokens": reasoningTokens,
 		},
 	})
-		if payloadResponse.Usage != nil && usage != nil {
-			responseUsage := llmusage.ResponseUsage{
-				PromptTokens:     payloadResponse.Usage.PromptTokens,
-				CompletionTokens: payloadResponse.Usage.CompletionTokens,
-			}
-			if payloadResponse.Usage.PromptCacheHitTokens != nil && payloadResponse.Usage.PromptCacheMissTokens != nil {
-				// DeepSeek-style flat cache breakdown.
-				responseUsage.PromptCacheHitTokens = *payloadResponse.Usage.PromptCacheHitTokens
-				responseUsage.PromptCacheMissTokens = *payloadResponse.Usage.PromptCacheMissTokens
-				responseUsage.CacheBreakdownPresent = true
-			} else if details := payloadResponse.Usage.PromptTokensDetails; details != nil && details.CachedTokens > 0 {
-				// OpenAI-style nested cached-token details (Zhipu, DashScope).
-				cached := details.CachedTokens
-				if cached > responseUsage.PromptTokens {
-					cached = responseUsage.PromptTokens
-				}
-				responseUsage.PromptCacheHitTokens = cached
-				responseUsage.PromptCacheMissTokens = responseUsage.PromptTokens - cached
-				responseUsage.CacheBreakdownPresent = true
-			}
-			usage.Record(llmusage.Event{Role: "profile", Operation: operation, BaseURL: settings.ProfileBaseURL, Model: settings.ProfileModel, OccurredAt: time.Now().UTC(), Usage: responseUsage})
+	if payloadResponse.Usage != nil && usage != nil {
+		responseUsage := llmusage.ResponseUsage{
+			PromptTokens:     payloadResponse.Usage.PromptTokens,
+			CompletionTokens: payloadResponse.Usage.CompletionTokens,
 		}
+		if payloadResponse.Usage.PromptCacheHitTokens != nil && payloadResponse.Usage.PromptCacheMissTokens != nil {
+			// DeepSeek-style flat cache breakdown.
+			responseUsage.PromptCacheHitTokens = *payloadResponse.Usage.PromptCacheHitTokens
+			responseUsage.PromptCacheMissTokens = *payloadResponse.Usage.PromptCacheMissTokens
+			responseUsage.CacheBreakdownPresent = true
+		} else if details := payloadResponse.Usage.PromptTokensDetails; details != nil && details.CachedTokens > 0 {
+			// OpenAI-style nested cached-token details (Zhipu, DashScope).
+			cached := details.CachedTokens
+			if cached > responseUsage.PromptTokens {
+				cached = responseUsage.PromptTokens
+			}
+			responseUsage.PromptCacheHitTokens = cached
+			responseUsage.PromptCacheMissTokens = responseUsage.PromptTokens - cached
+			responseUsage.CacheBreakdownPresent = true
+		}
+		usage.Record(llmusage.Event{Role: "profile", Operation: operation, BaseURL: settings.ProfileBaseURL, Model: settings.ProfileModel, OccurredAt: time.Now().UTC(), Usage: responseUsage})
+	}
 	if len(payloadResponse.Choices) == 0 {
 		return "", fmt.Errorf("profile model response did not contain any choices")
 	}
@@ -356,6 +357,10 @@ func shouldRetryProfileWithoutThinking(err error) bool {
 }
 
 func shouldRetryProfileParseWithThinkingDisabled(settings config.Settings, err error) bool {
+	var outputErr *profileModelOutputError
+	if errors.As(err, &outputErr) {
+		return true
+	}
 	if strings.EqualFold(strings.TrimSpace(settings.ProfileThinking), "disabled") {
 		return false
 	}

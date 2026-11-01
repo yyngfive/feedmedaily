@@ -9,25 +9,41 @@ import (
 	"strings"
 )
 
+type profileModelOutputError struct {
+	err error
+}
+
+func (e *profileModelOutputError) Error() string {
+	return e.err.Error()
+}
+
+func (e *profileModelOutputError) Unwrap() error {
+	return e.err
+}
+
+func newProfileModelOutputError(err error) error {
+	return &profileModelOutputError{err: err}
+}
+
 func buildCompactProposalAttempt(current map[string]any, currentDocument profileDocument, content string) (compactProposalAttempt, error) {
 	summary, changes, err := coerceCompactProposal(content)
 	if err != nil {
-		return compactProposalAttempt{}, err
+		return compactProposalAttempt{}, newProfileModelOutputError(err)
 	}
 	changes = withoutTopicChanges(changes)
 	if len(changes) == 0 {
-		return compactProposalAttempt{}, fmt.Errorf("model generated a profile proposal without any actionable changes")
+		return compactProposalAttempt{}, newProfileModelOutputError(fmt.Errorf("model generated a profile proposal without any actionable changes"))
 	}
 	proposedProfile, err := BuildProposedProfileFromChanges(current, changes)
 	if err != nil {
-		return compactProposalAttempt{}, err
+		return compactProposalAttempt{}, newProfileModelOutputError(err)
 	}
 	proposedDocument, err := parseDocumentMap(proposedProfile)
 	if err != nil {
-		return compactProposalAttempt{}, err
+		return compactProposalAttempt{}, newProfileModelOutputError(err)
 	}
 	if reason := destructiveRevisionReason(currentDocument, proposedDocument); reason != "" {
-		return compactProposalAttempt{}, fmt.Errorf("model generated an unsafe profile proposal. %s Current profile was kept unchanged.", reason)
+		return compactProposalAttempt{}, newProfileModelOutputError(fmt.Errorf("model generated an unsafe profile proposal. %s Current profile was kept unchanged.", reason))
 	}
 	return compactProposalAttempt{
 		Summary:          summary,
@@ -56,6 +72,7 @@ func validateGeneratedProfileProposal(settings config.Settings, currentDocument 
 	}
 	result, err := coerceProposalValidationResult(content)
 	if err != nil {
+		err = newProfileModelOutputError(err)
 		if !shouldRetryProfileParseWithThinkingDisabled(settings, err) {
 			return ProposalValidationResult{}, fmt.Errorf("parse profile proposal validation: %w", err)
 		}
@@ -63,12 +80,13 @@ func validateGeneratedProfileProposal(settings config.Settings, currentDocument 
 			Level:     "warning",
 			Component: "profile",
 			Action:    "proposal_validation_parse_fallback_started",
-			Message:   "Retrying proposal validation with thinking disabled after invalid JSON.",
+			Message:   "Retrying proposal validation with thinking disabled after invalid JSON or validation schema.",
 			Error:     err.Error(),
 			Data:      map[string]any{"model": settings.ProfileModel},
 		})
 		fallbackSettings := settings
 		fallbackSettings.ProfileThinking = "disabled"
+		prompt += fmt.Sprintf("\nThe previous response failed validation: %s\nReturn a corrected validation result using the complete required schema.\n", err)
 		content, err = callProfileModelJSON(
 			fallbackSettings,
 			"You audit scientific-literature classification profile proposals for regression risk.",
@@ -131,12 +149,13 @@ func repairProfileProposalFromValidation(settings config.Settings, currentDocume
 			Level:     "warning",
 			Component: "profile",
 			Action:    "proposal_repair_parse_fallback_started",
-			Message:   "Retrying profile proposal repair with thinking disabled after invalid JSON.",
+			Message:   "Retrying profile proposal repair with thinking disabled after invalid JSON or proposal schema.",
 			Error:     err.Error(),
 			Data:      map[string]any{"model": settings.ProfileModel},
 		})
 		fallbackSettings := settings
 		fallbackSettings.ProfileThinking = "disabled"
+		prompt += fmt.Sprintf("\nThe previous response failed validation: %s\nReturn a corrected proposal that fixes every reported error and follows the complete required schema.\n", err)
 		content, err = callProfileModelJSON(
 			fallbackSettings,
 			"You repair rejected scientific-literature profile proposals by applying validator fixes.",

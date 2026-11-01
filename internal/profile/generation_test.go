@@ -30,6 +30,7 @@ func TestGenerateProfileProposalValidatesAcceptedProposal(t *testing.T) {
 		t.Fatalf("generator prompt missing feedback-direction guard: %s", (*prompts)[0])
 	}
 	for _, fragment := range []string{
+		`Allowed section values: "scope", "direct_rule", "indirect_rule", "unrelated_rule", "topic"`,
 		"Before proposing changes, classify each feedback item into one error type",
 		"surface-term false positive, indirect too broad, unrelated boundary missing, direct boundary missing, scope drift",
 		"Propose changes only for repeated error types",
@@ -63,6 +64,107 @@ func TestGenerateProfileProposalValidatesAcceptedProposal(t *testing.T) {
 		if !strings.Contains((*prompts)[1], fragment) {
 			t.Fatalf("validator prompt missing %q: %s", fragment, (*prompts)[1])
 		}
+	}
+}
+
+func TestGenerateProfileProposalRetriesUnsupportedSection(t *testing.T) {
+	for _, thinking := range []string{"enabled", "disabled"} {
+		t.Run(thinking, func(t *testing.T) {
+			valid := profileProposalFixture("change-1", ProposalSectionUnrelatedRule, ProposalOperationAdd, nil, []string{"ML/software papers are unrelated without nucleic acid chemistry."})
+			invalid := strings.Replace(valid, `"unrelated_rule"`, `"rule"`, 1)
+			prompts := stubProfileModelResponses(t, invalid, valid,
+				`{"accepted":true,"summary":"Looks safe.","blocking_issues":[],"required_fixes":[]}`)
+			settings := profileGenerationSettings()
+			settings.ProfileThinking = thinking
+			draft, err := GenerateProfileProposal(settings, profileGenerationCurrentFixture(), profileGenerationFeedbackFixtures())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(draft.Changes) != 1 || draft.Changes[0].Section != ProposalSectionUnrelatedRule || len(*prompts) != 3 {
+				t.Fatalf("unexpected draft or request count: %#v, %d", draft, len(*prompts))
+			}
+			if !strings.Contains((*prompts)[1], "unsupported proposal change section: rule") {
+				t.Fatal("retry prompt must include the rejected section")
+			}
+		})
+	}
+}
+
+func TestGenerateProfileProposalStopsAfterRepeatedUnsupportedSection(t *testing.T) {
+	invalid := profileProposalFixture("change-1", "rule", ProposalOperationAdd, nil, []string{"A new boundary."})
+	prompts := stubProfileModelResponses(t, invalid, invalid)
+	_, err := GenerateProfileProposal(profileGenerationSettings(), profileGenerationCurrentFixture(), profileGenerationFeedbackFixtures())
+	if err == nil || !strings.Contains(err.Error(), "unsupported proposal change section: rule") || len(*prompts) != 2 {
+		t.Fatalf("expected one retry and a section error, got calls=%d err=%v", len(*prompts), err)
+	}
+}
+
+func TestGenerateProfileProposalRepairRetriesUnsupportedSection(t *testing.T) {
+	valid := profileProposalFixture("change-1", ProposalSectionUnrelatedRule, ProposalOperationAdd, nil, []string{"ML/software papers are unrelated without nucleic acid chemistry."})
+	invalid := strings.Replace(valid, `"unrelated_rule"`, `"rule"`, 1)
+	prompts := stubProfileModelResponses(t, valid,
+		`{"accepted":false,"hard_rejected":false,"summary":"Needs clearer rationale.","blocking_issues":["Too terse."],"required_fixes":["Clarify the rationale."]}`,
+		invalid, valid, `{"accepted":true,"summary":"Looks safe.","blocking_issues":[],"required_fixes":[]}`)
+	draft, err := GenerateProfileProposal(profileGenerationSettings(), profileGenerationCurrentFixture(), profileGenerationFeedbackFixtures())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(draft.Changes) != 1 || draft.Changes[0].Section != ProposalSectionUnrelatedRule || len(*prompts) != 5 {
+		t.Fatalf("unexpected draft or request count: %#v, %d", draft, len(*prompts))
+	}
+	if !strings.Contains((*prompts)[3], "unsupported proposal change section: rule") {
+		t.Fatal("repair retry prompt must include the rejected section")
+	}
+}
+
+func TestGenerateProfileProposalRetriesModelOutputValidation(t *testing.T) {
+	valid := profileProposalFixture("change-1", ProposalSectionUnrelatedRule, ProposalOperationAdd, nil, []string{"ML/software papers are unrelated without nucleic acid chemistry."})
+	indirect := profileProposalFixture("change-1", ProposalSectionIndirectRule, ProposalOperationAdd, nil, []string{"Close nucleic-acid substrate context."})
+	tests := []struct {
+		name          string
+		invalid       string
+		expectedError string
+	}{
+		{"unsupported operation", strings.Replace(valid, `"operation":"add"`, `"operation":"update"`, 1), "unsupported proposal change operation: update"},
+		{"blank proposal summary", strings.Replace(valid, `"summary":"Tighten unrelated boundaries"`, `"summary":""`, 1), "compact profile proposal summary cannot be blank"},
+		{"blank change summary", strings.Replace(valid, `"summary":"Tighten unrelated boundaries."`, `"summary":""`, 1), "profile proposal change summary cannot be blank"},
+		{"blank rationale", strings.Replace(valid, `"rationale":"The feedback requires core contribution boundaries instead of surface nucleic-acid adjacency."`, `"rationale":""`, 1), "profile proposal change rationale cannot be blank"},
+		{"no actionable changes", `{"summary":"No changes","changes":[]}`, "model generated a profile proposal without any actionable changes"},
+		{"unknown topic", strings.Replace(indirect, `"rationale":`, `"topics_after":["TypoLabel"],"rationale":`, 1), "change change-1 references unknown topic label: TypoLabel"},
+	}
+	for _, thinking := range []string{"enabled", "disabled"} {
+		for _, test := range tests {
+			t.Run(thinking+"/"+test.name, func(t *testing.T) {
+				prompts := stubProfileModelResponses(t, test.invalid, valid,
+					`{"accepted":true,"summary":"Looks safe.","blocking_issues":[],"required_fixes":[]}`)
+				settings := profileGenerationSettings()
+				settings.ProfileThinking = thinking
+				draft, err := GenerateProfileProposal(settings, profileGenerationCurrentFixture(), profileGenerationFeedbackFixtures())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(draft.Changes) != 1 || len(*prompts) != 3 {
+					t.Fatalf("unexpected draft or request count: %#v, %d", draft, len(*prompts))
+				}
+				if !strings.Contains((*prompts)[1], test.expectedError) {
+					t.Fatalf("retry prompt missing %q", test.expectedError)
+				}
+			})
+		}
+	}
+}
+
+func TestGenerateProfileProposalRepairRetriesModelOutputValidation(t *testing.T) {
+	valid := profileProposalFixture("change-1", ProposalSectionUnrelatedRule, ProposalOperationAdd, nil, []string{"ML/software papers are unrelated without nucleic acid chemistry."})
+	invalid := strings.Replace(valid, `"operation":"add"`, `"operation":"update"`, 1)
+	prompts := stubProfileModelResponses(t, valid,
+		`{"accepted":false,"hard_rejected":false,"summary":"Needs clearer rationale.","blocking_issues":["Too terse."],"required_fixes":["Clarify the rationale."]}`,
+		invalid, valid, `{"accepted":true,"summary":"Looks safe.","blocking_issues":[],"required_fixes":[]}`)
+	if _, err := GenerateProfileProposal(profileGenerationSettings(), profileGenerationCurrentFixture(), profileGenerationFeedbackFixtures()); err != nil {
+		t.Fatal(err)
+	}
+	if len(*prompts) != 5 || !strings.Contains((*prompts)[3], "unsupported proposal change operation: update") {
+		t.Fatalf("repair retry did not include the operation error: %d prompts", len(*prompts))
 	}
 }
 
@@ -169,6 +271,38 @@ func TestGenerateProfileProposalRetriesInvalidValidatorJSONWithThinkingDisabled(
 	}
 	if (*settingsSeen)[2].ProfileThinking != "disabled" {
 		t.Fatalf("validator retry should disable thinking, got %#v", (*settingsSeen)[2].ProfileThinking)
+	}
+}
+
+func TestGenerateProfileProposalRetriesIncompleteValidatorResponse(t *testing.T) {
+	valid := profileProposalFixture("change-1", ProposalSectionUnrelatedRule, ProposalOperationAdd, nil, []string{"ML/software papers are unrelated without nucleic acid chemistry."})
+	for _, thinking := range []string{"enabled", "disabled"} {
+		t.Run(thinking, func(t *testing.T) {
+			prompts, settingsSeen := stubProfileModelResponsesWithSettings(t, valid,
+				`{"accepted":false,"summary":"Incomplete validator response."}`,
+				`{"accepted":true,"summary":"Looks safe.","blocking_issues":[],"required_fixes":[]}`)
+			settings := profileGenerationSettings()
+			settings.ProfileThinking = thinking
+			if _, err := GenerateProfileProposal(settings, profileGenerationCurrentFixture(), profileGenerationFeedbackFixtures()); err != nil {
+				t.Fatal(err)
+			}
+			if len(*prompts) != 3 || !strings.Contains((*prompts)[2], "rejected profile proposal validation must include blocking_issues or required_fixes") {
+				t.Fatalf("validator retry did not include the validation error: %d prompts", len(*prompts))
+			}
+			if (*settingsSeen)[2].ProfileThinking != "disabled" {
+				t.Fatalf("validator retry should disable thinking, got %#v", (*settingsSeen)[2].ProfileThinking)
+			}
+		})
+	}
+}
+
+func TestGenerateProfileProposalStopsAfterRepeatedIncompleteValidatorResponse(t *testing.T) {
+	valid := profileProposalFixture("change-1", ProposalSectionUnrelatedRule, ProposalOperationAdd, nil, []string{"ML/software papers are unrelated without nucleic acid chemistry."})
+	invalid := `{"accepted":false,"summary":"Incomplete validator response."}`
+	prompts := stubProfileModelResponses(t, valid, invalid, invalid)
+	_, err := GenerateProfileProposal(profileGenerationSettings(), profileGenerationCurrentFixture(), profileGenerationFeedbackFixtures())
+	if err == nil || !strings.Contains(err.Error(), "rejected profile proposal validation must include blocking_issues or required_fixes") || len(*prompts) != 3 {
+		t.Fatalf("expected one validator retry, got calls=%d err=%v", len(*prompts), err)
 	}
 }
 

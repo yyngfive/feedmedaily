@@ -180,12 +180,13 @@ func GenerateProfileProposal(settings config.Settings, current map[string]any, f
 			Level:     "warning",
 			Component: "profile",
 			Action:    "proposal_parse_fallback_started",
-			Message:   "Retrying profile proposal generation with thinking disabled after invalid JSON.",
+			Message:   "Retrying profile proposal generation with thinking disabled after invalid JSON or proposal schema.",
 			Error:     err.Error(),
 			Data:      map[string]any{"model": settings.ProfileModel},
 		})
 		fallbackSettings := settings
 		fallbackSettings.ProfileThinking = "disabled"
+		prompt += fmt.Sprintf("\nThe previous response failed validation: %s\nReturn a corrected proposal that fixes every reported error and follows the complete required schema.\n", err)
 		content, err = callProfileModelJSON(
 			fallbackSettings,
 			"You compact scientific-literature profiles into maintainable change sets.",
@@ -315,9 +316,9 @@ func deterministicProposalAudit(currentDocument profileDocument, feedbackItems [
 	}
 	if issue := topicReferenceAudit(currentDocument, attempt); issue != "" {
 		return ProposalValidationResult{
-			Accepted:     false,
-			HardRejected: true,
-			Summary:      "Profile proposal rejected by deterministic safety audit.",
+			Accepted:       false,
+			HardRejected:   true,
+			Summary:        "Profile proposal rejected by deterministic safety audit.",
 			BlockingIssues: []string{issue},
 			RequiredFixes: []string{
 				"Reference only existing topic labels, or add a topic change with operation=add for the new label in the same proposal.",
